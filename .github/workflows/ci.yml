@@ -50,7 +50,15 @@ jobs:
       - name: Tests (pytest)
         if: steps.check.outputs.exists == 'true'
         working-directory: backend
-        run: pytest
+        run: |
+          pytest
+          code=$?
+          # exit code 5 = "тесты не найдены"; на этапе инициализации это не ошибка
+          if [ $code -eq 5 ]; then
+            echo "No tests collected yet — пропускаем (это нормально, пока тесты не написаны)"
+            exit 0
+          fi
+          exit $code
 
   frontend:
     name: Frontend (lint + build)

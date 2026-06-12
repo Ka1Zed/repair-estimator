@@ -1,7 +1,9 @@
+import ProjectCreatePage from "./pages/ProjectCreatePage";
+
 function App() {
   return (
     <div>
-      <h1>Проект: Оценка ремонта</h1>
+      <ProjectCreatePage />
     </div>
   );
 }

@@ -1,0 +1,7 @@
+[
+  {"name": "Покраска стен", "specialist_type": "Маляр", "unit": "м^2"},
+  {"name": "Укладка ламината", "specialist_type": "Укладчик", "unit": "м^2"},
+  {"name": "Покраска потолка", "specialist_type": "Маляр", "unit": "м^2"},
+  {"name": "Укладка плитки", "specialist_type": "Плиточник", "unit": "м^2"},
+  {"name": "Шпаклевка стен", "specialist_type": "Штукатур", "unit": "м^2"}
+]

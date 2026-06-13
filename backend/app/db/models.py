@@ -30,7 +30,7 @@ class LaborService(Base):
     __tablename__ = "labor_services"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    LaborServiceName: Mapped[str] = mapped_column(unique=True)
+    name: Mapped[str] = mapped_column(unique=True)
     specialist_type: Mapped[str]
     unit: Mapped[str]
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import RoomPolygonPreview from "./RoomPolygonPreview";
 
 export default function RoomPointsTable() {
   const [points, setPoints] = useState([
@@ -113,6 +114,9 @@ export default function RoomPointsTable() {
       >
         + Добавить точку
       </button>
+
+      {/* Вот наша новая строчка: */}
+      <RoomPolygonPreview points={points} />
     </div>
   );
 }

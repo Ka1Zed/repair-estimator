@@ -24,11 +24,8 @@ def floor_area(points: List[Union[tuple, list, dict]]) -> Decimal:
     
     Возвращает:
         площадь (неотрицательная).
-        Если точек меньше 3, возвращает Decimal('0.0').
     """
     n = len(points)
-    if n < 3:
-        return Decimal('0.0')
     
     def get_xy(p):
         if isinstance(p, dict):
@@ -53,11 +50,8 @@ def perimeter(points: List[Union[tuple, list, dict]]) -> Decimal:
     
     Возвращает:
         периметр.
-        Если точек меньше 2, возвращает Decimal('0.0').
     """
     n = len(points)
-    if n < 2:
-        return Decimal('0.0')
     
     def get_xy(p):
         if isinstance(p, dict):

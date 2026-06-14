@@ -3,11 +3,14 @@ import { useState } from "react";
 import RoomPointsTable from "../components/RoomPointsTable";
 
 export default function ProjectCreatePage() {
+  // Создаем "переменные" для хранения того, что вводит пользователь
   const [projectName, setProjectName] = useState("");
   const [roomName, setRoomName] = useState("");
   const [ceilingHeight, setCeilingHeight] = useState("");
 
+  // Функция, которая сработает при клике на кнопку
   const handleNext = () => {
+    // Та самая базовая валидация: проверяем, что все поля заполнены
     if (!projectName || !roomName || !ceilingHeight) {
       alert("Пожалуйста, заполните все поля!");
       return;
@@ -18,6 +21,7 @@ export default function ProjectCreatePage() {
       return;
     }
 
+    // Если всё хорошо, пока просто выводим сообщение
     alert(
       `Супер! Данные сохранены.\nПроект: ${projectName}\nКомната: ${roomName}`,
     );
@@ -61,7 +65,7 @@ export default function ProjectCreatePage() {
         />
       </div>
 
-      {/* Шаг 2: Выводим саму таблицу прямо перед кнопкой */}
+      {/* Выводим саму таблицу прямо перед кнопкой */}
       <RoomPointsTable />
 
       <button

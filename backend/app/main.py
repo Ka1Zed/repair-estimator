@@ -12,7 +12,3 @@ app.include_router(labor_router)
 def root():
     return {"message": "Hello World"}
 
-# Новый endpoint для проверки работоспособности
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}

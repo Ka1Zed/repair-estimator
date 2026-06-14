@@ -1,4 +1,6 @@
 import { useState } from "react";
+// Шаг 1: Подключили нашу новую таблицу
+import RoomPointsTable from "../components/RoomPointsTable";
 
 export default function ProjectCreatePage() {
   // Создаем "переменные" для хранения того, что вводит пользователь
@@ -63,9 +65,12 @@ export default function ProjectCreatePage() {
         />
       </div>
 
+      {/* Выводим саму таблицу прямо перед кнопкой */}
+      <RoomPointsTable />
+
       <button
         onClick={handleNext}
-        style={{ padding: "10px 20px", cursor: "pointer" }}
+        style={{ padding: "10px 20px", cursor: "pointer", marginTop: "20px" }}
       >
         Перейти к рисованию
       </button>

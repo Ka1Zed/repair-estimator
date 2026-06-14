@@ -2,7 +2,7 @@ import ProjectCreatePage from "./pages/ProjectCreatePage";
 
 function App() {
   return (
-    <div>
+    <div style={{ display: "flex", justifyContent: "center", width: "100vw" }}>
       <ProjectCreatePage />
     </div>
   );

@@ -1,4 +1,3 @@
-import pytest
 from decimal import Decimal
 from app.services.geometry_service import floor_area, perimeter, wall_area
 

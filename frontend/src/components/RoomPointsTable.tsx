@@ -1,8 +1,13 @@
 import { useState } from "react";
 import RoomPolygonPreview from "./RoomPolygonPreview";
 
+interface Point {
+  x: number | string;
+  y: number | string;
+}
+
 export default function RoomPointsTable() {
-  const [points, setPoints] = useState([
+  const [points, setPoints] = useState<Point[]>([
     { x: 0, y: 0 },
     { x: 4, y: 0 },
     { x: 4, y: 3 },
@@ -27,8 +32,33 @@ export default function RoomPointsTable() {
     value: string,
   ) => {
     const newPoints = [...points];
-    newPoints[index][field] = Number(value);
-    setPoints(newPoints);
+
+    if (value === "") {
+      newPoints[index][field] = "";
+      setPoints(newPoints);
+      return;
+    }
+
+    let cleanValue = value.replace(/^0+(?=\d)/, "");
+    if (
+      cleanValue.startsWith("-0") &&
+      cleanValue.length > 2 &&
+      cleanValue[2] !== "."
+    ) {
+      cleanValue = "-" + cleanValue.slice(2);
+    }
+
+    if (cleanValue === "-") {
+      newPoints[index][field] = "-";
+      setPoints(newPoints);
+      return;
+    }
+
+    const num = Number(cleanValue);
+    if (!isNaN(num)) {
+      newPoints[index][field] = num;
+      setPoints(newPoints);
+    }
   };
 
   return (
@@ -64,6 +94,7 @@ export default function RoomPointsTable() {
               <td>
                 <input
                   type="number"
+                  min="0"
                   value={point.x}
                   onChange={(e) =>
                     handlePointChange(index, "x", e.target.value)
@@ -74,6 +105,7 @@ export default function RoomPointsTable() {
               <td>
                 <input
                   type="number"
+                  min="0"
                   value={point.y}
                   onChange={(e) =>
                     handlePointChange(index, "y", e.target.value)
@@ -115,7 +147,6 @@ export default function RoomPointsTable() {
         + Добавить точку
       </button>
 
-      {/* Вот наша новая строчка: */}
       <RoomPolygonPreview points={points} />
     </div>
   );

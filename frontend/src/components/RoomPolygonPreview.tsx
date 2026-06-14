@@ -1,6 +1,6 @@
 interface Point {
-  x: number;
-  y: number;
+  x: number | string;
+  y: number | string;
 }
 
 interface Props {
@@ -16,15 +16,33 @@ export default function RoomPolygonPreview({ points }: Props) {
     );
   }
 
-  const maxX = Math.max(...points.map((p) => p.x));
-  const maxY = Math.max(...points.map((p) => p.y));
+  // Приводим к числам, пустой ввод или знак минуса временно интерпретируем как 0
+  const safePoints = points.map((p) => ({
+    x: p.x === "-" || p.x === "" ? 0 : Number(p.x),
+    y: p.y === "-" || p.y === "" ? 0 : Number(p.y),
+  }));
 
-  // Увеличиваем масштаб, чтобы метры стали видимыми на экране (1 метр = 50 пикселей)
-  const scale = 50;
-  const width = (maxX + 1) * scale;
-  const height = (maxY + 1) * scale;
+  const xs = safePoints.map((p) => p.x);
+  const ys = safePoints.map((p) => p.y);
 
-  const pointsString = points
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+
+  // Добавляем запасной отступ в 1 метр вокруг фигуры
+  const padding = 1;
+  const svgMinX = minX - padding;
+  const svgMinY = minY - padding;
+  const svgMaxX = maxX + padding;
+  const svgMaxY = maxY + padding;
+
+  const scale = 50; // 1 метр = 50 пикселей
+
+  const widthPixels = (svgMaxX - svgMinX) * scale;
+  const heightPixels = (svgMaxY - svgMinY) * scale;
+
+  const pointsString = safePoints
     .map((p) => `${p.x * scale},${p.y * scale}`)
     .join(" ");
 
@@ -39,7 +57,12 @@ export default function RoomPolygonPreview({ points }: Props) {
           display: "inline-block",
         }}
       >
-        <svg width={width} height={height} style={{ overflow: "visible" }}>
+        <svg
+          width={widthPixels}
+          height={heightPixels}
+          viewBox={`${svgMinX * scale} ${svgMinY * scale} ${widthPixels} ${heightPixels}`}
+          style={{ display: "block" }}
+        >
           <defs>
             <pattern
               id="grid"
@@ -55,7 +78,15 @@ export default function RoomPolygonPreview({ points }: Props) {
               />
             </pattern>
           </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
+
+          {/* Сетка динамически подстраивается под сдвинутые координаты холста */}
+          <rect
+            x={svgMinX * scale}
+            y={svgMinY * scale}
+            width={widthPixels}
+            height={heightPixels}
+            fill="url(#grid)"
+          />
 
           <polygon
             points={pointsString}
@@ -64,7 +95,7 @@ export default function RoomPolygonPreview({ points }: Props) {
             strokeWidth="3"
           />
 
-          {points.map((p, i) => (
+          {safePoints.map((p, i) => (
             <circle
               key={i}
               cx={p.x * scale}

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from app.schemas.room import RoomCalculateRequest, RoomCalculateResponse
 from app.services.geometry_service import floor_area, perimeter, wall_area
 

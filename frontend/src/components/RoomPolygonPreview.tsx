@@ -16,12 +16,13 @@ export default function RoomPolygonPreview({ points }: Props) {
     );
   }
 
-  // Приводим к числам, пустой ввод или знак минуса временно интерпретируем как 0
+  // 1. Приводим всё к числам (пустые значения считаем за 0)
   const safePoints = points.map((p) => ({
     x: p.x === "-" || p.x === "" ? 0 : Number(p.x),
     y: p.y === "-" || p.y === "" ? 0 : Number(p.y),
   }));
 
+  // 2. Ищем реальные границы фигуры по X и Y
   const xs = safePoints.map((p) => p.x);
   const ys = safePoints.map((p) => p.y);
 
@@ -30,63 +31,75 @@ export default function RoomPolygonPreview({ points }: Props) {
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
 
-  // Добавляем запасной отступ в 1 метр вокруг фигуры
-  const padding = 1;
-  const svgMinX = minX - padding;
-  const svgMinY = minY - padding;
-  const svgMaxX = maxX + padding;
-  const svgMaxY = maxY + padding;
+  const rangeX = maxX - minX;
+  const rangeY = maxY - minY;
 
-  const scale = 50; // 1 метр = 50 пикселей
+  // Защита от деления на ноль (если вдруг все точки в одной координате)
+  const effectiveRangeX = rangeX === 0 ? 1 : rangeX;
+  const effectiveRangeY = rangeY === 0 ? 1 : rangeY;
 
-  const widthPixels = (svgMaxX - svgMinX) * scale;
-  const heightPixels = (svgMaxY - svgMinY) * scale;
+  // 3. Задаем жесткие максимальные размеры рамки превью в пикселях
+  const MAX_PREVIEW_WIDTH = 400;
+  const MAX_PREVIEW_HEIGHT = 300;
 
+  // 4. Оставляем 10% отступа по краям, чтобы белые кружочки не обрезались
+  const paddingX = effectiveRangeX * 0.1;
+  const paddingY = effectiveRangeY * 0.1;
+
+  const totalViewWidth = effectiveRangeX + paddingX * 2;
+  const totalViewHeight = effectiveRangeY + paddingY * 2;
+
+  // 5. Вычисляем динамический масштаб (сколько пикселей в 1 метре ИМЕННО для этой фигуры)
+  const scaleX = MAX_PREVIEW_WIDTH / totalViewWidth;
+  const scaleY = MAX_PREVIEW_HEIGHT / totalViewHeight;
+  const scale = Math.min(scaleX, scaleY); // Берем минимальный, чтобы пропорции не исказились
+
+  // Итоговые размеры холста (они всегда будут меньше или равны 400x300)
+  const svgWidth = totalViewWidth * scale;
+  const svgHeight = totalViewHeight * scale;
+
+  // Смещение, чтобы фигура всегда была по центру
+  const offsetX = minX - paddingX;
+  const offsetY = minY - paddingY;
+
+  // Формируем новые координаты точек для SVG
   const pointsString = safePoints
-    .map((p) => `${p.x * scale},${p.y * scale}`)
+    .map((p) => `${(p.x - offsetX) * scale},${(p.y - offsetY) * scale}`)
     .join(" ");
 
   return (
-    <div style={{ marginTop: "20px" }}>
-      <h3>Предпросмотр:</h3>
+    <div style={{ marginTop: "20px", width: "100%", maxWidth: "450px" }}>
+      <h3>Предпросмотр (макет):</h3>
       <div
         style={{
           background: "#222",
           padding: "20px",
           borderRadius: "8px",
-          display: "inline-block",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          boxSizing: "border-box",
+          minHeight: "150px",
         }}
       >
-        <svg
-          width={widthPixels}
-          height={heightPixels}
-          viewBox={`${svgMinX * scale} ${svgMinY * scale} ${widthPixels} ${heightPixels}`}
-          style={{ display: "block" }}
-        >
+        <svg width={svgWidth} height={svgHeight} style={{ display: "block" }}>
           <defs>
+            {/* Сетка теперь статичная (каждые 20px). Она не привязана к метрам, просто красивый фон */}
             <pattern
               id="grid"
-              width={scale}
-              height={scale}
+              width="20"
+              height="20"
               patternUnits="userSpaceOnUse"
             >
               <path
-                d={`M ${scale} 0 L 0 0 0 ${scale}`}
+                d="M 20 0 L 0 0 0 20"
                 fill="none"
                 stroke="#333"
                 strokeWidth="1"
               />
             </pattern>
           </defs>
-
-          {/* Сетка динамически подстраивается под сдвинутые координаты холста */}
-          <rect
-            x={svgMinX * scale}
-            y={svgMinY * scale}
-            width={widthPixels}
-            height={heightPixels}
-            fill="url(#grid)"
-          />
+          <rect width="100%" height="100%" fill="url(#grid)" />
 
           <polygon
             points={pointsString}
@@ -98,8 +111,8 @@ export default function RoomPolygonPreview({ points }: Props) {
           {safePoints.map((p, i) => (
             <circle
               key={i}
-              cx={p.x * scale}
-              cy={p.y * scale}
+              cx={(p.x - offsetX) * scale}
+              cy={(p.y - offsetY) * scale}
               r="5"
               fill="#fff"
               stroke="#5cba5c"

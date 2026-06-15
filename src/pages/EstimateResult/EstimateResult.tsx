@@ -1,24 +1,29 @@
 import React from 'react';
 import { Card } from '../../components/ui/Card';
-import { Table } from '../../components/ui/Table';
 import { Button } from '../../components/ui/Button';
+import { MaterialsTable } from '../../components/EstimateTables/MaterialsTable';
+import { LaborTable } from '../../components/EstimateTables/LaborTable';
 import styles from './EstimateResult.module.css';
 
-// Mock-данные (тестовые данные расчета)
-const mockResult = {
-  totalCost: 145000,
-  floorArea: 45,
-  perimeter: 28,
-  wallArea: 70,
-  materials: [
-    { id: 1, name: 'Шпаклевка старт (25кг)', count: '5 шт', price: 650, total: 3250 },
-    { id: 2, name: 'Обои флизелиновые', count: '6 рулонов', price: 2800, total: 16800 },
-    { id: 3, name: 'Линолеум полукоммерческий', count: '45 кв.м.', price: 950, total: 42750 },
-    { id: 4, name: 'Краска для потолка', count: '2 банки', price: 3100, total: 6200 },
-  ]
-};
+// Расширенные mock-данные по требованиям задачи #12
+const mockMaterials = [
+  { id: 1, name: 'Грунтовка глубокого проникновения', count: 2, unit: 'канистра', price: 450 },
+  { id: 2, name: 'Штукатурка гипcapitalовая (30 кг)', count: 12, unit: 'мешок', price: 550 },
+  { id: 3, name: 'Краска интерьерная матовая', count: 3, unit: 'галон', price: 3200 },
+];
+
+const mockLabors = [
+  { id: 1, workName: 'Выравнивание стен по маякам', specialist: 'Штукатур-маляр', volume: 70, price: 450 },
+  { id: 2, workName: 'Грунтовка поверхностей в 2 слоя', specialist: 'Мастер-отделочник', volume: 70, price: 80 },
+  { id: 3, workName: 'Покраска стен безвоздушная', specialist: 'Маляр', volume: 70, price: 200 },
+];
 
 export function EstimateResult() {
+  // Быстрый расчет общей суммы для верхней карточки
+  const matTotal = mockMaterials.reduce((acc, item) => acc + item.count * item.price, 0);
+  const laborTotal = mockLabors.reduce((acc, item) => acc + item.volume * item.price, 0);
+  const totalCost = matTotal + laborTotal;
+
   return (
     <div className={styles.container}>
       <div className={styles.headerRow}>
@@ -26,53 +31,34 @@ export function EstimateResult() {
         <Button variant="secondary" onClick={() => window.print()}>Печать сметы</Button>
       </div>
 
-      {/* Блок общей стоимости и параметров помещения */}
       <div className={styles.statsGrid}>
         <Card title="Общая стоимость ремонта" className={styles.totalCard}>
           <div className={styles.priceValue}>
-            {mockResult.totalCost.toLocaleString('ru-RU')} ₽
+            {totalCost.toLocaleString('ru-RU')} ₽
           </div>
-          <p className={styles.subtext}>*Расчёт выполнен на основе базовых цен материалов</p>
+          <p className={styles.subtext}>Материалы: {matTotal.toLocaleString('ru-RU')} ₽ | Работы: {laborTotal.toLocaleString('ru-RU')} ₽</p>
         </Card>
 
         <Card title="Характеристики помещений">
           <div className={styles.paramItem}>
             <span>Площадь пола:</span>
-            <strong>{mockResult.floorArea} кв. м.</strong>
+            <strong>45 кв. м.</strong>
           </div>
           <div className={styles.paramItem}>
             <span>Периметр комнат:</span>
-            <strong>{mockResult.perimeter} м.</strong>
+            <strong>28 м.</strong>
           </div>
           <div className={styles.paramItem}>
             <span>Площадь стен:</span>
-            <strong>{mockResult.wallArea} кв. м.</strong>
+            <strong>70 кв. м.</strong>
           </div>
         </Card>
       </div>
 
-      {/* Таблица с детальным расчетом материалов */}
-      <Card title="Детализация необходимых материалов" style={{ marginTop: '25px' }}>
-        <Table>
-          <thead>
-            <tr>
-              <th>Материал / Работа</th>
-              <th>Количество</th>
-              <th>Цена за ед.</th>
-              <th>Итого</th>
-            </tr>
-          </thead>
-          <tbody>
-            {mockResult.materials.map((item) => (
-              <tr key={item.id}>
-                <td>{item.name}</td>
-                <td>{item.count}</td>
-                <td>{item.price.toLocaleString('ru-RU')} ₽</td>
-                <td>{item.total.toLocaleString('ru-RU')} ₽</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+      {/* Выводим новые таблицы */}
+      <Card title="Детальный расчет" style={{ marginTop: '25px' }}>
+        <MaterialsTable data={mockMaterials} />
+        <LaborTable data={mockLabors} />
       </Card>
     </div>
   );

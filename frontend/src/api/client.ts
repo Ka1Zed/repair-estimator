@@ -1,10 +1,25 @@
 // Базовый URL бэкенда (можно менять в зависимости от настроек команды, обычно локально это localhost:5000 или 8080)
 const BASE_URL = 'http://localhost:8000';
 
+// Добавил - Точка помещения
+interface Point {
+  x: number;
+  y: number;
+}
+
 // Интерфейс для данных комнаты, которую мы будем отправлять
+// Обновил - Данные для расчёта (по контракту docs/api.md)
 interface RoomData {
-  name: string;
-  area: number;
+  height: number;
+  points: Point[];
+}
+
+// Добавид - Ответ расчёта
+interface CalculateResult {
+  floor_area: number;
+  ceiling_area: number;
+  perimeter: number;
+  wall_area: number;
 }
 
 class ApiClient {
@@ -47,8 +62,9 @@ class ApiClient {
   }
 
   // 2. Функция для отправки данных комнаты (POST /rooms или аналогичный эндпоинт)
-  async sendRoomData(roomData: RoomData): Promise<{ success: boolean; id?: string | number }> {
-    return this.request<{ success: boolean; id?: string | number }>('/rooms', {
+  // Обновил - Отправка данных комнаты на расчёт (POST /api/rooms/calculate)
+  async sendRoomData(roomData: RoomData): Promise<CalculateResult> {
+    return this.request<CalculateResult>('/api/rooms/calculate', {
       method: 'POST',
       body: JSON.stringify(roomData),
     });

@@ -1,0 +1,16 @@
+.tableBox {
+  margin-bottom: 25px;
+}
+
+.tableTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.totalCell {
+  font-weight: 600;
+  color: #0070f3;
+}

@@ -1,5 +1,5 @@
 // Базовый URL бэкенда (можно менять в зависимости от настроек команды, обычно локально это localhost:5000 или 8080)
-const BASE_URL = 'http://localhost:5000/api';
+const BASE_URL = 'http://localhost:8000';
 
 // Интерфейс для данных комнаты, которую мы будем отправлять
 interface RoomData {
@@ -11,7 +11,7 @@ class ApiClient {
   private baseUrl: string;
 
   constructor(baseUrl: string) {
-    style: this.baseUrl = baseUrl;
+    this.baseUrl = baseUrl;
   }
 
   // Общий вспомогательный метод для выполнения запросов и обработки базовых ошибок

@@ -1,0 +1,32 @@
+.tableWrapper {
+  width: 100%;
+  overflow-x: auto;
+  margin-bottom: 20px;
+  border: 1px solid #eaeaea;
+  border-radius: 8px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 14px;
+}
+
+.table th {
+  background-color: #fafafa;
+  padding: 12px 16px;
+  font-weight: 600;
+  color: #444;
+  border-bottom: 1px solid #eaeaea;
+}
+
+.table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #eaeaea;
+  color: #666;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}

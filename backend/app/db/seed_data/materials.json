@@ -1,9 +1,13 @@
 [
-  {"name": "Краска для стен", "category": "Краска", "unit": "л", "package_size": 9},
-  {"name": "Грунтовка", "category": "Специальный состав", "unit": "л", "package_size": 10},
-  {"name": "Шпаклевка", "category": "Специальный состав", "unit": "кг", "package_size": 20},
-  {"name": "Ламинат", "category": "Напольное покрытие", "unit": "м^2", "package_size": 2},
-  {"name": "Плинтус", "category": "Напольное покрытие", "unit": "м", "package_size": 2.5},
-  {"name": "Плитка", "category": "Плитка", "unit": "м^2", "package_size": 1},
-  {"name": "Плиточный клей", "category": "Специальный состав", "unit": "кг", "package_size": 25}
+  { "name": "Краска для стен", "category": "Краска", "unit": "л", "package_size": 9, "consumption_per_m2": 0.13, "waste_factor": 1.1 },
+  { "name": "Грунтовка", "category": "Грунтовка", "unit": "л", "package_size": 10, "consumption_per_m2": 0.12, "waste_factor": 1.1 },
+  { "name": "Шпаклевка", "category": "Шпаклёвка", "unit": "кг", "package_size": 25, "consumption_per_m2": 1.0, "waste_factor": 1.1 },
+  { "name": "Ламинат", "category": "Напольное покрытие", "unit": "м²", "package_size": 2.0, "consumption_per_m2": 1.0, "waste_factor": 1.08 },
+  { "name": "Линолеум", "category": "Напольное покрытие", "unit": "м²", "package_size": 1.0, "consumption_per_m2": 1.0, "waste_factor": 1.05 },
+  { "name": "Плинтус", "category": "Напольное покрытие", "unit": "м", "package_size": 1.0, "waste_factor": 1.05 },
+  { "name": "Плитка", "category": "Плитка", "unit": "м²", "package_size": 1.2, "consumption_per_m2": 1.0, "waste_factor": 1.1 },
+  { "name": "Плиточный клей", "category": "Плитка", "unit": "кг", "package_size": 25, "consumption_per_m2": 4.5, "waste_factor": 1.1 },
+  { "name": "Затирка", "category": "Плитка", "unit": "кг", "package_size": 2, "consumption_per_m2": 0.4, "waste_factor": 1.1 },
+  { "name": "Краска потолочная", "category": "Краска", "unit": "л", "package_size": 9, "consumption_per_m2": 0.15, "waste_factor": 1.1 },
+  { "name": "Обои", "category": "Обои", "unit": "рулон", "package_size": 1, "consumption_per_m2": 0.2, "waste_factor": 1.1 }
 ]

@@ -35,11 +35,12 @@ class ApiClient {
       // Обработка сетевых ошибок (если сервер выключен или упал интернет)
       console.error(`[API Error] Сбой при запросе к ${endpoint}:`, error);
 
-      // Пробрасываем понятную ошибку (по требованию задачи C3)
+      // Пробрасываем понятную ошибку и прикрепляем оригинальную (cause) для строгого линтера
       throw new Error(
         error instanceof Error
           ? error.message
           : "Сервер недоступен. Проверьте подключение к интернету или статус сервера.",
+        { cause: error },
       );
     }
   }
@@ -50,19 +51,18 @@ class ApiClient {
   }
 
   // 2. Получение справочника материалов (GET /api/materials)
-  async fetchMaterials(): Promise<any> {
-    return this.request<any>("/api/materials");
+  async fetchMaterials(): Promise<unknown> {
+    return this.request<unknown>("/api/materials");
   }
 
   // 3. Получение справочника услуг (GET /api/labor-services)
-  async fetchLaborServices(): Promise<any> {
-    return this.request<any>("/api/labor-services");
+  async fetchLaborServices(): Promise<unknown> {
+    return this.request<unknown>("/api/labor-services");
   }
 
   // 4. Расчет сметы по новому контракту C1 (POST /api/estimates/calculate)
-  // Принимаем any, так как точные типы для фронта мы будем писать в других задачах (например F1-5)
-  async calculateEstimate(estimateData: any): Promise<any> {
-    return this.request<any>("/api/estimates/calculate", {
+  async calculateEstimate(estimateData: unknown): Promise<unknown> {
+    return this.request<unknown>("/api/estimates/calculate", {
       method: "POST",
       body: JSON.stringify(estimateData),
     });

@@ -1,7 +1,9 @@
 [
   {"service": "Покраска стен", "source": "seed", "price_min": "200.00", "price_avg": "250.00", "price_max": "350.00", "region": null},
-  {"service": "Укладка ламината", "source": "seed", "price_min": "500.00", "price_avg": "750.00", "price_max": "1000.00", "region": null},
   {"service": "Покраска потолка", "source": "seed", "price_min": "250.00", "price_avg": "350.00", "price_max": "500.00", "region": null},
+  {"service": "Шпаклевка стен", "source": "seed", "price_min": "300.00", "price_avg": "450.00", "price_max": "700.00", "region": null},
+  {"service": "Укладка ламината", "source": "seed", "price_min": "500.00", "price_avg": "750.00", "price_max": "1000.00", "region": null},
   {"service": "Укладка плитки", "source": "seed", "price_min": "800.00", "price_avg": "1200.00", "price_max": "1800.00", "region": null},
-  {"service": "Шпаклевка стен", "source": "seed", "price_min": "300.00", "price_avg": "450.00", "price_max": "700.00", "region": null}
+  {"service": "Электромонтаж", "source": "seed", "price_min": "1500.00", "price_avg": "2500.00", "price_max": "4000.00", "region": null},
+  {"service": "Сантехнические работы", "source": "seed", "price_min": "2000.00", "price_avg": "3500.00", "price_max": "6000.00", "region": null}
 ]

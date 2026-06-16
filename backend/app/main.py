@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
 # импорт роутеров(Backend 2)
 from app.api.materials import router as materials_router
 from app.api.labor import router as labor_router
@@ -8,9 +9,11 @@ from app.api.admin import router as admin_router
 
 app = FastAPI()
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # адрес фронта (Vite dev)
+    allow_origins=[FRONTEND_URL],  # адрес фронта (Vite dev)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

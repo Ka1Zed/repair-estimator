@@ -1,5 +1,4 @@
-import React from 'react';
-import { Table } from '../ui/Table';
+import { Table } from '../../components/ui/Table';
 import styles from './EstimateTables.module.css';
 
 interface MaterialItem {

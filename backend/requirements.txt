@@ -9,3 +9,6 @@ pydantic-settings==2.14.1
 alembic==1.18.4
 ruff
 pytest==8.2.0
+
+beautifulsoup4==4.15.0
+requests==2.34.2

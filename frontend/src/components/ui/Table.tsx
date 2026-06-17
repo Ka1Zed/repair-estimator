@@ -1,4 +1,4 @@
-import { type TableHTMLAttributes } from 'react';
+import type { TableHTMLAttributes } from 'react';
 import styles from './Table.module.css';
 
 export function Table({ children, className = '', ...props }: TableHTMLAttributes<HTMLTableElement>) {

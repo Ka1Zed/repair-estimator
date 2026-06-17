@@ -1,59 +1,73 @@
-// Базовый URL бэкенда (можно менять в зависимости от настроек команды, обычно локально это localhost:5000 или 8080)
-const BASE_URL = 'http://localhost:5000/api';
-
-// Интерфейс для данных комнаты, которую мы будем отправлять
-interface RoomData {
-  name: string;
-  area: number;
-}
+// Берем базовый URL из .env файла, если его нет - стучимся на локальный бэкенд FastAPI
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 class ApiClient {
   private baseUrl: string;
 
   constructor(baseUrl: string) {
-    style: this.baseUrl = baseUrl;
+    this.baseUrl = baseUrl;
   }
 
   // Общий вспомогательный метод для выполнения запросов и обработки базовых ошибок
-  private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  private async request<T>(
+    endpoint: string,
+    options?: RequestInit,
+  ): Promise<T> {
     try {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         ...options,
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           ...(options?.headers || {}),
         },
       });
 
-      // Обработка ошибок сервера (4xx, 5xx)
+      // Обработка ошибок сервера (например, 400 или 500)
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Ошибка сервера (${response.status}): ${errorText || response.statusText}`);
+        throw new Error(
+          `Ошибка HTTP: ${response.status} ${errorText || response.statusText}`,
+        );
       }
 
-      // Если всё хорошо, возвращаем распарсенный JSON
-      return await response.json() as T;
+      return (await response.json()) as T;
     } catch (error) {
-      // Обработка сетевых ошибок (например, если бэкенд вообще выключен)
-      console.error(`API Error on ${endpoint}:`, error);
-      throw error instanceof Error ? error : new Error('Неизвестная сетевая ошибка');
+      // Обработка сетевых ошибок (если сервер выключен или упал интернет)
+      console.error(`[API Error] Сбой при запросе к ${endpoint}:`, error);
+
+      // Пробрасываем понятную ошибку и прикрепляем оригинальную (cause) для строгого линтера
+      throw new Error(
+        error instanceof Error
+          ? error.message
+          : "Сервер недоступен. Проверьте подключение к интернету или статус сервера.",
+        { cause: error },
+      );
     }
   }
 
-  // 1. Функция проверки здоровья сервера (GET /health)
+  // 1. Проверка здоровья сервера (GET /health)
   async checkHealth(): Promise<{ status: string }> {
-    // Обычно эндпоинт /health лежит в корне бэка, поэтому делаем запрос относительно корня или /api
-    return this.request<{ status: string }>('/health');
+    return this.request<{ status: string }>("/health");
   }
 
-  // 2. Функция для отправки данных комнаты (POST /rooms или аналогичный эндпоинт)
-  async sendRoomData(roomData: RoomData): Promise<{ success: boolean; id?: string | number }> {
-    return this.request<{ success: boolean; id?: string | number }>('/rooms', {
-      method: 'POST',
-      body: JSON.stringify(roomData),
+  // 2. Получение справочника материалов (GET /api/materials)
+  async fetchMaterials(): Promise<unknown> {
+    return this.request<unknown>("/api/materials");
+  }
+
+  // 3. Получение справочника услуг (GET /api/labor-services)
+  async fetchLaborServices(): Promise<unknown> {
+    return this.request<unknown>("/api/labor-services");
+  }
+
+  // 4. Расчет сметы по новому контракту C1 (POST /api/estimates/calculate)
+  async calculateEstimate(estimateData: unknown): Promise<unknown> {
+    return this.request<unknown>("/api/estimates/calculate", {
+      method: "POST",
+      body: JSON.stringify(estimateData),
     });
   }
 }
 
-// Экспортируем готовый экземпляр класса для использования на страницах
-export const apiClient = new ApiClient(BASE_URL);
+// Экспортируем готовый экземпляр класса
+export const apiClient = new ApiClient(API_URL);

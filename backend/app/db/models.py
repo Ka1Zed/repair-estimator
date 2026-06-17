@@ -24,6 +24,8 @@ class Material(Base):
     category: Mapped[str]
     unit: Mapped[str]
     package_size: Mapped[float | None]   # nullable - просто через | None
+    consumption_per_m2: Mapped[float | None]   # расход на м^2
+    waste_factor: Mapped[float | None]          # коэффициент запаса (1.1 / 1.08 ...)
 
 
 class LaborService(Base):

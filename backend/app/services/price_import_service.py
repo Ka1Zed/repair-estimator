@@ -12,28 +12,16 @@ from app.db.models import (
 logger = logging.getLogger(__name__)
 
 
-def import_prices_from_csv(csv_text: str) -> dict:
-    '''
-    Импортирует цены из CSV-текста.
-
-    Формат CSV (с заголовком):
-        kind,name,price_min,price_avg,price_max
-        material,Краска для стен,300,450,600
-        labor,Покраска стен,200,250,350
-
-    - kind: "material" или "labor"
-    - name: точное название как в БД
-    - все цены проставляются с source=manual и свежим updated_at
-
-    Возвращает сводку: {"updated": N, "skipped": [...]}
-    '''
+def import_prices_from_csv(csv_text: str, source_name: str = "manual") -> dict:
+    # source_name — имя источника в price_sources (manual / avito / ...)
     session = SessionLocal()
     try:
-        manual_source = session.query(PriceSource).filter(
-            PriceSource.name == "manual"
+        src = session.query(PriceSource).filter(
+            PriceSource.name == source_name
         ).first()
-        if not manual_source:
-            raise RuntimeError("Источник 'manual' не найден в БД (нужен seed price_sources)")
+        if not src:
+            raise RuntimeError(f"Источник '{source_name}' не найден в БД (нужен seed price_sources)")
+        # дальше везде, где было manual_source, используем src
 
         reader = csv.DictReader(io.StringIO(csv_text))
         updated = 0
@@ -65,10 +53,10 @@ def import_prices_from_csv(csv_text: str) -> dict:
                     continue
                 price = session.query(MaterialPrice).filter(
                     MaterialPrice.material_id == entity.id,
-                    MaterialPrice.source_id == manual_source.id
+                    MaterialPrice.source_id == src.id
                 ).first()
                 if not price:
-                    price = MaterialPrice(material_id=entity.id, source_id=manual_source.id)
+                    price = MaterialPrice(material_id=entity.id, source_id=src.id)
                     session.add(price)
 
             else:  # labor
@@ -78,10 +66,10 @@ def import_prices_from_csv(csv_text: str) -> dict:
                     continue
                 price = session.query(LaborPrice).filter(
                     LaborPrice.labor_service_id == entity.id,
-                    LaborPrice.source_id == manual_source.id
+                    LaborPrice.source_id == src.id
                 ).first()
                 if not price:
-                    price = LaborPrice(labor_service_id=entity.id, source_id=manual_source.id)
+                    price = LaborPrice(labor_service_id=entity.id, source_id=src.id)
                     session.add(price)
 
             price.price_min = price_min
@@ -98,7 +86,6 @@ def import_prices_from_csv(csv_text: str) -> dict:
         session.close()
 
 
-def import_prices_from_file(path: str) -> dict:
-    # Импорт из CSV-файла по пути
+def import_prices_from_file(path: str, source_name: str = "manual") -> dict:
     with open(path, encoding="utf-8") as f:
-        return import_prices_from_csv(f.read())
+        return import_prices_from_csv(f.read(), source_name=source_name)

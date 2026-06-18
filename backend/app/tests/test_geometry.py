@@ -55,3 +55,23 @@ class TestGeometry:
         """Высота 0 -> площадь стен 0"""
         points = [(0,0), (2,0), (2,2), (0,2)]
         assert wall_area(points, Decimal('0.0')) == Decimal('0.0')
+
+    def test_rectangle_with_openings(self):
+        """Прямоугольник 4×3, высота 2.7, дверь 0.8×2.0, окно 1.5×1.4 -> стены = 34.1"""
+        points = [(0,0), (4,0), (4,3), (0,3)]
+        height = Decimal('2.7')
+        openings = [
+            {'type': 'door', 'width': 0.8, 'height': 2.0},
+            {'type': 'window', 'width': 1.5, 'height': 1.4}
+        ]
+        walls = wall_area(points, height, openings)
+        expected = Decimal('34.1')   # 37.8 - 1.6 - 2.1 = 34.1
+        assert walls == expected
+
+    def test_no_openings(self):
+        """Без проёмов площадь стен = периметр * высота"""
+        points = [(0,0), (4,0), (4,3), (0,3)]
+        height = Decimal('2.7')
+        walls = wall_area(points, height, [])
+        expected = perimeter(points) * height
+        assert walls == expected

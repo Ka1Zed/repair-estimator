@@ -70,7 +70,7 @@ def perimeter(points: List[Union[tuple, list, dict]]) -> Decimal:
         perim += distance
     return perim
 
-def wall_area(points: List[Union[tuple, list, dict]], height: Union[int, float, str, Decimal]) -> Decimal:
+def wall_area(points: List[Union[tuple, list, dict]], height: Union[int, float, str, Decimal], openings=None) -> Decimal:
     """
     Площадь стен = периметр × высота (Decimal).
     
@@ -81,5 +81,16 @@ def wall_area(points: List[Union[tuple, list, dict]], height: Union[int, float, 
     Возвращает:
         площадь стен.
     """
-    return perimeter(points) * to_decimal(height)
+    if openings is None:
+        openings = []
+    perim = perimeter(points)
+    wall_area_before = perim * to_decimal(height)
+    # Вычитаем площади проёмов
+    opening_area = Decimal('0.0')
+    for opening in openings:
+        # opening может быть словарём или объектом с полями width, height
+        w = opening.get('width') if isinstance(opening, dict) else opening.width
+        h = opening.get('height') if isinstance(opening, dict) else opening.height
+        opening_area += to_decimal(w) * to_decimal(h)
+    return wall_area_before - opening_area
 

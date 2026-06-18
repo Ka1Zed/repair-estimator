@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 # from decimal import Decimal
 
 from app.db.session import SessionLocal
-from app.db.models import Material, MaterialPrice, PriceSource
+from app.db.models import Material, MaterialPrice, PriceSource, LaborService, LaborPrice
 from app.parsers.base import BaseParser
 
 logger = logging.getLogger(__name__)
@@ -88,5 +88,49 @@ def get_price(material_name: str, parser: BaseParser | None = None) -> MaterialP
 
         return seed_price
 
+    finally:
+        session.close()
+
+
+def update_labor_price(service_name: str, parser) -> LaborPrice | None:
+    '''
+    Берет цену услуги через парсер и пишет в labor_prices с источником парсера
+    При любой ошибке парсера — ничего не меняет, возвращает None (старые цены остаются)
+    '''
+    session = SessionLocal()
+    try:
+        service = session.query(LaborService).filter(LaborService.name == service_name).first()
+        if not service:
+            logger.warning(f"Услуга '{service_name}' не найдена в БД")
+            return None
+
+        try:
+            parsed = parser.fetch_price(service_name)
+        except Exception as e:
+            logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{service_name}': {e}")
+            return None
+
+        source = session.query(PriceSource).filter(PriceSource.name == parser.source_name).first()
+        if not source:
+            logger.error(f"Источник '{parser.source_name}' не найден в БД")
+            return None
+
+        price = session.query(LaborPrice).filter(
+            LaborPrice.labor_service_id == service.id,
+            LaborPrice.source_id == source.id
+        ).first()
+        if not price:
+            price = LaborPrice(labor_service_id=service.id, source_id=source.id)
+            session.add(price)
+
+        price.price_min = parsed.price_min
+        price.price_avg = parsed.price_avg
+        price.price_max = parsed.price_max
+        price.updated_at = datetime.now(timezone.utc)
+
+        session.commit()
+        session.refresh(price)
+        logger.info(f"Цена услуги '{service_name}' обновлена от {parser.source_name}")
+        return price
     finally:
         session.close()

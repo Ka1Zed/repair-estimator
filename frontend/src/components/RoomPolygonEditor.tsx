@@ -69,7 +69,7 @@ export default function RoomPolygonEditor() {
     if (!ctm) return;
 
     // Создаем системную точку SVG и записываем в нее координаты мыши на экране
-    let pt = svg.createSVGPoint();
+    const pt = svg.createSVGPoint();
     pt.x = e.clientX;
     pt.y = e.clientY;
 

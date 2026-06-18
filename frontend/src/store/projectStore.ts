@@ -1,18 +1,40 @@
-import { create } from 'zustand';
+import { create } from "zustand";
 
-// Описываем типы для ремонта (как указано в Issue #90)
-export type RepairType = 'cosmetic' | 'basic' | 'extended';
+export type RepairType = "cosmetic" | "basic" | "extended";
 
-// Описываем интерфейс всего состояния нашего проекта
+// РАЗРЕШИЛИ СТРОКИ: x и y теперь могут быть number или string
+export interface Point {
+  x: number | string;
+  y: number | string;
+}
+
 interface ProjectState {
   repair_type: RepairType;
   setRepairType: (type: RepairType) => void;
-  
-  // В будущем твои коллеги добавят сюда комнаты, точки и т.д.
+
+  points: Point[];
+  // И здесь тоже разрешили строки
+  updatePoint: (index: number, x: number | string, y: number | string) => void;
+  setPoints: (points: Point[]) => void;
 }
 
-// Создаем сам стор
 export const useProjectStore = create<ProjectState>((set) => ({
-  repair_type: 'cosmetic', // Значение по умолчанию из задачи
+  repair_type: "cosmetic",
   setRepairType: (type) => set({ repair_type: type }),
+
+  points: [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 4, y: 3 },
+    { x: 0, y: 3 },
+  ],
+
+  updatePoint: (index, x, y) =>
+    set((state) => {
+      const newPoints = [...state.points];
+      newPoints[index] = { x, y };
+      return { points: newPoints };
+    }),
+
+  setPoints: (points) => set({ points }),
 }));

@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "finishOptions": {
+    "floor":    { "laminate": "Ламинат", "linoleum": "Линолеум", "parquet": "Паркет", "tile": "Плитка" },
+    "walls":    { "paint": "Покраска", "wallpaper": "Обои", "tile": "Плитка", "moisture_paint": "Влагостойкая краска" },
+    "ceiling":  { "paint": "Покраска", "moisture_paint": "Влагостойкая краска", "stretch": "Натяжной" },
+    "electric": { "basic": "Базовая", "extended": "Расширенная" }
+  },
+  "roomTypes": {
+    "living": {
+      "label": "Жилая комната",
+      "floor": ["laminate", "linoleum", "parquet"],
+      "walls": ["paint", "wallpaper"],
+      "ceiling": ["paint", "stretch"],
+      "electric": ["basic", "extended"],
+      "tile": false,
+      "plumbing": { "available": false, "required": false }
+    },
+    "kitchen": {
+      "label": "Кухня",
+      "floor": ["tile", "laminate"],
+      "walls": ["paint", "tile"],
+      "ceiling": ["paint", "stretch"],
+      "electric": ["basic", "extended"],
+      "tile": true,
+      "plumbing": { "available": true, "required": false }
+    },
+    "bathroom": {
+      "label": "Санузел",
+      "floor": ["tile"],
+      "walls": ["tile", "moisture_paint"],
+      "ceiling": ["moisture_paint", "stretch"],
+      "electric": ["basic", "extended"],
+      "tile": true,
+      "plumbing": { "available": true, "required": true }
+    },
+    "hallway": {
+      "label": "Коридор",
+      "floor": ["laminate", "tile"],
+      "walls": ["paint", "wallpaper"],
+      "ceiling": ["paint", "stretch"],
+      "electric": ["basic", "extended"],
+      "tile": false,
+      "plumbing": { "available": false, "required": false }
+    }
+  }
+}

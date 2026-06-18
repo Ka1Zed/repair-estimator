@@ -4,9 +4,13 @@ import { useProjectStore } from "../store/projectStore";
 export default function RoomPolygonEditor() {
   const points = useProjectStore((state) => state.points);
   const updatePoint = useProjectStore((state) => state.updatePoint);
-  const setPoints = useProjectStore((state) => state.setPoints); // Достаем функцию перезаписи массива
+  const setPoints = useProjectStore((state) => state.setPoints);
 
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+
+  // НОВЫЙ СТЕЙТ: включена ли привязка к сетке (по умолчанию да)
+  const [snapToGrid, setSnapToGrid] = useState(true);
+
   const svgRef = useRef<SVGSVGElement>(null);
 
   if (points.length < 3) {
@@ -51,11 +55,18 @@ export default function RoomPolygonEditor() {
   const offsetX = minX - paddingX;
   const offsetY = minY - paddingY;
 
+  // --- ЛОГИКА УМНОЙ СЕТКИ ---
+  const GRID_STEP = 0.5; // Шаг сетки 0.5 метра
+  const gridPixelSize = GRID_STEP * scale; // Размер одной клетки в пикселях на экране
+
+  // Смещение сетки, чтобы линии четко попадали в целые координаты (0, 0.5, 1 и т.д.)
+  const gridOffsetX = (-offsetX * scale) % gridPixelSize;
+  const gridOffsetY = (-offsetY * scale) % gridPixelSize;
+
   const pointsString = safePoints
     .map((p) => `${(p.x - offsetX) * scale},${(p.y - offsetY) * scale}`)
     .join(" ");
 
-  // --- ЛОГИКА ПЕРЕТАСКИВАНИЯ ---
   const handlePointerDown = (index: number) => {
     setDraggingIdx(index);
   };
@@ -75,11 +86,14 @@ export default function RoomPolygonEditor() {
     let newRealX = cursorPt.x / scale + offsetX;
     let newRealY = cursorPt.y / scale + offsetY;
 
-    newRealX = Math.max(0, newRealX);
-    newRealY = Math.max(0, newRealY);
+    // --- МАГНИТ К СЕТКЕ ---
+    if (snapToGrid) {
+      newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
+      newRealY = Math.round(newRealY / GRID_STEP) * GRID_STEP;
+    }
 
-    newRealX = Math.round(newRealX * 10) / 10;
-    newRealY = Math.round(newRealY * 10) / 10;
+    newRealX = Math.max(0, Math.round(newRealX * 10) / 10);
+    newRealY = Math.max(0, Math.round(newRealY * 10) / 10);
 
     updatePoint(draggingIdx, newRealX, newRealY);
   };
@@ -88,9 +102,7 @@ export default function RoomPolygonEditor() {
     setDraggingIdx(null);
   };
 
-  // --- НОВАЯ ЛОГИКА: УДАЛЕНИЕ ТОЧКИ ---
   const handleDeletePoint = (index: number, e: React.PointerEvent) => {
-    // Если зажат Shift во время клика
     if (e.shiftKey) {
       if (points.length <= 3) {
         alert("У помещения должно быть минимум 3 точки!");
@@ -98,19 +110,16 @@ export default function RoomPolygonEditor() {
       }
       setPoints(points.filter((_, i) => i !== index));
     } else {
-      // Иначе просто начинаем перетаскивание
       handlePointerDown(index);
     }
   };
 
-  // --- НОВАЯ ЛОГИКА: ДОБАВЛЕНИЕ ТОЧКИ НА СТОРОНУ ---
   const handleEdgeClick = (e: React.PointerEvent, index1: number) => {
     const svg = svgRef.current;
     if (!svg) return;
     const ctm = svg.getScreenCTM();
     if (!ctm) return;
 
-    // Вычисляем, куда именно кликнули на экране
     const pt = svg.createSVGPoint();
     pt.x = e.clientX;
     pt.y = e.clientY;
@@ -119,10 +128,15 @@ export default function RoomPolygonEditor() {
     let newRealX = cursorPt.x / scale + offsetX;
     let newRealY = cursorPt.y / scale + offsetY;
 
+    // --- МАГНИТ ПРИ ДОБАВЛЕНИИ ТОЧКИ ---
+    if (snapToGrid) {
+      newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
+      newRealY = Math.round(newRealY / GRID_STEP) * GRID_STEP;
+    }
+
     newRealX = Math.max(0, Math.round(newRealX * 10) / 10);
     newRealY = Math.max(0, Math.round(newRealY * 10) / 10);
 
-    // Вставляем новую точку сразу после index1
     const newPoints = [...points];
     newPoints.splice(index1 + 1, 0, { x: newRealX, y: newRealY });
     setPoints(newPoints);
@@ -130,12 +144,61 @@ export default function RoomPolygonEditor() {
 
   return (
     <div style={{ marginTop: "20px", width: "100%", maxWidth: "450px" }}>
-      <h3>Редактор помещения:</h3>
-      <p style={{ fontSize: "13px", color: "#888", marginBottom: "10px" }}>
-        💡 Кликните по зеленой границе, чтобы добавить изгиб.
-        <br />
-        💡 <b>Shift + Клик</b> по белой точке, чтобы её удалить.
-      </p>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          marginBottom: "10px",
+        }}
+      >
+        <div>
+          <h3>Редактор помещения:</h3>
+          <p
+            style={{
+              fontSize: "13px",
+              color: "#888",
+              margin: 0,
+              marginTop: "5px",
+            }}
+          >
+            💡 Клик по границе — добавить точку.
+            <br />
+            💡 <b>Shift + Клик</b> по точке — удалить.
+          </p>
+        </div>
+
+        {/* ТУМБЛЕР ПРИВЯЗКИ */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+          }}
+        >
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              cursor: "pointer",
+              fontSize: "14px",
+              color: "#ddd",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={snapToGrid}
+              onChange={(e) => setSnapToGrid(e.target.checked)}
+              style={{ marginRight: "6px" }}
+            />
+            Привязка к узлам
+          </label>
+          <span style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
+            1 клетка = 0.5 м
+          </span>
+        </div>
+      </div>
+
       <div
         style={{
           background: "#222",
@@ -165,14 +228,16 @@ export default function RoomPolygonEditor() {
           onPointerLeave={handlePointerUp}
         >
           <defs>
+            {/* Отрисовка самой сетки с привязкой координат */}
             <pattern
               id="grid"
-              width="20"
-              height="20"
+              width={gridPixelSize}
+              height={gridPixelSize}
               patternUnits="userSpaceOnUse"
+              patternTransform={`translate(${gridOffsetX}, ${gridOffsetY})`}
             >
               <path
-                d="M 20 0 L 0 0 0 20"
+                d={`M ${gridPixelSize} 0 L 0 0 0 ${gridPixelSize}`}
                 fill="none"
                 stroke="#333"
                 strokeWidth="1"
@@ -181,7 +246,6 @@ export default function RoomPolygonEditor() {
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
 
-          {/* Сам многоугольник (замыкается автоматически атрибутом points) */}
           <polygon
             points={pointsString}
             fill="rgba(100, 200, 100, 0.3)"
@@ -189,9 +253,8 @@ export default function RoomPolygonEditor() {
             strokeWidth="3"
           />
 
-          {/* Невидимые толстые линии поверх сторон для удобного клика */}
           {safePoints.map((p, i) => {
-            const nextIndex = (i + 1) % safePoints.length; // Чтобы последняя точка соединялась с нулевой
+            const nextIndex = (i + 1) % safePoints.length;
             const nextP = safePoints[nextIndex];
             return (
               <line
@@ -200,15 +263,14 @@ export default function RoomPolygonEditor() {
                 y1={(p.y - offsetY) * scale}
                 x2={(nextP.x - offsetX) * scale}
                 y2={(nextP.y - offsetY) * scale}
-                stroke="transparent" // Невидимая
-                strokeWidth="15" // Толстая, чтобы легко было попасть мышкой
+                stroke="transparent"
+                strokeWidth="15"
                 style={{ cursor: "crosshair" }}
                 onPointerDown={(e) => handleEdgeClick(e, i)}
               />
             );
           })}
 
-          {/* Вершины (белые кружочки) */}
           {safePoints.map((p, i) => (
             <circle
               key={i}

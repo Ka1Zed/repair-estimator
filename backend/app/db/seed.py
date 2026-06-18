@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from app.db.session import SessionLocal
-from app.db.models import Material, PriceSource, LaborService, MaterialPrice, LaborPrice
+from app.db.models import Material, PriceSource, LaborService, MaterialPrice, LaborPrice, RoomType
 
 from decimal import Decimal
 
@@ -24,7 +24,11 @@ def seed():
     with open(SEED_PATH / "labor_prices.json", 'r') as file:
         data_labor_prices = json.load(file)
 
+    with open(SEED_PATH / "room_types.json", 'r', encoding='utf-8') as file:
+        data_room_types = json.load(file)
+
     session = SessionLocal()
+    session.query(RoomType).delete()
     # сначала дети (цены) — на них ничего не ссылается
     session.query(MaterialPrice).delete()
     session.query(LaborPrice).delete()
@@ -90,6 +94,15 @@ def seed():
         labor_prices.append(price)
 
     session.add_all(labor_prices)
+
+    room_types = []
+    for key, rules in data_room_types["roomTypes"].items():
+        room_types.append(RoomType(
+            key=key,
+            label=rules["label"],
+            rules=rules,            # кладем весь объект как JSONB
+        ))
+    session.add_all(room_types)
 
     session.commit()
     session.close()

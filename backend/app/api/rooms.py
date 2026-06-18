@@ -11,11 +11,12 @@ async def calculate_room_geometry(request: RoomCalculateRequest):
     """
     points = [(p.x, p.y) for p in request.points]   # преобразуем в список кортежей
     height = request.height
+    openings = request.openings
 
     # Вызываем сервисные функции
     floor = floor_area(points)
     perim = perimeter(points)
-    walls = wall_area(points, height)
+    walls = wall_area(points, height, openings)
 
     # Площадь потолка равна площади пола
     ceiling = floor

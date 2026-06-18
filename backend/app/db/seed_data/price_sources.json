@@ -2,5 +2,6 @@
   {"name": "seed", "type": "seed", "url": null},
   {"name": "manual", "type": "manual", "url": null},
   {"name": "Мегастрой", "type": "parser", "url": "https://megastroy.com"},
-  {"name": "Avito", "type": "parser", "url": "https://www.avito.ru"}
+  {"name": "Avito", "type": "parser", "url": "https://www.avito.ru"},
+  {"name": "company_price", "type": "parser", "url": "https://rembrigada116.ru/price"}
 ]

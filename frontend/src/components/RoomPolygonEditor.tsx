@@ -4,6 +4,7 @@ import { useProjectStore } from "../store/projectStore";
 export default function RoomPolygonEditor() {
   const points = useProjectStore((state) => state.points);
   const updatePoint = useProjectStore((state) => state.updatePoint);
+  const setPoints = useProjectStore((state) => state.setPoints); // Достаем функцию перезаписи массива
 
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -36,7 +37,6 @@ export default function RoomPolygonEditor() {
   const MAX_PREVIEW_WIDTH = 400;
   const MAX_PREVIEW_HEIGHT = 300;
 
-  // Отступы по бокам, чтобы точки не прилипали к краям
   const paddingX = effectiveRangeX * 0.1;
   const paddingY = effectiveRangeY * 0.1;
   const totalViewWidth = effectiveRangeX + paddingX * 2;
@@ -55,6 +55,7 @@ export default function RoomPolygonEditor() {
     .map((p) => `${(p.x - offsetX) * scale},${(p.y - offsetY) * scale}`)
     .join(" ");
 
+  // --- ЛОГИКА ПЕРЕТАСКИВАНИЯ ---
   const handlePointerDown = (index: number) => {
     setDraggingIdx(index);
   };
@@ -63,23 +64,17 @@ export default function RoomPolygonEditor() {
     if (draggingIdx === null || !svgRef.current) return;
 
     const svg = svgRef.current;
-
-    // Получаем матрицу трансформации экрана (чтобы учесть, как браузер сжал нашу адаптивную SVG)
     const ctm = svg.getScreenCTM();
     if (!ctm) return;
 
-    // Создаем системную точку SVG и записываем в нее координаты мыши на экране
     const pt = svg.createSVGPoint();
     pt.x = e.clientX;
     pt.y = e.clientY;
-
-    // Магия: переводим экранные пиксели во внутренние пиксели SVG с учетом масштаба
     const cursorPt = pt.matrixTransform(ctm.inverse());
 
     let newRealX = cursorPt.x / scale + offsetX;
     let newRealY = cursorPt.y / scale + offsetY;
 
-    // ЖЕСТКАЯ ГРАНИЦА: запрещаем отрицательные значения
     newRealX = Math.max(0, newRealX);
     newRealY = Math.max(0, newRealY);
 
@@ -93,9 +88,54 @@ export default function RoomPolygonEditor() {
     setDraggingIdx(null);
   };
 
+  // --- НОВАЯ ЛОГИКА: УДАЛЕНИЕ ТОЧКИ ---
+  const handleDeletePoint = (index: number, e: React.PointerEvent) => {
+    // Если зажат Shift во время клика
+    if (e.shiftKey) {
+      if (points.length <= 3) {
+        alert("У помещения должно быть минимум 3 точки!");
+        return;
+      }
+      setPoints(points.filter((_, i) => i !== index));
+    } else {
+      // Иначе просто начинаем перетаскивание
+      handlePointerDown(index);
+    }
+  };
+
+  // --- НОВАЯ ЛОГИКА: ДОБАВЛЕНИЕ ТОЧКИ НА СТОРОНУ ---
+  const handleEdgeClick = (e: React.PointerEvent, index1: number) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return;
+
+    // Вычисляем, куда именно кликнули на экране
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const cursorPt = pt.matrixTransform(ctm.inverse());
+
+    let newRealX = cursorPt.x / scale + offsetX;
+    let newRealY = cursorPt.y / scale + offsetY;
+
+    newRealX = Math.max(0, Math.round(newRealX * 10) / 10);
+    newRealY = Math.max(0, Math.round(newRealY * 10) / 10);
+
+    // Вставляем новую точку сразу после index1
+    const newPoints = [...points];
+    newPoints.splice(index1 + 1, 0, { x: newRealX, y: newRealY });
+    setPoints(newPoints);
+  };
+
   return (
     <div style={{ marginTop: "20px", width: "100%", maxWidth: "450px" }}>
       <h3>Редактор помещения:</h3>
+      <p style={{ fontSize: "13px", color: "#888", marginBottom: "10px" }}>
+        💡 Кликните по зеленой границе, чтобы добавить изгиб.
+        <br />
+        💡 <b>Shift + Клик</b> по белой точке, чтобы её удалить.
+      </p>
       <div
         style={{
           background: "#222",
@@ -111,14 +151,13 @@ export default function RoomPolygonEditor() {
       >
         <svg
           ref={svgRef}
-          // ЗАМЕНИЛИ жесткие width и height на умный viewBox
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
           style={{
             display: "block",
             touchAction: "none",
-            width: "100%", // Теперь ширина резиновая
-            height: "auto", // Высота подстраивается под ширину
-            maxHeight: "300px", // Ограничиваем только максимальный размер
+            width: "100%",
+            height: "auto",
+            maxHeight: "300px",
             overflow: "visible",
           }}
           onPointerMove={handlePointerMove}
@@ -142,6 +181,7 @@ export default function RoomPolygonEditor() {
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
 
+          {/* Сам многоугольник (замыкается автоматически атрибутом points) */}
           <polygon
             points={pointsString}
             fill="rgba(100, 200, 100, 0.3)"
@@ -149,6 +189,26 @@ export default function RoomPolygonEditor() {
             strokeWidth="3"
           />
 
+          {/* Невидимые толстые линии поверх сторон для удобного клика */}
+          {safePoints.map((p, i) => {
+            const nextIndex = (i + 1) % safePoints.length; // Чтобы последняя точка соединялась с нулевой
+            const nextP = safePoints[nextIndex];
+            return (
+              <line
+                key={`edge-${i}`}
+                x1={(p.x - offsetX) * scale}
+                y1={(p.y - offsetY) * scale}
+                x2={(nextP.x - offsetX) * scale}
+                y2={(nextP.y - offsetY) * scale}
+                stroke="transparent" // Невидимая
+                strokeWidth="15" // Толстая, чтобы легко было попасть мышкой
+                style={{ cursor: "crosshair" }}
+                onPointerDown={(e) => handleEdgeClick(e, i)}
+              />
+            );
+          })}
+
+          {/* Вершины (белые кружочки) */}
           {safePoints.map((p, i) => (
             <circle
               key={i}
@@ -158,7 +218,7 @@ export default function RoomPolygonEditor() {
               fill={draggingIdx === i ? "#5cba5c" : "#fff"}
               stroke="#5cba5c"
               strokeWidth="2"
-              onPointerDown={() => handlePointerDown(i)}
+              onPointerDown={(e) => handleDeletePoint(i, e)}
               style={{ cursor: "grab" }}
             />
           ))}

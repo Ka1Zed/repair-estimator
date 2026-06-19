@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+// --- ТИПЫ (один источник истины прямо в сторе, как просил тимлид) ---
 export type RepairType = "cosmetic" | "basic" | "extended";
 
 export interface Point {
@@ -15,11 +16,12 @@ export interface Opening {
 export interface Room {
   id: string;
   name: string;
-  height: number;
+  height: number | string; // Исправлено по ревью (чтобы не было 0 при очистке)
   room_type: string;
   points: Point[];
   openings: Opening[];
 }
+// ------------------------------------------------------------------
 
 interface ProjectState {
   repair_type: RepairType;
@@ -33,8 +35,8 @@ interface ProjectState {
   setActiveRoom: (index: number) => void;
   updateRoomName: (index: number, name: string) => void;
 
-  // ДОБАВЛЕНО: функция для изменения высоты
-  setHeight: (height: number) => void;
+  // Высота теперь принимает и строку
+  setHeight: (height: number | string) => void;
 
   updatePoint: (index: number, x: number | string, y: number | string) => void;
   setPoints: (points: Point[]) => void;
@@ -43,7 +45,7 @@ interface ProjectState {
 const createDefaultRoom = (name: string): Room => ({
   id: crypto.randomUUID(),
   name,
-  height: 2.7, // Дефолтная высота
+  height: 2.7,
   room_type: "living_room",
   points: [
     { x: 0, y: 0 },
@@ -95,7 +97,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
       return { rooms: newRooms };
     }),
 
-  // ДОБАВЛЕНО: реализация изменения высоты активной комнаты
   setHeight: (height) =>
     set((state) => {
       const newRooms = [...state.rooms];

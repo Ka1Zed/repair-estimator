@@ -2,7 +2,10 @@ import { useState, useRef } from "react";
 import { useProjectStore } from "../store/projectStore";
 
 export default function RoomPolygonEditor() {
-  const points = useProjectStore((state) => state.points);
+  const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
+  const points = useProjectStore(
+    (state) => state.rooms[activeRoomIndex].points,
+  );
   const updatePoint = useProjectStore((state) => state.updatePoint);
   const setPoints = useProjectStore((state) => state.setPoints);
 

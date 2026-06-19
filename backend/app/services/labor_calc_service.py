@@ -11,7 +11,7 @@
 # Возвращаются три стоимости (min/avg/max) для каждой работы.
 
 from decimal import Decimal
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from app.db.models import LaborService, LaborPrice, PriceSource
 

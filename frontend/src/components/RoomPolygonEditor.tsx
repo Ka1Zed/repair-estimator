@@ -96,10 +96,11 @@ export default function RoomPolygonEditor() {
     if (snapToGrid) {
       newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
       newRealY = Math.round(newRealY / GRID_STEP) * GRID_STEP;
+    } else {
+      // Округляем до тысячных для большей точности, убрали Math.max
+      newRealX = Math.round(newRealX * 1000) / 1000;
+      newRealY = Math.round(newRealY * 1000) / 1000;
     }
-
-    newRealX = Math.max(0, Math.round(newRealX * 10) / 10);
-    newRealY = Math.max(0, Math.round(newRealY * 10) / 10);
 
     updatePoint(draggingIdx, newRealX, newRealY);
   };
@@ -139,10 +140,11 @@ export default function RoomPolygonEditor() {
     if (snapToGrid) {
       newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
       newRealY = Math.round(newRealY / GRID_STEP) * GRID_STEP;
+    } else {
+      // Убрали Math.max
+      newRealX = Math.round(newRealX * 1000) / 1000;
+      newRealY = Math.round(newRealY * 1000) / 1000;
     }
-
-    newRealX = Math.max(0, Math.round(newRealX * 10) / 10);
-    newRealY = Math.max(0, Math.round(newRealY * 10) / 10);
 
     const newPoints = [...points];
     newPoints.splice(index1 + 1, 0, { x: newRealX, y: newRealY });
@@ -180,8 +182,10 @@ export default function RoomPolygonEditor() {
     let newRealX = p1.x + nx * newLen;
     let newRealY = p1.y + ny * newLen;
 
-    newRealX = Math.max(0, Math.round(newRealX * 10) / 10);
-    newRealY = Math.max(0, Math.round(newRealY * 10) / 10);
+    // ИСПРАВЛЕНО: Убрали Math.max(0, ...) и повысили точность до 3 знаков (тысячных),
+    // чтобы диагональные стены сохраняли идеальную длину
+    newRealX = Math.round(newRealX * 1000) / 1000;
+    newRealY = Math.round(newRealY * 1000) / 1000;
 
     updatePoint(nextIndex, newRealX, newRealY);
     setEditingEdge(null);
@@ -349,10 +353,14 @@ export default function RoomPolygonEditor() {
                     value={edgeInputValue}
                     onChange={(e) => setEdgeInputValue(e.target.value)}
                     onBlur={() => handleEdgeLengthSubmit(i)}
-                    onClick={(e) => e.stopPropagation()} // Блокируем клики внутри самого инпута
+                    onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleEdgeLengthSubmit(i);
-                      if (e.key === "Escape") setEditingEdge(null);
+                      // ИСПРАВЛЕНО: Теперь Escape очищает строку до закрытия, чтобы onBlur не сохранил старое значение
+                      if (e.key === "Escape") {
+                        setEdgeInputValue("");
+                        setEditingEdge(null);
+                      }
                     }}
                     style={{
                       width: "100%",
@@ -372,12 +380,11 @@ export default function RoomPolygonEditor() {
             }
 
             return (
-              /* ИСПРАВЛЕНО: Заменили onPointerDown на onClick, чтобы избежать моментального закрытия */
               <g
                 key={`edge-label-group-${i}`}
                 style={{ cursor: "pointer" }}
                 onClick={(e) => {
-                  e.stopPropagation(); // Не даем клику провалиться на линию добавления точек
+                  e.stopPropagation();
                   setEditingEdge(i);
                   setEdgeInputValue(displayLen);
                 }}

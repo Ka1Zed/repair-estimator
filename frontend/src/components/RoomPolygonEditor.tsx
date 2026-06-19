@@ -7,9 +7,10 @@ export default function RoomPolygonEditor() {
   const setPoints = useProjectStore((state) => state.setPoints);
 
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
-
-  // НОВЫЙ СТЕЙТ: включена ли привязка к сетке (по умолчанию да)
   const [snapToGrid, setSnapToGrid] = useState(true);
+
+  const [editingEdge, setEditingEdge] = useState<number | null>(null);
+  const [edgeInputValue, setEdgeInputValue] = useState("");
 
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -26,6 +27,13 @@ export default function RoomPolygonEditor() {
     y: Number(p.y) || 0,
   }));
 
+  const calculateDistance = (
+    p1: { x: number; y: number },
+    p2: { x: number; y: number },
+  ) => {
+    return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+  };
+
   const xs = safePoints.map((p) => p.x);
   const ys = safePoints.map((p) => p.y);
   const minX = Math.min(...xs);
@@ -41,8 +49,8 @@ export default function RoomPolygonEditor() {
   const MAX_PREVIEW_WIDTH = 400;
   const MAX_PREVIEW_HEIGHT = 300;
 
-  const paddingX = effectiveRangeX * 0.1;
-  const paddingY = effectiveRangeY * 0.1;
+  const paddingX = effectiveRangeX * 0.2;
+  const paddingY = effectiveRangeY * 0.2;
   const totalViewWidth = effectiveRangeX + paddingX * 2;
   const totalViewHeight = effectiveRangeY + paddingY * 2;
 
@@ -55,11 +63,9 @@ export default function RoomPolygonEditor() {
   const offsetX = minX - paddingX;
   const offsetY = minY - paddingY;
 
-  // --- ЛОГИКА УМНОЙ СЕТКИ ---
-  const GRID_STEP = 0.5; // Шаг сетки 0.5 метра
-  const gridPixelSize = GRID_STEP * scale; // Размер одной клетки в пикселях на экране
+  const GRID_STEP = 0.5;
+  const gridPixelSize = GRID_STEP * scale;
 
-  // Смещение сетки, чтобы линии четко попадали в целые координаты (0, 0.5, 1 и т.д.)
   const gridOffsetX = (-offsetX * scale) % gridPixelSize;
   const gridOffsetY = (-offsetY * scale) % gridPixelSize;
 
@@ -69,6 +75,7 @@ export default function RoomPolygonEditor() {
 
   const handlePointerDown = (index: number) => {
     setDraggingIdx(index);
+    setEditingEdge(null);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -86,7 +93,6 @@ export default function RoomPolygonEditor() {
     let newRealX = cursorPt.x / scale + offsetX;
     let newRealY = cursorPt.y / scale + offsetY;
 
-    // --- МАГНИТ К СЕТКЕ ---
     if (snapToGrid) {
       newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
       newRealY = Math.round(newRealY / GRID_STEP) * GRID_STEP;
@@ -115,6 +121,8 @@ export default function RoomPolygonEditor() {
   };
 
   const handleEdgeClick = (e: React.PointerEvent, index1: number) => {
+    if (editingEdge !== null) return;
+
     const svg = svgRef.current;
     if (!svg) return;
     const ctm = svg.getScreenCTM();
@@ -128,7 +136,6 @@ export default function RoomPolygonEditor() {
     let newRealX = cursorPt.x / scale + offsetX;
     let newRealY = cursorPt.y / scale + offsetY;
 
-    // --- МАГНИТ ПРИ ДОБАВЛЕНИИ ТОЧКИ ---
     if (snapToGrid) {
       newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
       newRealY = Math.round(newRealY / GRID_STEP) * GRID_STEP;
@@ -140,6 +147,45 @@ export default function RoomPolygonEditor() {
     const newPoints = [...points];
     newPoints.splice(index1 + 1, 0, { x: newRealX, y: newRealY });
     setPoints(newPoints);
+  };
+
+  const handleEdgeLengthSubmit = (index: number) => {
+    if (!edgeInputValue) {
+      setEditingEdge(null);
+      return;
+    }
+
+    const newLen = parseFloat(edgeInputValue.replace(",", "."));
+    if (isNaN(newLen) || newLen <= 0) {
+      setEditingEdge(null);
+      return;
+    }
+
+    const p1 = safePoints[index];
+    const nextIndex = (index + 1) % safePoints.length;
+    const p2 = safePoints[nextIndex];
+
+    const currentLen = calculateDistance(p1, p2);
+    if (currentLen === 0) {
+      setEditingEdge(null);
+      return;
+    }
+
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+
+    const nx = dx / currentLen;
+    const ny = dy / currentLen;
+
+    let newRealX = p1.x + nx * newLen;
+    let newRealY = p1.y + ny * newLen;
+
+    newRealX = Math.max(0, Math.round(newRealX * 10) / 10);
+    newRealY = Math.max(0, Math.round(newRealY * 10) / 10);
+
+    updatePoint(nextIndex, newRealX, newRealY);
+    setEditingEdge(null);
+    setEdgeInputValue("");
   };
 
   return (
@@ -164,11 +210,12 @@ export default function RoomPolygonEditor() {
           >
             💡 Клик по границе — добавить точку.
             <br />
+            💡 <b>Клик по ценнику</b> — задать точную длину.
+            <br />
             💡 <b>Shift + Клик</b> по точке — удалить.
           </p>
         </div>
 
-        {/* ТУМБЛЕР ПРИВЯЗКИ */}
         <div
           style={{
             display: "flex",
@@ -228,7 +275,6 @@ export default function RoomPolygonEditor() {
           onPointerLeave={handlePointerUp}
         >
           <defs>
-            {/* Отрисовка самой сетки с привязкой координат */}
             <pattern
               id="grid"
               width={gridPixelSize}
@@ -268,6 +314,96 @@ export default function RoomPolygonEditor() {
                 style={{ cursor: "crosshair" }}
                 onPointerDown={(e) => handleEdgeClick(e, i)}
               />
+            );
+          })}
+
+          {/* Подписи длин и инпуты */}
+          {safePoints.map((p, i) => {
+            const nextIndex = (i + 1) % safePoints.length;
+            const nextP = safePoints[nextIndex];
+
+            const midX = (p.x + nextP.x) / 2;
+            const midY = (p.y + nextP.y) / 2;
+
+            const screenMidX = (midX - offsetX) * scale;
+            const screenMidY = (midY - offsetY) * scale;
+
+            const currentLen = calculateDistance(p, nextP);
+            const displayLen = Number.isInteger(currentLen)
+              ? currentLen.toString()
+              : currentLen.toFixed(1);
+
+            if (editingEdge === i) {
+              return (
+                <foreignObject
+                  key={`edge-input-${i}`}
+                  x={screenMidX - 35}
+                  y={screenMidY - 15}
+                  width="70"
+                  height="30"
+                  style={{ overflow: "visible" }}
+                >
+                  <input
+                    autoFocus
+                    type="text"
+                    value={edgeInputValue}
+                    onChange={(e) => setEdgeInputValue(e.target.value)}
+                    onBlur={() => handleEdgeLengthSubmit(i)}
+                    onClick={(e) => e.stopPropagation()} // Блокируем клики внутри самого инпута
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleEdgeLengthSubmit(i);
+                      if (e.key === "Escape") setEditingEdge(null);
+                    }}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      textAlign: "center",
+                      fontSize: "13px",
+                      border: "2px solid #5cba5c",
+                      borderRadius: "4px",
+                      background: "#111",
+                      color: "#fff",
+                      outline: "none",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </foreignObject>
+              );
+            }
+
+            return (
+              /* ИСПРАВЛЕНО: Заменили onPointerDown на onClick, чтобы избежать моментального закрытия */
+              <g
+                key={`edge-label-group-${i}`}
+                style={{ cursor: "pointer" }}
+                onClick={(e) => {
+                  e.stopPropagation(); // Не даем клику провалиться на линию добавления точек
+                  setEditingEdge(i);
+                  setEdgeInputValue(displayLen);
+                }}
+              >
+                <rect
+                  x={screenMidX - 25}
+                  y={screenMidY - 11}
+                  width="50"
+                  height="22"
+                  rx="4"
+                  fill="#1a1a1a"
+                  stroke="#444"
+                  strokeWidth="1"
+                />
+                <text
+                  x={screenMidX}
+                  y={screenMidY}
+                  fill="#fff"
+                  fontSize="12"
+                  fontWeight="bold"
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                >
+                  {displayLen}м
+                </text>
+              </g>
             );
           })}
 

@@ -1,6 +1,5 @@
 import { create } from "zustand";
 
-// --- ТИПЫ (один источник истины прямо в сторе, как просил тимлид) ---
 export type RepairType = "cosmetic" | "basic" | "extended";
 
 export interface Point {
@@ -8,9 +7,8 @@ export interface Point {
   y: number | string;
 }
 
-// ИСПРАВЛЕНО: Расширили тип проема по контракту C1 (добавили ширину и высоту)
 export interface Opening {
-  id: string; // Оставляем id, чтобы React не ругался на ключи в списоках
+  id: string;
   type: "door" | "window";
   width: number | string;
   height: number | string;
@@ -24,7 +22,6 @@ export interface Room {
   points: Point[];
   openings: Opening[];
 }
-// ------------------------------------------------------------------
 
 interface ProjectState {
   repair_type: RepairType;
@@ -43,11 +40,10 @@ interface ProjectState {
   updatePoint: (index: number, x: number | string, y: number | string) => void;
   setPoints: (points: Point[]) => void;
 
-  // ДОБАВЛЕНО: Сигнатуры новых методов для работы с проемами
   addOpening: () => void;
   updateOpening: (
     openingIndex: number,
-    field: keyof Opening,
+    field: "type" | "width" | "height",
     value: string | number,
   ) => void;
   deleteOpening: (openingIndex: number) => void;
@@ -64,7 +60,7 @@ const createDefaultRoom = (name: string): Room => ({
     { x: 4, y: 3 },
     { x: 0, y: 3 },
   ],
-  openings: [], // Изначально комната пустая, без проемов
+  openings: [],
 });
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -140,13 +136,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
       return { rooms: newRooms };
     }),
 
-  // ДОБАВЛЕНО: Реализация методов для добавления, изменения и удаления окон/дверей
   addOpening: () =>
     set((state) => {
       const newRooms = [...state.rooms];
       const activeRoom = newRooms[state.activeRoomIndex];
 
-      // Дефолтная дверь по ТЗ тимлида: width 0.8, height 2.0
+      // Дефолтная дверь: width 0.8, height 2.0
       const newOpening: Opening = {
         id: crypto.randomUUID(),
         type: "door",

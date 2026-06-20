@@ -85,6 +85,7 @@ export default function OpeningsForm() {
                   <input
                     type="number"
                     step="0.1"
+                    min="0"
                     value={opening.height}
                     onChange={(e) =>
                       updateOpening(

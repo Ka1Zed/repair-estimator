@@ -1,8 +1,11 @@
 import { useProjectStore } from "../store/projectStore";
-import RoomPolygonEditor from "./RoomPolygonEditor";
 
 export default function RoomPointsTable() {
-  const points = useProjectStore((state) => state.points);
+  const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
+  const points = useProjectStore(
+    (state) => state.rooms[activeRoomIndex].points,
+  );
+
   const setPoints = useProjectStore((state) => state.setPoints);
   const updatePoint = useProjectStore((state) => state.updatePoint);
 
@@ -23,16 +26,15 @@ export default function RoomPointsTable() {
     field: "x" | "y",
     value: string,
   ) => {
-    // 1. Если пользователь стер всё (пустая строка), разрешаем это!
     if (value === "") {
       if (field === "x") updatePoint(index, "", points[index].y);
       else updatePoint(index, points[index].x, "");
       return;
     }
 
-    // 2. Если ввели число, то обновляем. Защита от минусов остается (num >= 0).
     const num = Number(value);
-    if (!isNaN(num) && num >= 0) {
+    // Убрали проверку на num >= 0, теперь можно вводить минус
+    if (!isNaN(num)) {
       if (field === "x") updatePoint(index, num, points[index].y);
       else updatePoint(index, points[index].x, num);
     }
@@ -71,8 +73,7 @@ export default function RoomPointsTable() {
               <td>
                 <input
                   type="number"
-                  min="0"
-                  step="0.1" // Добавила шаг, чтобы можно было вводить десятые доли (2.5)
+                  step="0.1"
                   value={point.x}
                   onChange={(e) =>
                     handlePointChange(index, "x", e.target.value)
@@ -83,7 +84,6 @@ export default function RoomPointsTable() {
               <td>
                 <input
                   type="number"
-                  min="0"
                   step="0.1"
                   value={point.y}
                   onChange={(e) =>
@@ -125,8 +125,6 @@ export default function RoomPointsTable() {
       >
         + Добавить точку
       </button>
-
-      <RoomPolygonEditor />
     </div>
   );
 }

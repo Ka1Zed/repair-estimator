@@ -10,7 +10,8 @@ export interface Point {
 export interface Opening {
   id: string;
   type: "door" | "window";
-  // TODO: При интеграции с API обязательно конвертировать width и height в Number() перед POST /api/estimates/calculate
+  // 3. Исправлено: TODO-комментарий добавлен прямо в интерфейс
+  // TODO: перед POST /api/estimates/calculate обязательно конвертировать width и height через Number()
   width: number | string;
   height: number | string;
 }
@@ -142,7 +143,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
       const newRooms = [...state.rooms];
       const activeRoom = newRooms[state.activeRoomIndex];
 
-      // Дефолтная дверь: width 0.8, height 2.0
       const newOpening: Opening = {
         id: crypto.randomUUID(),
         type: "door",

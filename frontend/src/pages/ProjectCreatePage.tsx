@@ -98,8 +98,7 @@ export default function ProjectCreatePage() {
         <div style={{ marginTop: "20px" }}>
           <RoomPointsTable />
         </div>
-
-        {/* ВОТ ОНА — НАША НОВАЯ ФОРМА */}
+        
         <div style={{ marginTop: "20px" }}>
           <OpeningsForm />
         </div>

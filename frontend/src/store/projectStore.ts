@@ -1,6 +1,5 @@
 import { create } from "zustand";
 
-// --- ТИПЫ (один источник истины прямо в сторе, как просил тимлид) ---
 export type RepairType = "cosmetic" | "basic" | "extended";
 
 export interface Point {
@@ -9,19 +8,22 @@ export interface Point {
 }
 
 export interface Opening {
-  id?: string;
-  type?: string;
+  id: string;
+  type: "door" | "window";
+  // 3. Исправлено: TODO-комментарий добавлен прямо в интерфейс
+  // TODO: перед POST /api/estimates/calculate обязательно конвертировать width и height через Number()
+  width: number | string;
+  height: number | string;
 }
 
 export interface Room {
   id: string;
   name: string;
-  height: number | string; // Исправлено по ревью (чтобы не было 0 при очистке)
+  height: number | string;
   room_type: string;
   points: Point[];
   openings: Opening[];
 }
-// ------------------------------------------------------------------
 
 interface ProjectState {
   repair_type: RepairType;
@@ -35,11 +37,18 @@ interface ProjectState {
   setActiveRoom: (index: number) => void;
   updateRoomName: (index: number, name: string) => void;
 
-  // Высота теперь принимает и строку
   setHeight: (height: number | string) => void;
 
   updatePoint: (index: number, x: number | string, y: number | string) => void;
   setPoints: (points: Point[]) => void;
+
+  addOpening: () => void;
+  updateOpening: (
+    openingIndex: number,
+    field: "type" | "width" | "height",
+    value: string | number,
+  ) => void;
+  deleteOpening: (openingIndex: number) => void;
 }
 
 const createDefaultRoom = (name: string): Room => ({
@@ -125,6 +134,58 @@ export const useProjectStore = create<ProjectState>((set) => ({
       newRooms[state.activeRoomIndex] = {
         ...newRooms[state.activeRoomIndex],
         points,
+      };
+      return { rooms: newRooms };
+    }),
+
+  addOpening: () =>
+    set((state) => {
+      const newRooms = [...state.rooms];
+      const activeRoom = newRooms[state.activeRoomIndex];
+
+      const newOpening: Opening = {
+        id: crypto.randomUUID(),
+        type: "door",
+        width: 0.8,
+        height: 2.0,
+      };
+
+      newRooms[state.activeRoomIndex] = {
+        ...activeRoom,
+        openings: [...activeRoom.openings, newOpening],
+      };
+      return { rooms: newRooms };
+    }),
+
+  updateOpening: (openingIndex, field, value) =>
+    set((state) => {
+      const newRooms = [...state.rooms];
+      const activeRoom = newRooms[state.activeRoomIndex];
+      const newOpenings = [...activeRoom.openings];
+
+      newOpenings[openingIndex] = {
+        ...newOpenings[openingIndex],
+        [field]: value,
+      };
+
+      newRooms[state.activeRoomIndex] = {
+        ...activeRoom,
+        openings: newOpenings,
+      };
+      return { rooms: newRooms };
+    }),
+
+  deleteOpening: (openingIndex) =>
+    set((state) => {
+      const newRooms = [...state.rooms];
+      const activeRoom = newRooms[state.activeRoomIndex];
+      const newOpenings = activeRoom.openings.filter(
+        (_, i) => i !== openingIndex,
+      );
+
+      newRooms[state.activeRoomIndex] = {
+        ...activeRoom,
+        openings: newOpenings,
       };
       return { rooms: newRooms };
     }),

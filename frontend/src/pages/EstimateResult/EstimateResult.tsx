@@ -34,6 +34,43 @@ export function EstimateResult() {
 
       <RepairOptionsForm />
 
+      {/* TODO: заменить geoCells на данные из apiClient.calculateRoomGeometry / geometry в ответе calculateEstimate,
+          когда фронт перейдёт с моков на реальный бэкенд */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          border: '1px solid var(--border)',
+          marginBottom: '32px',
+        }}
+      >
+        {[
+          { label: 'Пол', unit: 'м²', val: '45,0' },
+          { label: 'Потолок', unit: 'м²', val: '45,0' },
+          { label: 'Периметр', unit: 'м', val: '28,0' },
+          { label: 'Стены', unit: 'м²', val: '70,0' },
+        ].map((g) => (
+          <div
+            key={g.label}
+            style={{
+              padding: '20px 22px',
+              borderRight: '1px solid var(--border)',
+              borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+              <span style={{ fontFamily: 'var(--serif)', fontWeight: 300, fontSize: '32px', color: 'var(--text-h)' }}>
+                {g.val}
+              </span>
+              <span style={{ fontSize: '12px', color: '#A8A8A8' }}>{g.unit}</span>
+            </div>
+            <div style={{ fontSize: '11px', letterSpacing: '.13em', textTransform: 'uppercase', color: '#A0A0A0', marginTop: '6px' }}>
+              {g.label}
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className={styles.statsGrid}>
         <Card title="Общая стоимость ремонта" className={styles.totalCard}>
           <div className={styles.priceValue}>

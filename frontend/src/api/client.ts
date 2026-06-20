@@ -55,6 +55,17 @@ class ApiClient {
     return this.request<unknown>("/api/materials");
   }
 
+  // 2b. Расчёт геометрии одной комнаты (POST /api/rooms/calculate)
+  async calculateRoomGeometry(payload: {
+    height: number;
+    points: { x: number; y: number }[];
+  }): Promise<{ floor_area: number; ceiling_area: number; perimeter: number; wall_area: number }> {
+    return this.request("/api/rooms/calculate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   // 3. Получение справочника услуг (GET /api/labor-services)
   async fetchLaborServices(): Promise<unknown> {
     return this.request<unknown>("/api/labor-services");

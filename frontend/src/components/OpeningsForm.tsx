@@ -3,7 +3,7 @@ import { useProjectStore } from "../store/projectStore";
 export default function OpeningsForm() {
   const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
   const openings = useProjectStore(
-    (state) => state.rooms[activeRoomIndex].openings,
+    (state) => state.rooms[activeRoomIndex]?.openings ?? [],
   );
 
   const addOpening = useProjectStore((state) => state.addOpening);
@@ -64,13 +64,16 @@ export default function OpeningsForm() {
                     step="0.1"
                     min="0"
                     value={opening.width}
-                    onChange={(e) =>
-                      updateOpening(
-                        index,
-                        "width",
-                        e.target.value === "" ? "" : Number(e.target.value),
-                      )
-                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "" || Number(val) >= 0) {
+                        updateOpening(
+                          index,
+                          "width",
+                          val === "" ? "" : Number(val),
+                        );
+                      }
+                    }}
                     style={{
                       width: "80px",
                       padding: "5px",
@@ -87,13 +90,16 @@ export default function OpeningsForm() {
                     step="0.1"
                     min="0"
                     value={opening.height}
-                    onChange={(e) =>
-                      updateOpening(
-                        index,
-                        "height",
-                        e.target.value === "" ? "" : Number(e.target.value),
-                      )
-                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "" || Number(val) >= 0) {
+                        updateOpening(
+                          index,
+                          "height",
+                          val === "" ? "" : Number(val),
+                        );
+                      }
+                    }}
                     style={{
                       width: "80px",
                       padding: "5px",

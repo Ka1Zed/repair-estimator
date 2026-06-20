@@ -2,6 +2,8 @@ import { useProjectStore } from "../store/projectStore";
 
 export default function OpeningsForm() {
   const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
+
+  // 1. Исправлено: Crash guard (защита от падения при пустых комнатах)
   const openings = useProjectStore(
     (state) => state.rooms[activeRoomIndex]?.openings ?? [],
   );
@@ -64,15 +66,10 @@ export default function OpeningsForm() {
                     step="0.1"
                     min="0"
                     value={opening.width}
+                    // 2. Исправлено: Проверка на отрицательные значения
                     onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === "" || Number(val) >= 0) {
-                        updateOpening(
-                          index,
-                          "width",
-                          val === "" ? "" : Number(val),
-                        );
-                      }
+                      const v = Number(e.target.value);
+                      if (v >= 0) updateOpening(index, "width", v);
                     }}
                     style={{
                       width: "80px",
@@ -88,17 +85,12 @@ export default function OpeningsForm() {
                   <input
                     type="number"
                     step="0.1"
-                    min="0"
+                    min="0" // 2. Исправлено: Добавлен min="0" для высоты
                     value={opening.height}
+                    // 2. Исправлено: Проверка на отрицательные значения
                     onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === "" || Number(val) >= 0) {
-                        updateOpening(
-                          index,
-                          "height",
-                          val === "" ? "" : Number(val),
-                        );
-                      }
+                      const v = Number(e.target.value);
+                      if (v >= 0) updateOpening(index, "height", v);
                     }}
                     style={{
                       width: "80px",

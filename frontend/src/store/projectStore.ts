@@ -8,15 +8,18 @@ export interface Point {
   y: number | string;
 }
 
+// ИСПРАВЛЕНО: Расширили тип проема по контракту C1 (добавили ширину и высоту)
 export interface Opening {
-  id?: string;
-  type?: string;
+  id: string; // Оставляем id, чтобы React не ругался на ключи в списоках
+  type: "door" | "window";
+  width: number | string;
+  height: number | string;
 }
 
 export interface Room {
   id: string;
   name: string;
-  height: number | string; // Исправлено по ревью (чтобы не было 0 при очистке)
+  height: number | string;
   room_type: string;
   points: Point[];
   openings: Opening[];
@@ -35,11 +38,19 @@ interface ProjectState {
   setActiveRoom: (index: number) => void;
   updateRoomName: (index: number, name: string) => void;
 
-  // Высота теперь принимает и строку
   setHeight: (height: number | string) => void;
 
   updatePoint: (index: number, x: number | string, y: number | string) => void;
   setPoints: (points: Point[]) => void;
+
+  // ДОБАВЛЕНО: Сигнатуры новых методов для работы с проемами
+  addOpening: () => void;
+  updateOpening: (
+    openingIndex: number,
+    field: keyof Opening,
+    value: string | number,
+  ) => void;
+  deleteOpening: (openingIndex: number) => void;
 }
 
 const createDefaultRoom = (name: string): Room => ({
@@ -53,7 +64,7 @@ const createDefaultRoom = (name: string): Room => ({
     { x: 4, y: 3 },
     { x: 0, y: 3 },
   ],
-  openings: [],
+  openings: [], // Изначально комната пустая, без проемов
 });
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -125,6 +136,60 @@ export const useProjectStore = create<ProjectState>((set) => ({
       newRooms[state.activeRoomIndex] = {
         ...newRooms[state.activeRoomIndex],
         points,
+      };
+      return { rooms: newRooms };
+    }),
+
+  // ДОБАВЛЕНО: Реализация методов для добавления, изменения и удаления окон/дверей
+  addOpening: () =>
+    set((state) => {
+      const newRooms = [...state.rooms];
+      const activeRoom = newRooms[state.activeRoomIndex];
+
+      // Дефолтная дверь по ТЗ тимлида: width 0.8, height 2.0
+      const newOpening: Opening = {
+        id: crypto.randomUUID(),
+        type: "door",
+        width: 0.8,
+        height: 2.0,
+      };
+
+      newRooms[state.activeRoomIndex] = {
+        ...activeRoom,
+        openings: [...activeRoom.openings, newOpening],
+      };
+      return { rooms: newRooms };
+    }),
+
+  updateOpening: (openingIndex, field, value) =>
+    set((state) => {
+      const newRooms = [...state.rooms];
+      const activeRoom = newRooms[state.activeRoomIndex];
+      const newOpenings = [...activeRoom.openings];
+
+      newOpenings[openingIndex] = {
+        ...newOpenings[openingIndex],
+        [field]: value,
+      };
+
+      newRooms[state.activeRoomIndex] = {
+        ...activeRoom,
+        openings: newOpenings,
+      };
+      return { rooms: newRooms };
+    }),
+
+  deleteOpening: (openingIndex) =>
+    set((state) => {
+      const newRooms = [...state.rooms];
+      const activeRoom = newRooms[state.activeRoomIndex];
+      const newOpenings = activeRoom.openings.filter(
+        (_, i) => i !== openingIndex,
+      );
+
+      newRooms[state.activeRoomIndex] = {
+        ...activeRoom,
+        openings: newOpenings,
       };
       return { rooms: newRooms };
     }),

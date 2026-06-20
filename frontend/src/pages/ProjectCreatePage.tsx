@@ -3,13 +3,13 @@ import RoomPointsTable from "../components/RoomPointsTable";
 import RoomPolygonEditor from "../components/RoomPolygonEditor";
 import RoomsList from "../components/RoomsList";
 import { useProjectStore } from "../store/projectStore";
+import OpeningsForm from "../components/OpeningsForm";
 
 export default function ProjectCreatePage() {
   const [projectName, setProjectName] = useState("");
 
   const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
   const activeRoom = useProjectStore((state) => state.rooms[activeRoomIndex]);
-  // Достаем весь массив комнат для правильной валидации
   const rooms = useProjectStore((state) => state.rooms);
   const setHeight = useProjectStore((state) => state.setHeight);
 
@@ -19,7 +19,6 @@ export default function ProjectCreatePage() {
       return;
     }
 
-    // Валидация по ВСЕМ комнатам (Пункт 3 из ревью)
     const allRoomsValid = rooms.every(
       (r) => r.name.trim() !== "" && r.height !== "" && Number(r.height) > 0,
     );
@@ -72,8 +71,6 @@ export default function ProjectCreatePage() {
           />
         </div>
 
-        {/* Дублирующееся поле имени активного помещения удалено (Пункт 4 из ревью) */}
-
         <div style={{ marginBottom: "15px" }}>
           <label>Высота потолка помещения (м):</label>
           <input
@@ -81,7 +78,6 @@ export default function ProjectCreatePage() {
             step="0.1"
             placeholder="2.7"
             value={activeRoom.height}
-            // Передаем просто e.target.value без Number() || 0 (Пункт 2 из ревью)
             onChange={(e) => setHeight(e.target.value)}
             style={{
               width: "100%",
@@ -101,6 +97,11 @@ export default function ProjectCreatePage() {
 
         <div style={{ marginTop: "20px" }}>
           <RoomPointsTable />
+        </div>
+
+        {/* ВОТ ОНА — НАША НОВАЯ ФОРМА */}
+        <div style={{ marginTop: "20px" }}>
+          <OpeningsForm />
         </div>
 
         <button

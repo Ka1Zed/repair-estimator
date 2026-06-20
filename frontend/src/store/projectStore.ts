@@ -10,6 +10,7 @@ export interface Point {
 export interface Opening {
   id: string;
   type: "door" | "window";
+  // TODO: При интеграции с API обязательно конвертировать width и height в Number() перед POST /api/estimates/calculate
   width: number | string;
   height: number | string;
 }

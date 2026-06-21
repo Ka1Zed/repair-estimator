@@ -3,9 +3,11 @@ import pytest
 from datetime import datetime, timezone
 from sqlalchemy.orm import sessionmaker
 
-# Используем PostgreSQL, если переменная не задана – ставим по умолчанию
-if not os.getenv("DATABASE_URL"):
-    os.environ["DATABASE_URL"] = "postgresql+psycopg://repair:repair@localhost:5432/repair_estimator"
+os.environ.setdefault("POSTGRES_USER", "repair")
+os.environ.setdefault("POSTGRES_PASSWORD", "repair")
+os.environ.setdefault("POSTGRES_DB", "repair_estimator")
+os.environ.setdefault("POSTGRES_HOST", "localhost")
+os.environ.setdefault("POSTGRES_PORT", "5432")
 
 from app.db.models import Base
 from app.db.session import engine

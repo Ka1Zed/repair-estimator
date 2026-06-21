@@ -1,5 +1,5 @@
-import { Table } from '../ui/Table';
-import styles from './EstimateTables.module.css';
+import { Table } from "../ui/Table";
+import styles from "./EstimateTables.module.css";
 
 // Поля строго по контракту docs/api.md (labor[])
 interface LaborItem {
@@ -43,9 +43,11 @@ export function LaborTable({ data }: LaborTableProps) {
               <td>{item.specialist}</td>
               <td>{item.volume}</td>
               <td>{item.unit}</td>
-              <td>{item.price_avg.toLocaleString('ru-RU')} ₽</td>
+              <td>{item.price_avg.toLocaleString("ru-RU")} ₽</td>
               {/* итог берём от backend */}
-              <td className={styles.totalCell}>{item.total_avg.toLocaleString('ru-RU')} ₽</td>
+              <td className={styles.totalCell}>
+                {item.total_avg.toLocaleString("ru-RU")} ₽
+              </td>
               <td>{item.source}</td>
             </tr>
           ))}

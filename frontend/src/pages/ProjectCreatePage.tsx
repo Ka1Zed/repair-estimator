@@ -4,6 +4,7 @@ import RoomPolygonEditor from "../components/RoomPolygonEditor";
 import RoomsList from "../components/RoomsList";
 import { useProjectStore } from "../store/projectStore";
 import OpeningsForm from "../components/OpeningsForm";
+import { RoomTypeSelector } from "../components/RoomTypeSelector";
 
 export default function ProjectCreatePage() {
   const [projectName, setProjectName] = useState("");
@@ -91,6 +92,8 @@ export default function ProjectCreatePage() {
           />
         </div>
 
+        <RoomTypeSelector />
+
         <div style={{ marginTop: "20px" }}>
           <RoomPolygonEditor />
         </div>
@@ -98,7 +101,7 @@ export default function ProjectCreatePage() {
         <div style={{ marginTop: "20px" }}>
           <RoomPointsTable />
         </div>
-        
+
         <div style={{ marginTop: "20px" }}>
           <OpeningsForm />
         </div>

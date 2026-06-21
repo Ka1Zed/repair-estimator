@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { RoomTypeKey } from "../types/roomTypes";
 
 export type RepairType = "cosmetic" | "basic" | "extended";
 
@@ -10,7 +11,6 @@ export interface Point {
 export interface Opening {
   id: string;
   type: "door" | "window";
-  // 3. Исправлено: TODO-комментарий добавлен прямо в интерфейс
   // TODO: перед POST /api/estimates/calculate обязательно конвертировать width и height через Number()
   width: number | string;
   height: number | string;
@@ -20,7 +20,7 @@ export interface Room {
   id: string;
   name: string;
   height: number | string;
-  room_type: string;
+  room_type: RoomTypeKey;
   points: Point[];
   openings: Opening[];
 }
@@ -36,6 +36,8 @@ interface ProjectState {
   deleteRoom: (index: number) => void;
   setActiveRoom: (index: number) => void;
   updateRoomName: (index: number, name: string) => void;
+
+  updateActiveRoomType: (type: RoomTypeKey) => void;
 
   setHeight: (height: number | string) => void;
 
@@ -55,7 +57,7 @@ const createDefaultRoom = (name: string): Room => ({
   id: crypto.randomUUID(),
   name,
   height: 2.7,
-  room_type: "living_room",
+  room_type: "living",
   points: [
     { x: 0, y: 0 },
     { x: 4, y: 0 },
@@ -103,6 +105,16 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set((state) => {
       const newRooms = [...state.rooms];
       newRooms[index] = { ...newRooms[index], name };
+      return { rooms: newRooms };
+    }),
+
+  updateActiveRoomType: (type) =>
+    set((state) => {
+      const newRooms = [...state.rooms];
+      newRooms[state.activeRoomIndex] = {
+        ...newRooms[state.activeRoomIndex],
+        room_type: type,
+      };
       return { rooms: newRooms };
     }),
 

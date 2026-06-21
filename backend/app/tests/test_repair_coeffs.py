@@ -2,7 +2,7 @@
 
 import pytest
 from decimal import Decimal
-from app.services.repair_coeffs_service import apply_repair_coeffs, REPAIR_COEFFS, CONTINGENCY
+from app.services.repair_coeffs_service import apply_repair_coeffs, CONTINGENCY
 
 
 class TestRepairCoeffs:
@@ -66,4 +66,3 @@ class TestRepairCoeffs:
 
         with pytest.raises(ValueError, match="Unknown repair_type: basic"):
             apply_repair_coeffs(materials, labor, 'basic')
-            

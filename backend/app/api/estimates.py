@@ -14,7 +14,7 @@ from app.schemas.estimate import (
     MaterialItem, LaborItem
 )
 from app.services.geometry_service import calculate_room_geometry
-from app.services.material_calc_service import calculate_materials
+from app.services.material_calc_service import calculate_materials, packs_to_buy
 from app.services.labor_calc_service import calculate_labor
 from app.services.repair_coeffs_service import apply_repair_coeffs
 from app.services.price_aggregator_service import get_price
@@ -59,7 +59,7 @@ def calculate_estimate(
             repair_options=request.repair_options.model_dump(),
             db=db
         )
-        all_materials.extend(materials)   # <-- ЭТО БЫЛО ПРОПУЩЕНО!
+        all_materials.extend(materials)   # <-- ВАЖНО: без этого материалы не попадают в ответ
 
         # 1c. Работы
         labor = calculate_labor(
@@ -69,7 +69,7 @@ def calculate_estimate(
         )
         all_labor.extend(labor)
 
-    # ---- 2. Агрегация материалов ----
+    # ---- 2. Агрегация материалов с округлением до упаковок ----
     mat_groups: Dict[int, Dict] = {}
     for mat in all_materials:
         mid = mat['material_id']
@@ -77,31 +77,40 @@ def calculate_estimate(
             mat_groups[mid] = {
                 'name': mat['name'],
                 'unit': mat['unit'],
-                'quantity': Decimal(0),
+                'package_size': Decimal(str(mat.get('package_size', 1))),
+                'quantity': Decimal(0),          # суммарное базовое количество (дробное)
+                'pack_quantity': Decimal(0),     # суммарное количество упаковок (дробное)
             }
         mat_groups[mid]['quantity'] += mat['quantity']
+        if mat.get('pack_quantity') is not None:
+            mat_groups[mid]['pack_quantity'] += mat['pack_quantity']
 
     materials_response: List[MaterialItem] = []
     materials_sum = {'min': Decimal(0), 'avg': Decimal(0), 'max': Decimal(0)}
 
     for mid, group in mat_groups.items():
         name = group['name']
-        quantity = group['quantity']
+        # Округляем количество упаковок вверх
+        total_pack_quantity = group['pack_quantity']
+        packs = packs_to_buy(total_pack_quantity)   # целое число упаковок
+        package_size = group['package_size']
+        final_quantity = Decimal(packs) * package_size   # итоговое количество в базовых единицах
 
-        price_obj = get_price(name, parser=None)
+        # Получаем цену (передаём сессию!)
+        price_obj = get_price(name, parser=None, db_session=db)
         if not price_obj:
             logger.warning(f"Цена для материала '{name}' не найдена, пропускаем")
-            continue   # <-- continue ТОЛЬКО здесь
+            continue
 
         price_avg = price_obj.price_avg
-        total_avg = quantity * price_avg
+        total_avg = final_quantity * price_avg
         source = db.query(PriceSource).filter(PriceSource.id == price_obj.source_id).first()
         source_name = source.name if source else "unknown"
         updated_at = price_obj.updated_at.strftime("%Y-%m-%d") if price_obj.updated_at else ""
 
         materials_response.append(MaterialItem(
             name=name,
-            quantity=float(quantity),
+            quantity=float(final_quantity),
             unit=group['unit'],
             price_avg=float(price_avg),
             total_avg=float(total_avg),
@@ -109,12 +118,12 @@ def calculate_estimate(
             updated_at=updated_at
         ))
 
-        materials_sum['min'] += quantity * price_obj.price_min
-        materials_sum['avg'] += quantity * price_obj.price_avg
-        materials_sum['max'] += quantity * price_obj.price_max
+        materials_sum['min'] += final_quantity * price_obj.price_min
+        materials_sum['avg'] += final_quantity * price_obj.price_avg
+        materials_sum['max'] += final_quantity * price_obj.price_max
 
     # ---- 3. Агрегация работ ----
-    labor_groups: Dict[str, Dict] = {}   # ключ – имя услуги (service)
+    labor_groups: Dict[str, Dict] = {}
     for job in all_labor:
         service = job['service']
         if service not in labor_groups:
@@ -133,11 +142,9 @@ def calculate_estimate(
     labor_sum = {'min': Decimal(0), 'avg': Decimal(0), 'max': Decimal(0)}
 
     for service, group in labor_groups.items():
-        # Находим услугу в БД (для получения расценки)
         labor_service = db.query(LaborService).filter(LaborService.name == service).first()
         if not labor_service:
             continue
-        # Берём первую расценку (пока seed)
         labor_price = db.query(LaborPrice).filter(
             LaborPrice.labor_service_id == labor_service.id
         ).first()
@@ -147,7 +154,7 @@ def calculate_estimate(
         volume = group['volume']
         price_avg = labor_price.price_avg
         total_avg = volume * price_avg
-        source_name = "seed"  # пока берём seed
+        source_name = "seed"
 
         labor_response.append(LaborItem(
             service=service,

@@ -9,7 +9,6 @@ export default function RoomPolygonEditor() {
   const updatePoint = useProjectStore((state) => state.updatePoint);
   const setPoints = useProjectStore((state) => state.setPoints);
 
-  // Достаем наши новые экшены из стора
   const clearActiveRoom = useProjectStore((state) => state.clearActiveRoom);
   const loadDemoRoom = useProjectStore((state) => state.loadDemoRoom);
   const resetProject = useProjectStore((state) => state.resetProject);
@@ -22,8 +21,62 @@ export default function RoomPolygonEditor() {
 
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // ВАЖНО: Если точек меньше 3, мы все равно должны показывать кнопки,
-  // иначе если пользователь нажмет "Очистить", кнопки пропадут и он не сможет нажать "Загрузить пример"
+  const controlButtonsJSX = (
+    <div
+      style={{
+        display: "flex",
+        gap: "10px",
+        marginTop: "15px",
+        justifyContent: "flex-end",
+        flexWrap: "wrap",
+      }}
+    >
+      <button
+        onClick={resetProject}
+        style={{
+          padding: "8px 12px",
+          background: "#c0392b",
+          color: "#fff",
+          border: "none",
+          borderRadius: "4px",
+          cursor: "pointer",
+          fontSize: "14px",
+          marginRight: "auto",
+        }}
+      >
+        Сбросить черновик
+      </button>
+      <button
+        onClick={clearActiveRoom}
+        style={{
+          padding: "8px 12px",
+          background: "transparent",
+          color: "#e74c3c",
+          border: "1px solid #e74c3c",
+          borderRadius: "4px",
+          cursor: "pointer",
+          fontSize: "14px",
+        }}
+      >
+        Очистить комнату
+      </button>
+      <button
+        onClick={loadDemoRoom}
+        style={{
+          padding: "8px 12px",
+          background: "#3498db",
+          color: "#fff",
+          border: "none",
+          borderRadius: "4px",
+          cursor: "pointer",
+          fontSize: "14px",
+        }}
+      >
+        Загрузить пример
+      </button>
+    </div>
+  );
+
   if (points.length < 3) {
     return (
       <div style={{ marginTop: "20px", width: "100%", maxWidth: "450px" }}>
@@ -31,48 +84,7 @@ export default function RoomPolygonEditor() {
           Добавьте минимум 3 точки для отображения плана или загрузите готовый
           пример.
         </div>
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-          <button
-            onClick={resetProject}
-            style={{
-              padding: "8px 12px",
-              background: "#c0392b",
-              color: "#fff",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-              marginRight: "auto",
-            }}
-          >
-            Сбросить черновик
-          </button>
-          <button
-            onClick={clearActiveRoom}
-            style={{
-              padding: "8px 12px",
-              background: "transparent",
-              color: "#e74c3c",
-              border: "1px solid #e74c3c",
-              borderRadius: "4px",
-              cursor: "pointer",
-            }}
-          >
-            Очистить комнату
-          </button>
-          <button
-            onClick={loadDemoRoom}
-            style={{
-              padding: "8px 12px",
-              background: "#3498db",
-              color: "#fff",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-            }}
-          >
-            Загрузить пример
-          </button>
-        </div>
+        {controlButtonsJSX}
       </div>
     );
   }
@@ -479,59 +491,7 @@ export default function RoomPolygonEditor() {
         </svg>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          gap: "10px",
-          marginTop: "15px",
-          justifyContent: "flex-end",
-          flexWrap: "wrap",
-        }}
-      >
-        <button
-          onClick={resetProject}
-          style={{
-            padding: "8px 12px",
-            background: "#c0392b",
-            color: "#fff",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-            fontSize: "14px",
-            marginRight: "auto",
-          }}
-        >
-          Сбросить черновик
-        </button>
-        <button
-          onClick={clearActiveRoom}
-          style={{
-            padding: "8px 12px",
-            background: "transparent",
-            color: "#e74c3c",
-            border: "1px solid #e74c3c",
-            borderRadius: "4px",
-            cursor: "pointer",
-            fontSize: "14px",
-          }}
-        >
-          Очистить комнату
-        </button>
-        <button
-          onClick={loadDemoRoom}
-          style={{
-            padding: "8px 12px",
-            background: "#3498db",
-            color: "#fff",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-            fontSize: "14px",
-          }}
-        >
-          Загрузить пример
-        </button>
-      </div>
+      {controlButtonsJSX}
     </div>
   );
 }

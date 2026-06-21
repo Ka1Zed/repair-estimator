@@ -9,13 +9,11 @@ export const demoRoomData = {
   ],
   openings: [
     {
-      id: crypto.randomUUID(),
       type: "door" as const,
       width: 0.8,
       height: 2.0,
     },
     {
-      id: crypto.randomUUID(),
       type: "window" as const,
       width: 1.5,
       height: 1.4,

@@ -51,7 +51,7 @@ interface ProjectState {
 
   clearActiveRoom: () => void;
   loadDemoRoom: () => void;
-  resetProject: () => void; // Экшен для сброса черновика
+  resetProject: () => void;
 }
 
 const createDefaultRoom = (name: string): Room => ({
@@ -68,14 +68,12 @@ const createDefaultRoom = (name: string): Room => ({
   openings: [],
 });
 
-// Выносим начальное состояние, чтобы можно было легко сбросить стор
 const initialState = {
   repair_type: "cosmetic" as RepairType,
   rooms: [createDefaultRoom("Комната 1")],
   activeRoomIndex: 0,
 };
 
-// Оборачиваем стор в persist для автосохранения в localStorage
 export const useProjectStore = create<ProjectState>()(
   persist(
     (set) => ({
@@ -249,11 +247,11 @@ export const useProjectStore = create<ProjectState>()(
           return { rooms: newRooms };
         }),
 
-      // Сбрасываем стор до изначального состояния
       resetProject: () => set(initialState),
     }),
     {
-      name: "repair-estimator-draft", // Ключ, по которому данные будут лежать в localStorage
+      name: "repair-estimator-draft",
+      version: 1,
     },
   ),
 );

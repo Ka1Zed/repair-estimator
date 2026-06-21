@@ -3,23 +3,13 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-from app.db.session import SessionLocal
-from app.db.models import Material
+
+pytestmark = pytest.mark.usefixtures("override_get_db")
 
 client = TestClient(app)
 
 
 def test_single_room():
-    """Проверка запроса с одной комнатой."""
-    # Проверяем, что в БД есть материалы (для отладки, можно убрать)
-    session = SessionLocal()
-    count = session.query(Material).count()
-    print(f"DEBUG: total materials in DB = {count}")
-    if count > 0:
-        for m in session.query(Material).limit(5).all():
-            print(f"  - {m.name}")
-    session.close()
-
     payload = {
         "city": "Казань",
         "rooms": [

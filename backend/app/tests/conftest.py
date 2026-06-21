@@ -78,7 +78,7 @@ def seed_test_data(session):
 
     session.commit()
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def setup_test_db():
     Base.metadata.drop_all(bind=test_engine)
     Base.metadata.create_all(bind=test_engine)
@@ -86,11 +86,9 @@ def setup_test_db():
     seed_test_data(session)
     session.close()
     yield
-    # Base.metadata.drop_all(bind=test_engine)  # опционально
 
-@pytest.fixture(autouse=True)
-def override_get_db():
-    original = get_db
+@pytest.fixture
+def override_get_db(setup_test_db):
     def _override():
         db = TestingSessionLocal()
         try:
@@ -99,4 +97,4 @@ def override_get_db():
             db.close()
     app.dependency_overrides[get_db] = _override
     yield
-    app.dependency_overrides[get_db] = original
+    app.dependency_overrides.pop(get_db, None)

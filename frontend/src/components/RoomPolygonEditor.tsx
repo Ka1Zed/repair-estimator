@@ -9,6 +9,11 @@ export default function RoomPolygonEditor() {
   const updatePoint = useProjectStore((state) => state.updatePoint);
   const setPoints = useProjectStore((state) => state.setPoints);
 
+  // Достаем наши новые экшены из стора
+  const clearActiveRoom = useProjectStore((state) => state.clearActiveRoom);
+  const loadDemoRoom = useProjectStore((state) => state.loadDemoRoom);
+  const resetProject = useProjectStore((state) => state.resetProject);
+
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(true);
 
@@ -17,10 +22,57 @@ export default function RoomPolygonEditor() {
 
   const svgRef = useRef<SVGSVGElement>(null);
 
+  // ВАЖНО: Если точек меньше 3, мы все равно должны показывать кнопки,
+  // иначе если пользователь нажмет "Очистить", кнопки пропадут и он не сможет нажать "Загрузить пример"
   if (points.length < 3) {
     return (
-      <div style={{ color: "#888", marginTop: "20px" }}>
-        Добавьте минимум 3 точки для отображения плана
+      <div style={{ marginTop: "20px", width: "100%", maxWidth: "450px" }}>
+        <div style={{ color: "#888", marginBottom: "15px" }}>
+          Добавьте минимум 3 точки для отображения плана или загрузите готовый
+          пример.
+        </div>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button
+            onClick={resetProject}
+            style={{
+              padding: "8px 12px",
+              background: "#c0392b",
+              color: "#fff",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              marginRight: "auto",
+            }}
+          >
+            Сбросить черновик
+          </button>
+          <button
+            onClick={clearActiveRoom}
+            style={{
+              padding: "8px 12px",
+              background: "transparent",
+              color: "#e74c3c",
+              border: "1px solid #e74c3c",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            Очистить комнату
+          </button>
+          <button
+            onClick={loadDemoRoom}
+            style={{
+              padding: "8px 12px",
+              background: "#3498db",
+              color: "#fff",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            Загрузить пример
+          </button>
+        </div>
       </div>
     );
   }
@@ -100,7 +152,6 @@ export default function RoomPolygonEditor() {
       newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
       newRealY = Math.round(newRealY / GRID_STEP) * GRID_STEP;
     } else {
-      // Округляем до тысячных для большей точности, убрали Math.max
       newRealX = Math.round(newRealX * 1000) / 1000;
       newRealY = Math.round(newRealY * 1000) / 1000;
     }
@@ -144,7 +195,6 @@ export default function RoomPolygonEditor() {
       newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
       newRealY = Math.round(newRealY / GRID_STEP) * GRID_STEP;
     } else {
-      // Убрали Math.max
       newRealX = Math.round(newRealX * 1000) / 1000;
       newRealY = Math.round(newRealY * 1000) / 1000;
     }
@@ -185,8 +235,6 @@ export default function RoomPolygonEditor() {
     let newRealX = p1.x + nx * newLen;
     let newRealY = p1.y + ny * newLen;
 
-    // ИСПРАВЛЕНО: Убрали Math.max(0, ...) и повысили точность до 3 знаков (тысячных),
-    // чтобы диагональные стены сохраняли идеальную длину
     newRealX = Math.round(newRealX * 1000) / 1000;
     newRealY = Math.round(newRealY * 1000) / 1000;
 
@@ -324,7 +372,6 @@ export default function RoomPolygonEditor() {
             );
           })}
 
-          {/* Подписи длин и инпуты */}
           {safePoints.map((p, i) => {
             const nextIndex = (i + 1) % safePoints.length;
             const nextP = safePoints[nextIndex];
@@ -359,7 +406,6 @@ export default function RoomPolygonEditor() {
                     onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleEdgeLengthSubmit(i);
-                      // ИСПРАВЛЕНО: Теперь Escape очищает строку до закрытия, чтобы onBlur не сохранил старое значение
                       if (e.key === "Escape") {
                         setEdgeInputValue("");
                         setEditingEdge(null);
@@ -431,6 +477,60 @@ export default function RoomPolygonEditor() {
             />
           ))}
         </svg>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          gap: "10px",
+          marginTop: "15px",
+          justifyContent: "flex-end",
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          onClick={resetProject}
+          style={{
+            padding: "8px 12px",
+            background: "#c0392b",
+            color: "#fff",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontSize: "14px",
+            marginRight: "auto",
+          }}
+        >
+          Сбросить черновик
+        </button>
+        <button
+          onClick={clearActiveRoom}
+          style={{
+            padding: "8px 12px",
+            background: "transparent",
+            color: "#e74c3c",
+            border: "1px solid #e74c3c",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontSize: "14px",
+          }}
+        >
+          Очистить комнату
+        </button>
+        <button
+          onClick={loadDemoRoom}
+          style={{
+            padding: "8px 12px",
+            background: "#3498db",
+            color: "#fff",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontSize: "14px",
+          }}
+        >
+          Загрузить пример
+        </button>
       </div>
     </div>
   );

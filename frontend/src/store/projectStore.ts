@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { RoomTypeKey } from "../types/roomTypes";
 
 export type RepairType = "cosmetic" | "basic" | "extended";
 
@@ -20,7 +21,7 @@ export interface Room {
   id: string;
   name: string;
   height: number | string;
-  room_type: string;
+  room_type: RoomTypeKey; // ИЗМЕНЕНО: теперь используем строгий тип вместо string
   points: Point[];
   openings: Opening[];
 }
@@ -36,6 +37,9 @@ interface ProjectState {
   deleteRoom: (index: number) => void;
   setActiveRoom: (index: number) => void;
   updateRoomName: (index: number, name: string) => void;
+
+  // ДОБАВЛЕНО: экшен для обновления типа комнаты
+  updateActiveRoomType: (type: RoomTypeKey) => void;
 
   setHeight: (height: number | string) => void;
 
@@ -55,7 +59,7 @@ const createDefaultRoom = (name: string): Room => ({
   id: crypto.randomUUID(),
   name,
   height: 2.7,
-  room_type: "living_room",
+  room_type: "living", // ИЗМЕНЕНО: living_room поменяли на living, чтобы совпадало с типами лида
   points: [
     { x: 0, y: 0 },
     { x: 4, y: 0 },
@@ -103,6 +107,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set((state) => {
       const newRooms = [...state.rooms];
       newRooms[index] = { ...newRooms[index], name };
+      return { rooms: newRooms };
+    }),
+
+  // ДОБАВЛЕНО: реализация экшена
+  updateActiveRoomType: (type) =>
+    set((state) => {
+      const newRooms = [...state.rooms];
+      newRooms[state.activeRoomIndex] = {
+        ...newRooms[state.activeRoomIndex],
+        room_type: type,
+      };
       return { rooms: newRooms };
     }),
 

@@ -5,13 +5,6 @@ import { LaborTable } from "../../components/EstimateTables/LaborTable";
 import { RepairOptionsForm } from "../../components/RepairOptionsForm/RepairOptionsForm";
 import styles from "./EstimateResult.module.css";
 
-// --- ДОБАВЛЕНО: импорты для фильтрации ---
-import { useProjectStore } from "../../store/projectStore";
-import { allowedWorks } from "../../types/roomTypes";
-// -----------------------------------------
-
-// Mock-данные в формате контракта docs/api.md (materials[] / labor[]).
-// Временно, пока не подключён реальный API (F2-6 / C4).
 const mockMaterials = [
   {
     name: "Грунтовка",
@@ -73,35 +66,9 @@ const mockLabors = [
 ];
 
 export function EstimateResult() {
-  // --- ДОБАВЛЕНО: логика фильтрации с защитой от пустых таблиц ---
-  const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
-  const activeRoom = useProjectStore((state) => state.rooms[activeRoomIndex]);
-  const rules = allowedWorks(activeRoom.room_type);
-
-  // Фильтруем, но если ничего не совпало (массив пустой), оставляем исходные данные
-  const filteredMaterials = mockMaterials.filter((item) =>
-    [...rules.floor, ...rules.walls].some((f) => f.label === item.name),
-  );
-  const displayMaterials =
-    filteredMaterials.length > 0 ? filteredMaterials : mockMaterials;
-
-  const filteredLabors = mockLabors.filter((item) =>
-    [...rules.walls, ...rules.ceiling].some((w) => w.label === item.service),
-  );
-  const displayLabors = filteredLabors.length > 0 ? filteredLabors : mockLabors;
-  // ---------------------------------------------------------------
-
-  // --- ИЗМЕНЕНО: Итог суммируем по отфильтрованным (display) данным ---
-  const matTotal = displayMaterials.reduce(
-    (acc, item) => acc + item.total_avg,
-    0,
-  );
-  const laborTotal = displayLabors.reduce(
-    (acc, item) => acc + item.total_avg,
-    0,
-  );
+  const matTotal = mockMaterials.reduce((acc, item) => acc + item.total_avg, 0);
+  const laborTotal = mockLabors.reduce((acc, item) => acc + item.total_avg, 0);
   const totalCost = matTotal + laborTotal;
-  // --------------------------------------------------------------------
 
   return (
     <div className={styles.container}>
@@ -142,10 +109,8 @@ export function EstimateResult() {
       </div>
 
       <Card title="Детальный расчет" style={{ marginTop: "25px" }}>
-        {/* --- ИЗМЕНЕНО: передаем массивы с защитой --- */}
-        <MaterialsTable data={displayMaterials} />
-        <LaborTable data={displayLabors} />
-        {/* -------------------------------------------- */}
+        <MaterialsTable data={mockMaterials} />
+        <LaborTable data={mockLabors} />
       </Card>
     </div>
   );

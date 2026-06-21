@@ -100,3 +100,12 @@ def override_get_db(setup_test_db):
     app.dependency_overrides[get_db] = _override
     yield
     app.dependency_overrides.pop(get_db, None)
+
+@pytest.fixture
+def db_session():
+    """Возвращает тестовую сессию БД для модульных тестов сервисов."""
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

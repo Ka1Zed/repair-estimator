@@ -92,7 +92,6 @@ export default function ProjectCreatePage() {
           />
         </div>
 
-        {/* Наш новый селектор типов комнат */}
         <RoomTypeSelector />
 
         <div style={{ marginTop: "20px" }}>

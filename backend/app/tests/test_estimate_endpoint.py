@@ -87,7 +87,7 @@ def test_single_room():
 
     labor = data["labor"]
     assert len(labor) > 0
-    painter = next((l for l in labor if l["service"] == "Покраска стен"), None)
+    painter = next((lab for lab in labor if lab["service"] == "Покраска стен"), None)
     assert painter is not None
 
     # Проверка summary: min <= avg <= max

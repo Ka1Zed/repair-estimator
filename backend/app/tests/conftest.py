@@ -1,8 +1,6 @@
 import os
 import pytest
 from datetime import datetime, timezone
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 # Используем PostgreSQL, если переменная не задана – ставим по умолчанию

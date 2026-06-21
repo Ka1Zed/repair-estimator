@@ -1,7 +1,7 @@
 # app/services/repair_coeffs_service.py
 
 from decimal import Decimal
-from typing import Dict, Any
+from typing import Dict
 
 REPAIR_COEFFS = {
     'cosmetic': Decimal('1.0'),

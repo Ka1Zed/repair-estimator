@@ -65,7 +65,11 @@ jobs:
         if: steps.check.outputs.exists == 'true'
         working-directory: backend
         env:
-          DATABASE_URL: postgresql+psycopg://repair:repair@localhost:5432/repair_estimator
+          POSTGRES_USER: repair
+          POSTGRES_PASSWORD: repair
+          POSTGRES_DB: repair_estimator
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
         run: |
           set +e
           pytest

@@ -1,6 +1,7 @@
 // frontend/src/components/RepairOptionsForm/RepairOptionsForm.tsx
 import React from 'react';
 import { useProjectStore, type RepairType } from '../../store/projectStore';
+import { WorksCheckboxes } from "./WorksCheckboxes";
 
 export const RepairOptionsForm: React.FC = () => {
   // Достаем текущее значение и функцию обновления из стора
@@ -49,6 +50,10 @@ export const RepairOptionsForm: React.FC = () => {
           Расширенный
         </label>
       </div>
+
+      {/* Вставляем наш новый компонент прямо сюда! */}
+      <WorksCheckboxes />
+
     </div>
   );
 };

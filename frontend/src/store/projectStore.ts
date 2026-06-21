@@ -10,10 +10,17 @@ export interface Point {
 export interface Opening {
   id: string;
   type: "door" | "window";
-  // 3. Исправлено: TODO-комментарий добавлен прямо в интерфейс
-  // TODO: перед POST /api/estimates/calculate обязательно конвертировать width и height через Number()
   width: number | string;
   height: number | string;
+}
+
+export interface RepairOptions {
+  floor?: string | boolean;
+  walls?: string | boolean;
+  ceiling?: string | boolean;
+  tile?: boolean;
+  electric?: string | boolean;
+  plumbing?: boolean;
 }
 
 export interface Room {
@@ -23,6 +30,7 @@ export interface Room {
   room_type: string;
   points: Point[];
   openings: Opening[];
+  repair_options?: RepairOptions;
 }
 
 interface ProjectState {
@@ -49,13 +57,15 @@ interface ProjectState {
     value: string | number,
   ) => void;
   deleteOpening: (openingIndex: number) => void;
+
+  updateRepairOptions: (roomIndex: number, options: Partial<RepairOptions>) => void;
 }
 
 const createDefaultRoom = (name: string): Room => ({
   id: crypto.randomUUID(),
   name,
   height: 2.7,
-  room_type: "living_room",
+  room_type: "living",
   points: [
     { x: 0, y: 0 },
     { x: 4, y: 0 },
@@ -63,6 +73,7 @@ const createDefaultRoom = (name: string): Room => ({
     { x: 0, y: 3 },
   ],
   openings: [],
+  repair_options: { floor: false, walls: false, ceiling: false, tile: false, electric: false, plumbing: false }
 });
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -186,6 +197,19 @@ export const useProjectStore = create<ProjectState>((set) => ({
       newRooms[state.activeRoomIndex] = {
         ...activeRoom,
         openings: newOpenings,
+      };
+      return { rooms: newRooms };
+    }),
+
+  updateRepairOptions: (roomIndex, options) =>
+    set((state) => {
+      const newRooms = [...state.rooms];
+      const activeRoom = newRooms[roomIndex];
+      const currentOptions = activeRoom.repair_options || {};
+
+      newRooms[roomIndex] = {
+        ...activeRoom,
+        repair_options: { ...currentOptions, ...options },
       };
       return { rooms: newRooms };
     }),

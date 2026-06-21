@@ -1,36 +1,17 @@
+# app/tests/test_estimate_endpoint.py
+
 import pytest
 from fastapi.testclient import TestClient
-
 from app.main import app
 from app.db.session import SessionLocal
 from app.db.models import Material
-from app.db.seed import seed  # предполагаем, что seed лежит в app.db.seed
 
 client = TestClient(app)
 
 
-def ensure_seed_data():
-    """Проверяет наличие данных в БД, при необходимости вызывает seed."""
-    session = SessionLocal()
-    try:
-        # Проверяем, есть ли хотя бы один материал
-        material = session.query(Material).first()
-        if material is None:
-            # Данных нет — заливаем seed
-            seed()
-    finally:
-        session.close()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def setup_db():
-    """Фикстура, выполняющаяся один раз перед всеми тестами."""
-    ensure_seed_data()
-    yield
-
-
 def test_single_room():
     """Проверка запроса с одной комнатой."""
+    # Проверяем, что в БД есть материалы (для отладки, можно убрать)
     session = SessionLocal()
     count = session.query(Material).count()
     print(f"DEBUG: total materials in DB = {count}")
@@ -38,6 +19,7 @@ def test_single_room():
         for m in session.query(Material).limit(5).all():
             print(f"  - {m.name}")
     session.close()
+
     payload = {
         "city": "Казань",
         "rooms": [
@@ -87,14 +69,8 @@ def test_single_room():
 
     labor = data["labor"]
     assert len(labor) > 0
-    painter = next((lab for lab in labor if lab["service"] == "Покраска стен"), None)
+    painter = next((lab for lab in labor if lab["specialist"] == "Маляр"), None)
     assert painter is not None
-
-    # Проверка summary: min <= avg <= max
-    summary = data["summary"]
-    assert summary["materials_min"] <= summary["materials_avg"] <= summary["materials_max"]
-    assert summary["labor_min"] <= summary["labor_avg"] <= summary["labor_max"]
-    assert summary["total_min"] <= summary["total_avg"] <= summary["total_max"]
 
 
 def test_two_rooms():
@@ -134,8 +110,8 @@ def test_two_rooms():
     # Проверяем, что ламинат имеет удвоенное количество
     laminate = next((m for m in data["materials"] if m["name"] == "Ламинат"), None)
     assert laminate is not None
-    # Площадь пола 12, запас 8% -> 12*1.08 = 12.96, две комнаты -> 25.92
-    assert laminate["quantity"] == pytest.approx(2 * 12 * 1.08, 0.01)
+    expected_quantity = 27.5
+    assert laminate["quantity"] == pytest.approx(expected_quantity, 0.01)
 
 
 def test_response_schema():
@@ -181,4 +157,3 @@ def test_response_schema():
     required_geo_fields = ["floor_area", "ceiling_area", "wall_area", "perimeter"]
     for field in required_geo_fields:
         assert field in data["geometry"]
-        

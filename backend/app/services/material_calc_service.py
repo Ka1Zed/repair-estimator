@@ -108,6 +108,7 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
 
     return sel
 
+
 def quantity_of(material: Material, area: Decimal, geom: Dict[str, Any]) -> Decimal:
     """Количество в базовых единицах по формуле из estimation-rules.md (по unit)."""
     unit = material.unit
@@ -135,6 +136,22 @@ def calculate_materials(
     repair_options: Dict[str, Any],
     db: Session,
 ) -> List[Dict[str, Any]]:
+    """
+    Считает материалы для одной комнаты по геометрии и выбранной отделке.
+
+    geometry: floor_area, ceiling_area, wall_area, perimeter, door_width_sum
+    repair_options: {floor, walls, ceiling, tile, electric, plumbing} (контракт api.md)
+
+    Возвращает позиции с ДРОБНЫМ pack_quantity (округление — в B1-5):
+        material_id   — идентификатор материала (группировка в агрегации)
+        name          — название материала
+        quantity      — количество в базовой единице (дробное, Decimal)
+        unit          — единица измерения
+        package_size  — размер упаковки (Decimal)
+        pack_quantity — количество упаковок (дробное, Decimal)
+                        НЕ ОКРУГЛЯЕТСЯ здесь — ceil выполняется в B1-5
+                        после суммирования одинаковых материалов по всей квартире.
+    """
     result: List[Dict[str, Any]] = []
 
     for material_name, area in _selections(repair_options, geometry):
@@ -151,12 +168,12 @@ def calculate_materials(
         pack_quantity = (quantity / package_size) if package_size > 0 else None
 
         result.append({
-            "material_id": material.id,
+            "material_id": material.id,           # ключ группировки в B1-5
             "name": material.name,
-            "quantity": quantity,
+            "quantity": quantity,                  # дробное, Decimal
             "unit": material.unit,
             "package_size": material.package_size,
-            "pack_quantity": pack_quantity,
+            "pack_quantity": pack_quantity,        # дробное; ceil — в агрегации
         })
 
     return result

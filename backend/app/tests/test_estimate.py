@@ -6,7 +6,6 @@ from decimal import Decimal
 from app.services.material_calc_service import calculate_materials, packs_to_buy
 from app.services.labor_calc_service import calculate_labor
 from app.services.repair_coeffs_service import apply_repair_coeffs
-from app.services.geometry_service import calculate_room_geometry
 
 
 class TestMaterialCalc:

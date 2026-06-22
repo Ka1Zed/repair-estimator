@@ -1,80 +1,99 @@
+import  { useState } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { MaterialsTable } from '../../components/EstimateTables/MaterialsTable';
-import { LaborTable } from '../../components/EstimateTables/LaborTable';
+import { MaterialsTable, type MaterialItem } from '../../components/EstimateTables/MaterialsTable';
+import { LaborTable, type LaborItem } from '../../components/EstimateTables/LaborTable';
 import { RepairOptionsForm } from '../../components/RepairOptionsForm/RepairOptionsForm';
+import { EstimateSummary, type SummaryData } from '../../components/EstimateSummary';
 import styles from './EstimateResult.module.css';
-import { EstimateSummary } from '../../components/EstimateSummary';
 
-const mockMaterials = [
-  { name: 'Грунтовка', quantity: 2, unit: 'л', price_avg: 450, total_avg: 900, source: 'seed', updated_at: '2026-06-17' },
-  { name: 'Шпаклевка', quantity: 12, unit: 'кг', price_avg: 550, total_avg: 6600, source: 'seed', updated_at: '2026-06-17' },
-  { name: 'Краска для стен', quantity: 3, unit: 'л', price_avg: 3200, total_avg: 9600, source: 'Мегастрой', updated_at: '2026-06-17' },
-];
 
-const mockLabors = [
-  { service: 'Выравнивание стен', specialist: 'Штукатур', volume: 70, unit: 'м²', price_avg: 450, total_avg: 31500, source: 'seed' },
-  { service: 'Грунтовка поверхностей', specialist: 'Отделочник', volume: 70, unit: 'м²', price_avg: 80, total_avg: 5600, source: 'seed' },
-  { service: 'Покраска стен', specialist: 'Маляр', volume: 70, unit: 'м²', price_avg: 200, total_avg: 14000, source: 'seed' },
-];
+import { useProjectStore } from '../../store/projectStore';
+import { calculateEstimate } from '../../api/estimates';
 
+
+// Обновляем интерфейс всего ответа
+interface EstimateResponse {
+  summary: SummaryData;
+  materials: MaterialItem[];
+  labor: LaborItem[];
+}
 export function EstimateResult() {
-  const matTotal = mockMaterials.reduce((acc, item) => acc + item.total_avg, 0);
-  const laborTotal = mockLabors.reduce((acc, item) => acc + item.total_avg, 0);
-  const totalCost = matTotal + laborTotal;
-  const mockSummary = {
-    materials_min: 45000,
-    materials_avg: 52000,
-    materials_max: 61000,
-    labor_min: 70000,
-    labor_avg: 85000,
-    labor_max: 105000,
-    total_min: 115000,
-    total_avg: 137000,
-    total_max: 166000,
+  const { rooms, repair_type } = useProjectStore();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [estimateData, setEstimateData] = useState<EstimateResponse | null>(null);
+  const handleCalculate = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const payload = {
+        city: "Казань", 
+        repair_type: repair_type,
+        rooms: rooms.map(room => ({
+          name: room.name,
+          room_type: room.room_type,
+          height: Number(room.height), 
+          repair_options: room.repair_options,
+          openings: room.openings.map(op => ({
+            ...op,
+            width: Number(op.width),
+            height: Number(op.height)
+          })),
+          points: room.points.map(p => ({
+            x: Number(p.x),
+            y: Number(p.y)
+          }))
+        }))
+      };
+
+    
+      const data = await calculateEstimate(payload);
+      setEstimateData(data as EstimateResponse);
+    } catch (err) {
+      console.error(err);
+      setError("Не удалось рассчитать смету. Проверьте подключение к серверу.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className={styles.container}>
+      {/* Шапка с кнопками */}
       <div className={styles.headerRow}>
         <h2>Результат расчёта сметы</h2>
-        <Button variant="secondary" onClick={() => window.print()}>Печать сметы</Button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <Button variant="primary" onClick={handleCalculate} disabled={isLoading}>
+            {isLoading ? 'Считаем...' : 'Рассчитать'}
+          </Button>
+          <Button variant="secondary" onClick={() => window.print()}>
+            Печать сметы
+          </Button>
+        </div>
       </div>
-
-      <EstimateSummary summary={mockSummary} />
 
       <RepairOptionsForm />
 
-      <div className={styles.statsGrid}>
-        <Card title="Общая стоимость ремонта" className={styles.totalCard}>
-          <div className={styles.priceValue}>
-            {totalCost.toLocaleString('ru-RU')} ₽
-          </div>
-          <p className={styles.subtext}>
-            Материалы: {matTotal.toLocaleString('ru-RU')} ₽ | Работы: {laborTotal.toLocaleString('ru-RU')} ₽
-          </p>
-        </Card>
+      {/* Показываем ошибки, если сервер упал */}
+      {error && <div style={{ color: 'red', marginTop: '20px' }}>{error}</div>}
 
-        <Card title="Характеристики помещений">
-          <div className={styles.paramItem}>
-            <span>Площадь пола:</span>
-            <strong>45 кв. м.</strong>
-          </div>
-          <div className={styles.paramItem}>
-            <span>Периметр комнат:</span>
-            <strong>28 м.</strong>
-          </div>
-          <div className={styles.paramItem}>
-            <span>Площадь стен:</span>
-            <strong>70 кв. м.</strong>
-          </div>
-        </Card>
-      </div>
+      {/* Показываем лоадер во время загрузки */}
+      {isLoading && <div style={{ marginTop: '20px', fontSize: '18px' }}>Загрузка данных с сервера... ⏳</div>}
 
-      <Card title="Детальный расчет" style={{ marginTop: '25px' }}>
-        <MaterialsTable data={mockMaterials} />
-        <LaborTable data={mockLabors} />
-      </Card>
+      {/* Отрисовываем таблицы ТОЛЬКО если данные успешно пришли */}
+      {!isLoading && !error && estimateData && (
+        <>
+          <EstimateSummary summary={estimateData.summary} />
+
+          <Card title="Детальный расчет" style={{ marginTop: '25px' }}>
+            {/* Передаем реальные массивы из estimateData в таблицы */}
+            <MaterialsTable data={estimateData.materials} />
+            <LaborTable data={estimateData.labor} />
+          </Card>
+        </>
+      )}
     </div>
   );
 }

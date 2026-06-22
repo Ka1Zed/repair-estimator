@@ -2,7 +2,7 @@ import { Table } from '../ui/Table';
 import styles from './EstimateTables.module.css';
 
 // Поля строго по контракту docs/api.md (materials[])
-interface MaterialItem {
+export interface MaterialItem {
   name: string;
   quantity: number;
   unit: string;

@@ -3,10 +3,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 ENV_PATH = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
-class DBSettings(BaseSettings):  
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: SecretStr = "postgres"
-    POSTGRES_DB: str = "postgres"
+class DBSettings(BaseSettings):
+    POSTGRES_USER: str = "repair"
+    POSTGRES_PASSWORD: SecretStr = "repair"
+    POSTGRES_DB: str = "repair_estimator"
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
 

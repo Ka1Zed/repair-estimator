@@ -258,7 +258,11 @@ export const useProjectStore = create<ProjectState>()(
           return {
             ...state,
             repair_options: fromRoom ?? { ...DEFAULT_REPAIR_OPTIONS },
-            rooms: rooms.map(({ repair_options: _r, ...room }) => room),
+            rooms: rooms.map((room) => {
+              const r = { ...room };
+              delete r['repair_options'];
+              return r;
+            }),
           };
         }
         return state;

@@ -235,3 +235,70 @@ def test_two_rooms_grouping_and_rounding():
     double_total_avg = data["summary"]["total_avg"]
     # Из-за округления double может быть не ровно в 2 раза, но должно быть больше single
     assert double_total_avg > single_total_avg
+
+
+PAINT_PAYLOAD = {
+    "city": "Казань",
+    "rooms": [
+        {
+            "name": "Комната",
+            "height": 2.7,
+            "points": [
+                {"x": 0, "y": 0}, {"x": 4, "y": 0},
+                {"x": 4, "y": 3}, {"x": 0, "y": 3}
+            ],
+            "room_type": "living",
+            "openings": []
+        }
+    ],
+    "repair_type": "cosmetic",
+    "repair_options": {
+        "floor": "laminate",
+        "walls": "paint",
+        "ceiling": "paint",
+        "tile": False,
+        "electric": "basic",
+        "plumbing": False
+    }
+}
+
+
+def test_parser_source_in_response(monkeypatch):
+    """Когда парсер отдаёт цену, source у краски становится 'Мегастрой', а не 'seed'."""
+    from decimal import Decimal
+    from app.parsers.base import ParsedPrice
+
+    def fake_fetch(self, material_name):
+        return ParsedPrice(
+            price_min=Decimal("500"),
+            price_avg=Decimal("700"),
+            price_max=Decimal("900"),
+        )
+
+    monkeypatch.setattr(
+        "app.parsers.megastroy_parser.MegastroyParser.fetch_price", fake_fetch
+    )
+
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    materials = response.json()["materials"]
+    paint = next((m for m in materials if m["name"] == "Краска для стен"), None)
+    assert paint is not None
+    assert paint["source"] == "Мегастрой"
+
+
+def test_parser_fallback_on_error(monkeypatch):
+    """Когда парсер падает, расчёт не ломается и source остаётся 'seed'."""
+    def failing_fetch(self, material_name):
+        raise RuntimeError("сайт недоступен")
+
+    monkeypatch.setattr(
+        "app.parsers.megastroy_parser.MegastroyParser.fetch_price", failing_fetch
+    )
+
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    materials = response.json()["materials"]
+    assert len(materials) > 0
+    for m in materials:
+        assert m["source"] == "seed"

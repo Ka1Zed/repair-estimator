@@ -3,12 +3,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 ENV_PATH = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
-class DBSettings(BaseSettings):  
-    POSTGRES_USER: str  
-    POSTGRES_PASSWORD: SecretStr
-    POSTGRES_DB: str
-    POSTGRES_HOST: str  
-    POSTGRES_PORT: int
+class DBSettings(BaseSettings):
+    POSTGRES_USER: str = "repair"
+    POSTGRES_PASSWORD: SecretStr = "repair"
+    POSTGRES_DB: str = "repair_estimator"
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
 
     model_config = SettingsConfigDict(env_file=ENV_PATH, env_file_encoding="utf8", extra="ignore")
 

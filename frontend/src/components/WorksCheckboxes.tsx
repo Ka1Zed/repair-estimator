@@ -1,6 +1,17 @@
 import React from 'react';
-import { useProjectStore } from '../store/projectStore';
-import { roomTypes } from '../types/roomTypes';
+import { useProjectStore, type RepairOptions } from '../store/projectStore';
+import { roomTypes, type RoomTypeKey } from '../types/roomTypes';
+
+const BOOLEAN_KEYS = new Set<keyof RepairOptions>(['tile', 'plumbing']);
+
+const labelsMap: Record<string, string> = {
+  floor: 'Пол',
+  walls: 'Стены',
+  ceiling: 'Потолок',
+  tile: 'Плитка',
+  electric: 'Электрика',
+  plumbing: 'Сантехника',
+};
 
 export const WorksCheckboxes: React.FC = () => {
   const { rooms, activeRoomIndex, updateRepairOptions } = useProjectStore();
@@ -8,45 +19,43 @@ export const WorksCheckboxes: React.FC = () => {
 
   if (!room) return null;
 
-  const repairOptions = room.repair_options || {
-    floor: false, walls: false, ceiling: false, tile: false, electric: false, plumbing: false,
+  const repairOptions: RepairOptions = room.repair_options ?? {
+    floor: null, walls: null, ceiling: null, tile: false, electric: null, plumbing: false,
   };
 
-  const labelsMap: Record<string, string> = {
-    floor: "Пол",
-    walls: "Стены",
-    ceiling: "Потолок",
-    tile: "Плитка",
-    electric: "Электрика",
-    plumbing: "Сантехника",
-  };
+  const rules = roomTypes[room.room_type as RoomTypeKey];
 
-  const handleToggle = (key: keyof typeof repairOptions) => {
-    updateRepairOptions(activeRoomIndex, { [key]: !repairOptions[key] });
+  const handleToggle = (key: keyof RepairOptions) => {
+    if (BOOLEAN_KEYS.has(key)) {
+      updateRepairOptions(activeRoomIndex, { [key]: !repairOptions[key] });
+      return;
+    }
+    if (repairOptions[key]) {
+      updateRepairOptions(activeRoomIndex, { [key]: null });
+    } else {
+      const options = rules?.[key as 'floor' | 'walls' | 'ceiling' | 'electric'];
+      const first = Array.isArray(options) ? options[0] ?? null : null;
+      updateRepairOptions(activeRoomIndex, { [key]: first });
+    }
   };
-
-  const currentRoomRules = roomTypes[room.room_type as keyof typeof roomTypes];
 
   return (
     <div className="works-checkboxes">
-      {Object.keys(repairOptions).map((key) => {
-        const isBlocked = currentRoomRules
-          ? (key === 'tile' && !currentRoomRules.tile) ||
-            (key === 'plumbing' && !currentRoomRules.plumbing.available)
-          : false;
+      {(Object.keys(labelsMap) as (keyof RepairOptions)[]).map((key) => {
+        const isBlocked =
+          (key === 'tile' && !rules?.tile) ||
+          (key === 'plumbing' && !rules?.plumbing.available);
 
         return (
           <label key={key} style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
             <input
               type="checkbox"
-              checked={!!repairOptions[key as keyof typeof repairOptions]}
-              onChange={() => handleToggle(key as keyof typeof repairOptions)}
+              checked={!!repairOptions[key]}
+              onChange={() => handleToggle(key)}
               disabled={isBlocked}
               style={{ marginRight: '8px' }}
             />
-            <span style={{ fontSize: '14px', color: '#333' }}>
-              {labelsMap[key] || key.charAt(0).toUpperCase() + key.slice(1)}
-            </span>
+            <span style={{ fontSize: '14px', color: '#333' }}>{labelsMap[key]}</span>
           </label>
         );
       })}

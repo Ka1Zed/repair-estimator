@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 import type { RoomTypeKey } from "../types/roomTypes";
 import { demoRoomData } from "../data/demoRoom";
 
-export type RepairType = "cosmetic" | "basic" | "extended";
+export type RepairType = "cosmetic" | "base" | "extended";
 
 export interface Point {
   x: number | string;
@@ -34,15 +34,16 @@ export interface Room {
   room_type: RoomTypeKey;
   points: Point[];
   openings: Opening[];
-  repair_options?: RepairOptions;
 }
 
 interface ProjectState {
   repair_type: RepairType;
+  repair_options: RepairOptions;
   rooms: Room[];
   activeRoomIndex: number;
 
   setRepairType: (type: RepairType) => void;
+  updateRepairOptions: (options: Partial<RepairOptions>) => void;
   addRoom: () => void;
   deleteRoom: (index: number) => void;
   setActiveRoom: (index: number) => void;
@@ -58,11 +59,19 @@ interface ProjectState {
     value: string | number,
   ) => void;
   deleteOpening: (openingIndex: number) => void;
-  updateRepairOptions: (roomIndex: number, options: Partial<RepairOptions>) => void;
   clearActiveRoom: () => void;
   loadDemoRoom: () => void;
   resetProject: () => void;
 }
+
+const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
+  floor: null,
+  walls: null,
+  ceiling: null,
+  tile: false,
+  electric: null,
+  plumbing: false,
+};
 
 const createDefaultRoom = (name: string): Room => ({
   id: crypto.randomUUID(),
@@ -76,11 +85,11 @@ const createDefaultRoom = (name: string): Room => ({
     { x: 0, y: 3 },
   ],
   openings: [],
-  repair_options: { floor: null, walls: null, ceiling: null, tile: false, electric: null, plumbing: false },
 });
 
 const initialState = {
   repair_type: "cosmetic" as RepairType,
+  repair_options: { ...DEFAULT_REPAIR_OPTIONS },
   rooms: [createDefaultRoom("Комната 1")],
   activeRoomIndex: 0,
 };
@@ -201,15 +210,10 @@ export const useProjectStore = create<ProjectState>()(
           return { rooms: newRooms };
         }),
 
-      updateRepairOptions: (roomIndex, options) =>
-        set((state) => {
-          const newRooms = [...state.rooms];
-          newRooms[roomIndex] = {
-            ...newRooms[roomIndex],
-            repair_options: { ...newRooms[roomIndex].repair_options, ...options },
-          };
-          return { rooms: newRooms };
-        }),
+      updateRepairOptions: (options) =>
+        set((state) => ({
+          repair_options: { ...state.repair_options, ...options },
+        })),
 
       clearActiveRoom: () =>
         set((state) => {
@@ -219,7 +223,6 @@ export const useProjectStore = create<ProjectState>()(
             ...activeRoom,
             points: [],
             openings: [],
-            repair_options: { floor: null, walls: null, ceiling: null, tile: false, electric: null, plumbing: false },
           };
           return { rooms: newRooms };
         }),
@@ -245,7 +248,25 @@ export const useProjectStore = create<ProjectState>()(
     }),
     {
       name: "repair-estimator-draft",
-      version: 1,
+      version: 2,
+      migrate: (persisted: unknown, version: number) => {
+        const state = persisted as Record<string, unknown>;
+        if (version === 1) {
+          // repair_options переехал из rooms[i] на уровень проекта
+          const rooms = (state.rooms as Array<Record<string, unknown>>) ?? [];
+          const fromRoom = rooms[0]?.repair_options as RepairOptions | undefined;
+          return {
+            ...state,
+            repair_options: fromRoom ?? { ...DEFAULT_REPAIR_OPTIONS },
+            rooms: rooms.map((room) => {
+              const r = { ...room };
+              delete r['repair_options'];
+              return r;
+            }),
+          };
+        }
+        return state;
+      },
     },
   ),
 );

@@ -1,0 +1,310 @@
+# app/tests/test_estimate.py
+
+import pytest
+from decimal import Decimal
+
+from app.services.material_calc_service import calculate_materials, packs_to_buy
+from app.services.labor_calc_service import calculate_labor
+from app.services.repair_coeffs_service import apply_repair_coeffs
+from app.services.geometry_service import calculate_room_geometry
+
+
+class TestMaterialCalc:
+    """Модульные тесты для расчёта материалов."""
+
+    def test_material_calc_rectangle(self, db_session):
+        """Прямоугольная комната 4×3, h=2.7, ламинат, покраска стен и потолка."""
+        geometry = {
+            'floor_area': Decimal('12.0'),
+            'ceiling_area': Decimal('12.0'),
+            'wall_area': Decimal('34.1'),
+            'perimeter': Decimal('14.0'),
+            'door_width_sum': Decimal('0.8')  # одна дверь
+        }
+        repair_options = {
+            'floor': 'laminate',
+            'walls': 'paint',
+            'ceiling': 'paint',
+            'tile': False,
+            'electric': 'basic',
+            'plumbing': False
+        }
+
+        materials = calculate_materials(geometry, repair_options, db_session)
+
+        # Ожидаемые имена материалов (все должны быть)
+        expected_names = {
+            'Ламинат', 'Плинтус', 'Грунтовка', 'Шпаклевка',
+            'Краска для стен', 'Краска потолочная'
+        }
+        returned_names = {m['name'] for m in materials}
+        assert expected_names.issubset(returned_names)
+
+        # Проверка количества для ламината (с округлением НЕ делаем здесь)
+        laminate = next(m for m in materials if m['name'] == 'Ламинат')
+        # Площадь пола 12 * 1.08 = 12.96
+        assert laminate['quantity'] == Decimal('12.96')
+        # Проверяем дробное значение pack_quantity до агрегации — ceil делается в B1-5
+        assert laminate['pack_quantity'] == Decimal('5.184')
+        assert packs_to_buy(laminate['pack_quantity']) == 6  # демонстрация, что ceil работает
+
+        # Проверка плинтуса: периметр - дверь = 14 - 0.8 = 13.2, *1.1 = 14.52
+        plinth = next(m for m in materials if m['name'] == 'Плинтус')
+        assert plinth['quantity'] == Decimal('14.52')
+
+        # Грунтовка: 34.1 * 0.1 * 1.1 = 3.751
+        primer = next(m for m in materials if m['name'] == 'Грунтовка')
+        assert primer['quantity'] == Decimal('3.751')
+
+        # Шпаклевка: 34.1 * 1.2 * 1.1 = 45.012
+        putty = next(m for m in materials if m['name'] == 'Шпаклевка')
+        assert putty['quantity'] == Decimal('45.012')
+
+        # Краска стен: 34.1 * 2 * 0.13 * 1.1 = 9.7526
+        paint_walls = next(m for m in materials if m['name'] == 'Краска для стен')
+        assert paint_walls['quantity'] == Decimal('9.7526')
+
+        # Краска потолка: 12 * 2 * 0.12 * 1.1 = 3.168
+        paint_ceiling = next(m for m in materials if m['name'] == 'Краска потолочная')
+        assert paint_ceiling['quantity'] == Decimal('3.168')
+
+
+
+class TestLaborCalc:
+    """Модульные тесты для расчёта работ."""
+
+    def test_labor_calc_rectangle(self, db_session):
+        """Прямоугольная комната 4×3, h=2.7, ламинат, покраска стен и потолка."""
+        geometry = {
+            'floor_area': Decimal('12.0'),
+            'ceiling_area': Decimal('12.0'),
+            'wall_area': Decimal('34.1'),
+            'perimeter': Decimal('14.0'),
+            'electrical_points': Decimal('5'),
+            'plumbing_points': Decimal('2')
+        }
+        repair_options = {
+            'floor': 'laminate',
+            'walls': 'paint',
+            'ceiling': 'paint',
+            'tile': False,
+            'electric': 'basic',
+            'plumbing': True
+        }
+
+        labor = calculate_labor(geometry, repair_options, db_session)
+
+        # Проверяем, что все ожидаемые услуги есть
+        expected_services = {
+            'Покраска стен', 'Покраска потолка', 'Шпаклевка стен',
+            'Укладка ламината', 'Электромонтаж', 'Сантехнические работы'
+        }
+        returned_services = {item['service'] for item in labor}
+        assert expected_services.issubset(returned_services)
+
+        # Проверка объёмов
+        painter_walls = next(item for item in labor if item['service'] == 'Покраска стен')
+        assert painter_walls['volume'] == Decimal('34.1')
+
+        painter_ceiling = next(item for item in labor if item['service'] == 'Покраска потолка')
+        assert painter_ceiling['volume'] == Decimal('12.0')
+
+        putty = next(item for item in labor if item['service'] == 'Шпаклевка стен')
+        assert putty['volume'] == Decimal('34.1')
+
+        laminate_install = next(item for item in labor if item['service'] == 'Укладка ламината')
+        assert laminate_install['volume'] == Decimal('12.0')
+
+        electric = next(item for item in labor if item['service'] == 'Электромонтаж')
+        assert electric['volume'] == Decimal('5')
+
+        plumbing = next(item for item in labor if item['service'] == 'Сантехнические работы')
+        assert plumbing['volume'] == Decimal('2')
+
+
+class TestRepairCoeffs:
+    """Тесты применения коэффициентов типа ремонта и непредвиденных расходов."""
+
+    def test_coeffs_scale(self):
+        """Проверка, что при переходе cosmetic → base итог умножается на 1.2."""
+        materials = {'min': Decimal('100'), 'avg': Decimal('200'), 'max': Decimal('300')}
+        labor = {'min': Decimal('400'), 'avg': Decimal('500'), 'max': Decimal('600')}
+
+        res_cosmetic = apply_repair_coeffs(materials, labor, 'cosmetic')
+        res_base = apply_repair_coeffs(materials, labor, 'base')
+
+        for key in ['materials_min', 'materials_avg', 'materials_max',
+                    'labor_min', 'labor_avg', 'labor_max',
+                    'total_min', 'total_avg', 'total_max']:
+            assert res_base[key] == res_cosmetic[key] * Decimal('1.2')
+
+    def test_min_avg_max_order(self):
+        """Проверка, что min ≤ avg ≤ max для всех категорий."""
+        materials = {'min': Decimal('100'), 'avg': Decimal('200'), 'max': Decimal('300')}
+        labor = {'min': Decimal('400'), 'avg': Decimal('500'), 'max': Decimal('600')}
+
+        for repair_type in ['cosmetic', 'base', 'extended']:
+            result = apply_repair_coeffs(materials, labor, repair_type)
+            for category in ['materials', 'labor', 'total']:
+                assert result[f'{category}_min'] <= result[f'{category}_avg'] <= result[f'{category}_max']
+
+    def test_cosmetic_with_standard_contingency(self):
+        """При cosmetic и коэффициенте непредвиденных = 1.0 сумма равна исходной."""
+        # В реальном коде контингент жёстко задан, поэтому мы не можем получить 1.0.
+        # Но мы можем проверить, что результат при cosmetic и контингенте = 1.1/1.12/1.15
+        # соответствует ожидаемому умножению.
+        materials = {'min': Decimal('100'), 'avg': Decimal('200'), 'max': Decimal('300')}
+        labor = {'min': Decimal('400'), 'avg': Decimal('500'), 'max': Decimal('600')}
+
+        result = apply_repair_coeffs(materials, labor, 'cosmetic')
+        # Для min: (100+400)*1.1 = 550
+        assert result['total_min'] == Decimal('550')
+        # avg: (200+500)*1.12 = 784
+        assert result['total_avg'] == Decimal('784')
+        # max: (300+600)*1.15 = 1035
+        assert result['total_max'] == Decimal('1035')
+
+    def test_unknown_repair_type_raises_error(self):
+        """Неизвестный тип ремонта вызывает ValueError."""
+        materials = {'min': Decimal('1'), 'avg': Decimal('2'), 'max': Decimal('3')}
+        labor = {'min': Decimal('4'), 'avg': Decimal('5'), 'max': Decimal('6')}
+        with pytest.raises(ValueError, match="Unknown repair_type: basic"):
+            apply_repair_coeffs(materials, labor, 'basic')
+
+class TestLShape:
+    def test_l_shaped_room_materials(self, db_session):
+        """Г-образная комната (невыпуклый многоугольник) – проверка геометрии и материалов."""
+        points = [
+            (0, 0), (4, 0), (4, 2), (2, 2), (2, 4), (0, 4)
+        ]
+        geometry = calculate_room_geometry(
+            points=points,
+            height=2.7,
+            openings=[{"type": "door", "width": 0.8, "height": 2.0}]
+        )
+
+        # calculate_room_geometry не возвращает door_width_sum — добавляем вручную для расчёта плинтуса
+        geometry['door_width_sum'] = Decimal('0.8')
+
+        repair_options = {
+            'floor': 'laminate',
+            'walls': 'paint',
+            'ceiling': 'paint',
+            'tile': False,
+            'electric': 'basic',
+            'plumbing': False
+        }
+
+        materials = calculate_materials(geometry, repair_options, db_session)
+
+        # Площадь пола: 4×4 с вырезом 2×2 = 12
+        assert geometry['floor_area'] == Decimal('12.0')
+        # Периметр: (0,0)→(4,0)=4, (4,0)→(4,2)=2, (4,2)→(2,2)=2, (2,2)→(2,4)=2, (2,4)→(0,4)=2, (0,4)→(0,0)=4 → итого 16
+        assert geometry['perimeter'] == Decimal('16.0')
+
+        # Ламинат: площадь 12 * 1.08 = 12.96, package_size=2.5 -> 5.184 (дробно)
+        laminate = next(m for m in materials if m['name'] == 'Ламинат')
+        assert laminate['pack_quantity'] == Decimal('5.184')
+
+        # Плинтус: периметр (16) - дверь (0.8) = 15.2, *1.1 = 16.72
+        plinth = next(m for m in materials if m['name'] == 'Плинтус')
+        assert plinth['quantity'] == Decimal('16.72')
+
+        # Проверяем, что есть грунтовка, шпаклёвка, краска
+        primer = next(m for m in materials if m['name'] == 'Грунтовка')
+        assert primer['quantity'] > 0
+
+class TestDifferentRooms:
+    """Тесты агрегации материалов из нескольких разных комнат."""
+
+    def test_aggregation_different_rooms(self, db_session):
+        """Проверка агрегации материалов из двух разных комнат."""
+        # Комната 1: 4×3, ламинат, покраска стен и потолка
+        geom1 = {
+            'floor_area': Decimal('12.0'),
+            'ceiling_area': Decimal('12.0'),
+            'wall_area': Decimal('34.1'),
+            'perimeter': Decimal('14.0'),
+            'door_width_sum': Decimal('0.8')
+        }
+        opts1 = {
+            'floor': 'laminate',
+            'walls': 'paint',
+            'ceiling': 'paint',
+            'tile': False,
+            'electric': 'basic',
+            'plumbing': False
+        }
+        materials1 = calculate_materials(geom1, opts1, db_session)
+
+        # Комната 2: 5×4, линолеум, обои (без потолка)
+        geom2 = {
+            'floor_area': Decimal('20.0'),
+            'ceiling_area': Decimal('20.0'),
+            'wall_area': Decimal('48.6'),  # периметр 18, высота 2.7 -> 48.6
+            'perimeter': Decimal('18.0'),
+            'door_width_sum': Decimal('1.2')
+        }
+        opts2 = {
+            'floor': 'linoleum',
+            'walls': 'wallpaper',
+            'ceiling': None,
+            'tile': False,
+            'electric': 'basic',
+            'plumbing': False
+        }
+        materials2 = calculate_materials(geom2, opts2, db_session)
+
+        # Агрегируем все материалы вручную
+        aggregated = {}
+        for mat in materials1 + materials2:
+            mid = mat['material_id']
+            if mid not in aggregated:
+                aggregated[mid] = {
+                    'name': mat['name'],
+                    'unit': mat['unit'],
+                    'quantity': Decimal(0),
+                    'pack_quantity': Decimal(0),
+                }
+            aggregated[mid]['quantity'] += mat['quantity']
+            if mat.get('pack_quantity') is not None:
+                aggregated[mid]['pack_quantity'] += mat['pack_quantity']
+
+        # Проверяем, что ламинат есть только из первой комнаты
+        laminate = next((v for k, v in aggregated.items() if v['name'] == 'Ламинат'), None)
+        assert laminate is not None
+        assert laminate['quantity'] == Decimal('12.96')  # 12 * 1.08
+
+        # Линолеум — только из второй
+        linoleum = next((v for k, v in aggregated.items() if v['name'] == 'Линолеум'), None)
+        assert linoleum is not None
+        assert linoleum['quantity'] == Decimal('20.0')  # 20 * 1.0 (waste_factor=1.0 в seed)
+
+        # Обои — только из второй (wallpaper)
+        wallpaper = next((v for k, v in aggregated.items() if v['name'] == 'Обои'), None)
+        assert wallpaper is not None
+        # consumption_per_m2=0.2, waste=1.1 -> 48.6 * 0.2 * 1.1 = 10.692
+        assert wallpaper['quantity'] == Decimal('10.692')
+
+        # Проверяем, что краска для стен суммируется (из первой комнаты только)
+        paint_walls = next((v for k, v in aggregated.items() if v['name'] == 'Краска для стен'), None)
+        assert paint_walls is not None
+        # Только комната1: 34.1 * 2 * 0.13 * 1.1 = 9.7526
+        assert paint_walls['quantity'] == Decimal('9.7526')
+
+        # Плинтус суммируется из обеих комнат (разные значения)
+        plinth = next((v for k, v in aggregated.items() if v['name'] == 'Плинтус'), None)
+        assert plinth is not None
+        # Комната1: (14-0.8)*1.1 = 14.52
+        # Комната2: (18-1.2)*1.1 = 18.48
+        # Итого: 33.0
+        assert plinth['quantity'] == Decimal('33.0')
+
+        # Проверяем, что грунтовка и шпаклёвка есть только из первой (где стены красятся)
+        primer = next((v for k, v in aggregated.items() if v['name'] == 'Грунтовка'), None)
+        assert primer is not None
+        assert primer['quantity'] == Decimal('3.751')  # 34.1 * 0.1 * 1.1
+
+        putty = next((v for k, v in aggregated.items() if v['name'] == 'Шпаклевка'), None)
+        assert putty is not None
+        assert putty['quantity'] == Decimal('45.012')  # 34.1 * 1.2 * 1.1

@@ -1,7 +1,7 @@
 import { useProjectStore } from "../store/projectStore";
-import { roomTypeOptions } from "../../src/types/roomTypes";
+import { roomTypeOptions } from "../types/roomTypes";
 import styles from "./RoomTypeSelector.module.css";
-import { WorksCheckboxes } from '../components/WorksCheckboxes';
+import { WorksCheckboxes } from "./WorksCheckboxes";
 export const RoomTypeSelector = () => {
   const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
   const rooms = useProjectStore((state) => state.rooms);

@@ -31,8 +31,8 @@ export const RepairOptionsForm: React.FC = () => {
           <input
             type="radio"
             name="repair_type"
-            value="basic"
-            checked={repairType === 'basic'}
+            value="base"
+            checked={repairType === 'base'}
             onChange={handleChange}
           />
           Базовый

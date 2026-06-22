@@ -29,13 +29,13 @@ export function EstimateResult() {
 
     try {
       const payload = {
-        city: "Казань", 
+        city: "Казань", // TODO: взять из стора когда появится поле city
         repair_type: repair_type,
+        repair_options: rooms[0]?.repair_options ?? {},
         rooms: rooms.map(room => ({
           name: room.name,
           room_type: room.room_type,
-          height: Number(room.height), 
-          repair_options: room.repair_options,
+          height: Number(room.height),
           openings: room.openings.map(op => ({
             ...op,
             width: Number(op.width),

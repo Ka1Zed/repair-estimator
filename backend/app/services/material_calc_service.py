@@ -55,7 +55,11 @@ def packs_to_buy(pack_quantity: Decimal) -> int:
 def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tuple]:
     """
     Разворачивает repair_options ({floor, walls, ceiling, tile, ...}) в список
-    позиций (material_name, area).
+    позиций (material_name, area) — какую площадь использовать для материала.
+    Плинтус и плитка/клей/затирка добавляются как зависимые автоматически.
+
+    area для unit='м' (плинтус) и unit='рулон' (обои) считается внутри
+    quantity_of по геометрии, здесь передаётся опорная площадь.
     """
     floor   = repair_options.get("floor")
     walls   = repair_options.get("walls")
@@ -70,30 +74,30 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
     # --- пол ---
     if floor == "laminate":
         sel.append((M_LAMINATE, floor_area))
-        sel.append((M_PLINTH, floor_area))
+        sel.append((M_PLINTH, floor_area))      # area для плинтуса не важна, считается по периметру
     elif floor == "linoleum":
         sel.append((M_LINOLEUM, floor_area))
         sel.append((M_PLINTH, floor_area))
     elif floor == "parquet":
-        # нет материала "Паркет" – только плинтус
+        # материала "Паркет" в seed нет — пропускаем покрытие, но плинтус нужен
         sel.append((M_PLINTH, floor_area))
-    # floor == "tile" обрабатывается в блоке плитки
+    # floor == "tile" обрабатывается в блоке плитки ниже (плинтус не нужен)
 
     # --- стены ---
     if walls == "paint":
-        sel.append((M_PRIMER, wall_area))
-        sel.append((M_PUTTY, wall_area))
-        sel.append((M_PAINT_WALLS, wall_area))
+        sel.append((M_PRIMER, wall_area))       # грунтовка, 1 слой
+        sel.append((M_PUTTY, wall_area))        # шпаклёвка
+        sel.append((M_PAINT_WALLS, wall_area))  # краска, 2 слоя
     elif walls == "wallpaper":
         sel.append((M_WALLPAPER, wall_area))
     elif walls == "moisture_paint":
-        # fallback на обычную краску
+        # отдельного материала нет — берём обычную краску для стен как fallback (MVP)
         sel.append((M_PAINT_WALLS, wall_area))
 
     # --- потолок ---
     if ceiling in ("paint", "moisture_paint"):
         sel.append((M_PAINT_CEILING, ceiling_area))
-    # stretch – пропускаем
+    # ceiling == "stretch" (натяжной) — это работа, не материал → пропускаем
 
     # --- плитка (пол + стены) ---
     tiled = Decimal(0)
@@ -143,24 +147,17 @@ def calculate_materials(
     repair_options: {floor, walls, ceiling, tile, electric, plumbing} (контракт api.md)
 
     Возвращает позиции с ДРОБНЫМ pack_quantity (округление — в B1-5):
-        material_id   — идентификатор материала (группировка в агрегации)
-        name          — название материала
-        quantity      — количество в базовой единице (дробное, Decimal)
-        unit          — единица измерения
-        package_size  — размер упаковки (Decimal)
-        pack_quantity — количество упаковок (дробное, Decimal)
-                        НЕ ОКРУГЛЯЕТСЯ здесь — ceil выполняется в B1-5
-                        после суммирования одинаковых материалов по всей квартире.
+        material_id, name, quantity (Decimal), unit, package_size, pack_quantity
     """
     result: List[Dict[str, Any]] = []
 
     for material_name, area in _selections(repair_options, geometry):
         material = db.query(Material).filter(Material.name == material_name).first()
         if material is None:
+            # материала нет в БД (например, не засидован) — пропускаем
             continue
 
         quantity = quantity_of(material, area, geometry)
-
         if quantity <= 0:
             continue
 
@@ -168,12 +165,12 @@ def calculate_materials(
         pack_quantity = (quantity / package_size) if package_size > 0 else None
 
         result.append({
-            "material_id": material.id,           # ключ группировки в B1-5
+            "material_id": material.id,        # ключ группировки в B1-5
             "name": material.name,
-            "quantity": quantity,                  # дробное, Decimal
+            "quantity": quantity,              # дробное, Decimal
             "unit": material.unit,
             "package_size": material.package_size,
-            "pack_quantity": pack_quantity,        # дробное; ceil — в агрегации
+            "pack_quantity": pack_quantity,    # дробное; ceil — в агрегации
         })
 
     return result

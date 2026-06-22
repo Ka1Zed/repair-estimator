@@ -94,37 +94,3 @@ def wall_area(points: List[Union[tuple, list, dict]], height: Union[int, float, 
         opening_area += to_decimal(w) * to_decimal(h)
     return wall_area_before - opening_area
 
-def calculate_room_geometry(points, height, openings=None):
-    """
-    Рассчитывает геометрию комнаты по точкам многоугольника и высоте.
-    """
-    # Приводим points к единому формату (список кортежей)
-    if points and isinstance(points[0], dict):
-        pts = [(p['x'], p['y']) for p in points]
-    else:
-        pts = [(float(p[0]), float(p[1])) for p in points]  # гарантируем числовой тип
-
-    # Вычисляем площадь пола и периметр
-    floor = floor_area(pts)
-    perim = perimeter(pts)
-
-    # Преобразуем openings в список словарей для wall_area
-    if openings is None:
-        openings = []
-    openings_dict = []
-    for op in openings:
-        if isinstance(op, dict):
-            openings_dict.append(op)
-        else:
-            # ожидаем кортеж (type, width, height)
-            _, w, h = op
-            openings_dict.append({'width': w, 'height': h})
-
-    wall = wall_area(pts, height, openings_dict)
-
-    return {
-        'floor_area': floor,
-        'ceiling_area': floor,   # потолок равен полу
-        'wall_area': wall,
-        'perimeter': perim
-    }

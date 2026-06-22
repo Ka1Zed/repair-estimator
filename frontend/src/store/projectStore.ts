@@ -219,6 +219,7 @@ export const useProjectStore = create<ProjectState>()(
             ...activeRoom,
             points: [],
             openings: [],
+            repair_options: { floor: null, walls: null, ceiling: null, tile: false, electric: null, plumbing: false },
           };
           return { rooms: newRooms };
         }),

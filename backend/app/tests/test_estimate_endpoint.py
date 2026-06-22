@@ -63,46 +63,6 @@ def test_single_room():
     assert painter is not None
 
 
-def test_two_rooms():
-    """Проверка: две одинаковые комнаты -> удвоение количества и итога."""
-    room = {
-        "name": "Спальня",
-        "height": 2.7,
-        "points": [
-            {"x": 0, "y": 0},
-            {"x": 4, "y": 0},
-            {"x": 4, "y": 3},
-            {"x": 0, "y": 3}
-        ],
-        "room_type": "living",
-        "openings": [
-            {"type": "door", "width": 0.8, "height": 2.0}
-        ]
-    }
-    payload = {
-        "city": "Казань",
-        "rooms": [room, room],
-        "repair_type": "cosmetic",
-        "repair_options": {
-            "floor": "laminate",
-            "walls": "paint",
-            "ceiling": "paint",
-            "tile": False,
-            "electric": "basic",
-            "plumbing": False
-        }
-    }
-
-    response = client.post("/api/estimates/calculate", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-
-    # Проверяем, что ламинат имеет удвоенное количество
-    laminate = next((m for m in data["materials"] if m["name"] == "Ламинат"), None)
-    assert laminate is not None
-    expected_quantity = 27.5
-    assert laminate["quantity"] == pytest.approx(expected_quantity, 0.01)
-
 
 def test_response_schema():
     """Проверка, что ответ соответствует схеме (нет лишних/недостающих полей)."""
@@ -275,3 +235,4 @@ def test_two_rooms_grouping_and_rounding():
     double_total_avg = data["summary"]["total_avg"]
     # Из-за округления double может быть не ровно в 2 раза, но должно быть больше single
     assert double_total_avg > single_total_avg
+

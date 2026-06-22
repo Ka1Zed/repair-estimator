@@ -1,5 +1,7 @@
+# app/services/repair_coeffs_service.py
+
 from decimal import Decimal
-from typing import Dict, Any
+from typing import Dict
 
 REPAIR_COEFFS = {
     'cosmetic': Decimal('1.0'),
@@ -13,9 +15,10 @@ CONTINGENCY = {
     'max': Decimal('1.15'),
 }
 
+
 def apply_repair_coeffs(
-    materials: Dict[str, Any],
-    labor: Dict[str, Any],
+    materials: Dict[str, Decimal],
+    labor: Dict[str, Decimal],
     repair_type: str
 ) -> Dict[str, Decimal]:
     """
@@ -28,8 +31,8 @@ def apply_repair_coeffs(
     result = {}
 
     for key in ['min', 'avg', 'max']:
-        mat = Decimal(str(materials.get(key, 0)))   # приводим к Decimal
-        lab = Decimal(str(labor.get(key, 0)))
+        mat = materials.get(key, Decimal(0))
+        lab = labor.get(key, Decimal(0))
         cont = CONTINGENCY[key]
 
         mat_final = mat * coeff * cont
@@ -41,4 +44,3 @@ def apply_repair_coeffs(
         result[f'total_{key}'] = total
 
     return result
-

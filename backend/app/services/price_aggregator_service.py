@@ -1,9 +1,5 @@
-# app/services/price_aggregator_service.py
-
 import logging
 from datetime import datetime, timezone
-from typing import Optional
-from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.db.models import Material, MaterialPrice, PriceSource, LaborService, LaborPrice
@@ -12,22 +8,17 @@ from app.parsers.base import BaseParser
 logger = logging.getLogger(__name__)
 
 
-def get_price(
-    material_name: str,
-    parser: BaseParser | None = None,
-    db_session: Optional[Session] = None,   # <-- новый параметр
-) -> MaterialPrice | None:
+def get_price(material_name: str, parser: BaseParser | None = None) -> MaterialPrice | None:
     '''
-    Возвращает актуальную цену для материала.
-    '''
-    # Если сессия не передана, создаём свою
-    if db_session is None:
-        session = SessionLocal()
-        close_session = True
-    else:
-        session = db_session
-        close_session = False
+    Возвращает актуальную цену для материала
 
+    Логика:
+    1. Если парсер передан - пробуем получить цену через него
+    2. Если парсер упал (любая ошибка) или не передан - берём seed-цену из БД.
+    3. При успешном парсинге - сохраняем свежую цену в БД (source = парсер)
+    4. Наверх исключение не пробрасываем никогда
+    '''
+    session = SessionLocal()
     try:
         material = session.query(Material).filter(Material.name == material_name).first()
         if not material:
@@ -39,22 +30,26 @@ def get_price(
             try:
                 parsed = parser.fetch_price(material_name)
 
+                # Находим или создаем запись источника
                 source = session.query(PriceSource).filter(
                     PriceSource.name == parser.source_name
                 ).first()
 
                 if source:
+                    # Ищем существующую запись цены для этого источника
                     price_entry = session.query(MaterialPrice).filter(
                         MaterialPrice.material_id == material.id,
                         MaterialPrice.source_id == source.id
                     ).first()
 
                     if price_entry:
+                        # Обновляем
                         price_entry.price_min = parsed.price_min
                         price_entry.price_avg = parsed.price_avg
                         price_entry.price_max = parsed.price_max
                         price_entry.updated_at = datetime.now(timezone.utc)
                     else:
+                        # Создаем новую
                         price_entry = MaterialPrice(
                             material_id=material.id,
                             source_id=source.id,
@@ -71,9 +66,10 @@ def get_price(
                     return price_entry
 
             except Exception as e:
+                # Парсер упал - логируем и идем в fallback
                 logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{material_name}': {e}")
 
-        # Fallback: seed-цена
+        # Fallback: берем seed-цену из БД
         seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
         if not seed_source:
             logger.error("Источник 'seed' не найден в БД")
@@ -92,8 +88,7 @@ def get_price(
         return seed_price
 
     finally:
-        if close_session:
-            session.close()
+        session.close()
 
 
 def update_labor_price(service_name: str, parser) -> LaborPrice | None:

@@ -1,5 +1,3 @@
-# app/api/estimates.py
-
 import logging
 from decimal import Decimal
 from typing import Dict, List, Any
@@ -28,10 +26,6 @@ def calculate_estimate(
     request: EstimateRequest,
     db: Session = Depends(get_db)
 ) -> EstimateResponse:
-    """
-    Сборка сметы по квартире: геометрия → материалы → работы → коэффициенты.
-    """
-    # ---- 1. Обработка каждой комнаты ----
     all_materials: List[Dict[str, Any]] = []
     all_labor: List[Dict[str, Any]] = []
     total_geometry = {
@@ -42,26 +36,22 @@ def calculate_estimate(
     }
 
     for room in request.rooms:
-        # 1a. Геометрия (с учётом проёмов)
         geometry = calculate_room_geometry(
             points=[(p.x, p.y) for p in room.points],
             height=room.height,
             openings=[(o.type, o.width, o.height) for o in room.openings]
         )
 
-        # Суммируем геометрию по квартире
         for key in total_geometry:
             total_geometry[key] += Decimal(str(geometry[key]))
 
-        # 1b. Материалы
         materials = calculate_materials(
             geometry=geometry,
             repair_options=request.repair_options.model_dump(),
             db=db
         )
-        all_materials.extend(materials)   # <-- ВАЖНО: без этого материалы не попадают в ответ
+        all_materials.extend(materials)
 
-        # 1c. Работы
         labor = calculate_labor(
             geometry=geometry,
             repair_options=request.repair_options.model_dump(),
@@ -69,7 +59,7 @@ def calculate_estimate(
         )
         all_labor.extend(labor)
 
-    # ---- 2. Агрегация материалов с округлением до упаковок ----
+    # Агрегация материалов с округлением до упаковок
     mat_groups: Dict[int, Dict] = {}
     for mat in all_materials:
         mid = mat['material_id']
@@ -78,8 +68,8 @@ def calculate_estimate(
                 'name': mat['name'],
                 'unit': mat['unit'],
                 'package_size': Decimal(str(mat.get('package_size', 1))),
-                'quantity': Decimal(0),          # суммарное базовое количество (дробное)
-                'pack_quantity': Decimal(0),     # суммарное количество упаковок (дробное)
+                'quantity': Decimal(0),
+                'pack_quantity': Decimal(0),
             }
         mat_groups[mid]['quantity'] += mat['quantity']
         if mat.get('pack_quantity') is not None:
@@ -90,14 +80,10 @@ def calculate_estimate(
 
     for mid, group in mat_groups.items():
         name = group['name']
-        # Округляем количество упаковок вверх
-        total_pack_quantity = group['pack_quantity']
-        packs = packs_to_buy(total_pack_quantity)   # целое число упаковок
-        package_size = group['package_size']
-        final_quantity = Decimal(packs) * package_size   # итоговое количество в базовых единицах
+        packs = packs_to_buy(group['pack_quantity'])
+        final_quantity = Decimal(packs) * group['package_size']
 
-        # Получаем цену (передаём сессию!)
-        price_obj = get_price(name, parser=None, db_session=db)
+        price_obj = get_price(name)
         if not price_obj:
             logger.warning(f"Цена для материала '{name}' не найдена, пропускаем")
             continue
@@ -122,7 +108,7 @@ def calculate_estimate(
         materials_sum['avg'] += final_quantity * price_obj.price_avg
         materials_sum['max'] += final_quantity * price_obj.price_max
 
-    # ---- 3. Агрегация работ ----
+    # Агрегация работ
     labor_groups: Dict[str, Dict] = {}
     for job in all_labor:
         service = job['service']
@@ -131,10 +117,6 @@ def calculate_estimate(
                 'specialist': job['specialist'],
                 'unit': job['unit'],
                 'volume': Decimal(0),
-                'price_min': Decimal(0),
-                'price_avg': Decimal(0),
-                'price_max': Decimal(0),
-                'source': job.get('source', 'seed'),
             }
         labor_groups[service]['volume'] += job['volume']
 
@@ -154,7 +136,6 @@ def calculate_estimate(
         volume = group['volume']
         price_avg = labor_price.price_avg
         total_avg = volume * price_avg
-        source_name = "seed"
 
         labor_response.append(LaborItem(
             service=service,
@@ -163,14 +144,13 @@ def calculate_estimate(
             unit=group['unit'],
             price_avg=float(price_avg),
             total_avg=float(total_avg),
-            source=source_name
+            source="seed"
         ))
 
         labor_sum['min'] += volume * labor_price.price_min
         labor_sum['avg'] += volume * labor_price.price_avg
         labor_sum['max'] += volume * labor_price.price_max
 
-    # ---- 4. Применение коэффициентов (B1-3) ----
     coeff_result = apply_repair_coeffs(
         materials=materials_sum,
         labor=labor_sum,
@@ -189,7 +169,6 @@ def calculate_estimate(
         total_max=float(coeff_result['total_max']),
     )
 
-    # ---- 5. Формирование ответа ----
     geometry_summary = GeometrySummary(
         floor_area=float(total_geometry['floor_area']),
         ceiling_area=float(total_geometry['ceiling_area']),

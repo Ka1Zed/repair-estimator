@@ -18,6 +18,15 @@ export interface Opening {
   height: number | string;
 }
 
+export interface RepairOptions {
+  floor?: string | null;
+  walls?: string | null;
+  ceiling?: string | null;
+  tile?: boolean;
+  electric?: string | null;
+  plumbing?: boolean;
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -25,6 +34,7 @@ export interface Room {
   room_type: RoomTypeKey;
   points: Point[];
   openings: Opening[];
+  repair_options?: RepairOptions;
 }
 
 interface ProjectState {
@@ -37,7 +47,7 @@ interface ProjectState {
   deleteRoom: (index: number) => void;
   setActiveRoom: (index: number) => void;
   updateRoomName: (index: number, name: string) => void;
-  updateActiveRoomType: (type: RoomTypeKey) => void;
+  updateActiveRoomType: (index: number, room_type: RoomTypeKey) => void;
   setHeight: (height: number | string) => void;
   updatePoint: (index: number, x: number | string, y: number | string) => void;
   setPoints: (points: Point[]) => void;
@@ -48,7 +58,7 @@ interface ProjectState {
     value: string | number,
   ) => void;
   deleteOpening: (openingIndex: number) => void;
-
+  updateRepairOptions: (roomIndex: number, options: Partial<RepairOptions>) => void;
   clearActiveRoom: () => void;
   loadDemoRoom: () => void;
   resetProject: () => void;
@@ -66,6 +76,7 @@ const createDefaultRoom = (name: string): Room => ({
     { x: 0, y: 3 },
   ],
   openings: [],
+  repair_options: { floor: null, walls: null, ceiling: null, tile: false, electric: null, plumbing: false },
 });
 
 const initialState = {
@@ -83,9 +94,7 @@ export const useProjectStore = create<ProjectState>()(
 
       addRoom: () =>
         set((state) => {
-          const newRoom = createDefaultRoom(
-            `Комната ${state.rooms.length + 1}`,
-          );
+          const newRoom = createDefaultRoom(`Комната ${state.rooms.length + 1}`);
           return {
             rooms: [...state.rooms, newRoom],
             activeRoomIndex: state.rooms.length,
@@ -117,13 +126,10 @@ export const useProjectStore = create<ProjectState>()(
           return { rooms: newRooms };
         }),
 
-      updateActiveRoomType: (type) =>
+      updateActiveRoomType: (index, room_type) =>
         set((state) => {
           const newRooms = [...state.rooms];
-          newRooms[state.activeRoomIndex] = {
-            ...newRooms[state.activeRoomIndex],
-            room_type: type,
-          };
+          newRooms[index] = { ...newRooms[index], room_type };
           return { rooms: newRooms };
         }),
 
@@ -142,13 +148,8 @@ export const useProjectStore = create<ProjectState>()(
           const newRooms = [...state.rooms];
           const activeRoom = newRooms[state.activeRoomIndex];
           const newPoints = [...activeRoom.points];
-
           newPoints[index] = { x, y };
-          newRooms[state.activeRoomIndex] = {
-            ...activeRoom,
-            points: newPoints,
-          };
-
+          newRooms[state.activeRoomIndex] = { ...activeRoom, points: newPoints };
           return { rooms: newRooms };
         }),
 
@@ -166,14 +167,12 @@ export const useProjectStore = create<ProjectState>()(
         set((state) => {
           const newRooms = [...state.rooms];
           const activeRoom = newRooms[state.activeRoomIndex];
-
           const newOpening: Opening = {
             id: crypto.randomUUID(),
             type: "door",
             width: 0.8,
             height: 2.0,
           };
-
           newRooms[state.activeRoomIndex] = {
             ...activeRoom,
             openings: [...activeRoom.openings, newOpening],
@@ -186,16 +185,8 @@ export const useProjectStore = create<ProjectState>()(
           const newRooms = [...state.rooms];
           const activeRoom = newRooms[state.activeRoomIndex];
           const newOpenings = [...activeRoom.openings];
-
-          newOpenings[openingIndex] = {
-            ...newOpenings[openingIndex],
-            [field]: value,
-          };
-
-          newRooms[state.activeRoomIndex] = {
-            ...activeRoom,
-            openings: newOpenings,
-          };
+          newOpenings[openingIndex] = { ...newOpenings[openingIndex], [field]: value };
+          newRooms[state.activeRoomIndex] = { ...activeRoom, openings: newOpenings };
           return { rooms: newRooms };
         }),
 
@@ -203,13 +194,19 @@ export const useProjectStore = create<ProjectState>()(
         set((state) => {
           const newRooms = [...state.rooms];
           const activeRoom = newRooms[state.activeRoomIndex];
-          const newOpenings = activeRoom.openings.filter(
-            (_, i) => i !== openingIndex,
-          );
-
           newRooms[state.activeRoomIndex] = {
             ...activeRoom,
-            openings: newOpenings,
+            openings: activeRoom.openings.filter((_, i) => i !== openingIndex),
+          };
+          return { rooms: newRooms };
+        }),
+
+      updateRepairOptions: (roomIndex, options) =>
+        set((state) => {
+          const newRooms = [...state.rooms];
+          newRooms[roomIndex] = {
+            ...newRooms[roomIndex],
+            repair_options: { ...newRooms[roomIndex].repair_options, ...options },
           };
           return { rooms: newRooms };
         }),
@@ -218,13 +215,11 @@ export const useProjectStore = create<ProjectState>()(
         set((state) => {
           const newRooms = [...state.rooms];
           const activeRoom = newRooms[state.activeRoomIndex];
-
           newRooms[state.activeRoomIndex] = {
             ...activeRoom,
             points: [],
             openings: [],
           };
-
           return { rooms: newRooms };
         }),
 
@@ -232,7 +227,6 @@ export const useProjectStore = create<ProjectState>()(
         set((state) => {
           const newRooms = [...state.rooms];
           const activeRoom = newRooms[state.activeRoomIndex];
-
           newRooms[state.activeRoomIndex] = {
             ...activeRoom,
             height: demoRoomData.height,
@@ -243,7 +237,6 @@ export const useProjectStore = create<ProjectState>()(
               id: crypto.randomUUID(),
             })),
           };
-
           return { rooms: newRooms };
         }),
 

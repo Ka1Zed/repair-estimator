@@ -19,7 +19,7 @@ interface EstimateResponse {
   labor: LaborItem[];
 }
 export function EstimateResult() {
-  const { rooms, repair_type } = useProjectStore();
+  const { rooms, repair_type, repair_options } = useProjectStore();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [estimateData, setEstimateData] = useState<EstimateResponse | null>(null);
@@ -30,8 +30,8 @@ export function EstimateResult() {
     try {
       const payload = {
         city: "Казань", // TODO: взять из стора когда появится поле city
-        repair_type: repair_type,
-        repair_options: rooms[0]?.repair_options ?? {},
+        repair_type,
+        repair_options,
         rooms: rooms.map(room => ({
           name: room.name,
           room_type: room.room_type,

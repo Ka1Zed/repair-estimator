@@ -102,10 +102,13 @@ def override_get_db(setup_test_db):
     app.dependency_overrides.pop(get_db, None)
 
 @pytest.fixture
-def db_session():
-    """Возвращает тестовую сессию БД для модульных тестов сервисов."""
+def db_session(setup_test_db):
+    """Возвращает тестовую сессию БД для модульных тестов сервисов.
+    Зависит от setup_test_db, чтобы таблицы были созданы и заполнены."""
     db = TestingSessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+        

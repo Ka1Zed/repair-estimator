@@ -12,9 +12,17 @@ import { useProjectStore } from '../../store/projectStore';
 import { calculateEstimate } from '../../api/estimates';
 
 
+interface GeometryData {
+  floor_area: number;
+  ceiling_area: number;
+  wall_area: number;
+  perimeter: number;
+}
+
 // Обновляем интерфейс всего ответа
 interface EstimateResponse {
   summary: SummaryData;
+  geometry: GeometryData;
   materials: MaterialItem[];
   labor: LaborItem[];
 }
@@ -85,6 +93,17 @@ export function EstimateResult() {
       {/* Отрисовываем таблицы ТОЛЬКО если данные успешно пришли */}
       {!isLoading && !error && estimateData && (
         <>
+          {estimateData.geometry && (
+            <Card title="Параметры помещения" style={{ marginTop: '25px' }}>
+              <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', fontSize: '14px' }}>
+                <span>Площадь пола: <strong>{estimateData.geometry.floor_area} м²</strong></span>
+                <span>Площадь потолка: <strong>{estimateData.geometry.ceiling_area} м²</strong></span>
+                <span>Площадь стен: <strong>{estimateData.geometry.wall_area} м²</strong></span>
+                <span>Периметр: <strong>{estimateData.geometry.perimeter} м</strong></span>
+              </div>
+            </Card>
+          )}
+
           <EstimateSummary summary={estimateData.summary} />
 
           <Card title="Детальный расчет" style={{ marginTop: '25px' }}>

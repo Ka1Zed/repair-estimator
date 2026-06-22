@@ -16,6 +16,7 @@ from app.services.material_calc_service import calculate_materials, packs_to_buy
 from app.services.labor_calc_service import calculate_labor
 from app.services.repair_coeffs_service import apply_repair_coeffs
 from app.services.price_aggregator_service import get_price
+from app.parsers.megastroy_parser import MegastroyParser
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
@@ -59,6 +60,8 @@ def calculate_estimate(
         )
         all_labor.extend(labor)
 
+    parser = MegastroyParser()
+
     # Агрегация материалов с округлением до упаковок
     mat_groups: Dict[int, Dict] = {}
     for mat in all_materials:
@@ -83,7 +86,7 @@ def calculate_estimate(
         packs = packs_to_buy(group['pack_quantity'])
         final_quantity = Decimal(packs) * group['package_size']
 
-        price_obj = get_price(name)
+        price_obj = get_price(name, parser=parser)
         if not price_obj:
             logger.warning(f"Цена для материала '{name}' не найдена, пропускаем")
             continue

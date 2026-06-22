@@ -14,7 +14,7 @@ from app.schemas.estimate import (
 from app.services.geometry_service import calculate_room_geometry
 from app.services.material_calc_service import calculate_materials, packs_to_buy
 from app.services.labor_calc_service import calculate_labor
-from app.services.repair_coeffs_service import apply_repair_coeffs
+from app.services.repair_coeffs_service import apply_repair_coeffs, REPAIR_COEFFS, CONTINGENCY
 from app.services.price_aggregator_service import get_price
 from app.parsers.megastroy_parser import MegastroyParser
 
@@ -62,6 +62,10 @@ def calculate_estimate(
 
     parser = MegastroyParser()
 
+    # Множитель строк детализации: коэффициент типа ремонта × непредвиденные расходы (avg).
+    # Нужен, чтобы сумма построчных total_avg точно совпадала с summary.*_avg.
+    line_factor = REPAIR_COEFFS[request.repair_type] * CONTINGENCY['avg']
+
     # Агрегация материалов с округлением до упаковок
     mat_groups: Dict[int, Dict] = {}
     for mat in all_materials:
@@ -88,11 +92,23 @@ def calculate_estimate(
 
         price_obj = get_price(name, parser=parser)
         if not price_obj:
-            logger.warning(f"Цена для материала '{name}' не найдена, пропускаем")
+            # Цены нет даже в seed — не теряем позицию молча, показываем её с пометкой.
+            logger.warning(f"Цена для материала '{name}' не найдена, показываем без цены")
+            materials_response.append(MaterialItem(
+                name=name,
+                quantity=float(final_quantity),
+                unit=group['unit'],
+                price_avg=0.0,
+                total_avg=0.0,
+                source="нет цены",
+                updated_at=""
+            ))
             continue
 
         price_avg = price_obj.price_avg
-        total_avg = final_quantity * price_avg
+        # Строчный итог уже включает коэффициент ремонта и непредвиденные, чтобы
+        # сумма строк совпадала с summary (см. line_factor).
+        total_avg = final_quantity * price_avg * line_factor
         source = db.query(PriceSource).filter(PriceSource.id == price_obj.source_id).first()
         source_name = source.name if source else "unknown"
         updated_at = price_obj.updated_at.strftime("%Y-%m-%d") if price_obj.updated_at else ""
@@ -138,7 +154,12 @@ def calculate_estimate(
 
         volume = group['volume']
         price_avg = labor_price.price_avg
-        total_avg = volume * price_avg
+        # Строчный итог включает коэффициент ремонта и непредвиденные (как и у материалов).
+        total_avg = volume * price_avg * line_factor
+        labor_source = db.query(PriceSource).filter(
+            PriceSource.id == labor_price.source_id
+        ).first()
+        labor_source_name = labor_source.name if labor_source else "seed"
 
         labor_response.append(LaborItem(
             service=service,
@@ -147,7 +168,7 @@ def calculate_estimate(
             unit=group['unit'],
             price_avg=float(price_avg),
             total_avg=float(total_avg),
-            source="seed"
+            source=labor_source_name
         ))
 
         labor_sum['min'] += volume * labor_price.price_min

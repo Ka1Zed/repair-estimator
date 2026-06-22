@@ -10,6 +10,10 @@ class DBSettings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
 
+    # Сколько часов считать спарсенную цену актуальной, прежде чем дёргать парсер снова.
+    # Запрос сметы не ходит в интернет, если в БД есть свежая цена парсера.
+    PRICE_TTL_HOURS: int = 24
+
     model_config = SettingsConfigDict(env_file=ENV_PATH, env_file_encoding="utf8", extra="ignore")
 
     @property

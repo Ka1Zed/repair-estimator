@@ -1,6 +1,7 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.db.models import Material, MaterialPrice, PriceSource, LaborService, LaborPrice
 from app.parsers.base import BaseParser
@@ -8,16 +9,34 @@ from app.parsers.base import BaseParser
 logger = logging.getLogger(__name__)
 
 
-def get_price(material_name: str, parser: BaseParser | None = None) -> MaterialPrice | None:
-    '''
-    Возвращает актуальную цену для материала
+def _is_fresh(updated_at: datetime | None, ttl_hours: int) -> bool:
+    '''Цена считается актуальной, если её обновляли позже, чем ttl_hours назад.'''
+    if updated_at is None:
+        return False
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - updated_at < timedelta(hours=ttl_hours)
 
-    Логика:
-    1. Если парсер передан - пробуем получить цену через него
-    2. Если парсер упал (любая ошибка) или не передан - берём seed-цену из БД.
-    3. При успешном парсинге - сохраняем свежую цену в БД (source = парсер)
-    4. Наверх исключение не пробрасываем никогда
+
+def get_price(
+    material_name: str,
+    parser: BaseParser | None = None,
+    ttl_hours: int | None = None,
+    force_refresh: bool = False,
+) -> MaterialPrice | None:
     '''
+    Возвращает актуальную цену для материала.
+
+    Логика (TTL-кэш, чтобы расчёт сметы не ходил в интернет на каждый запрос):
+    1. Если есть свежая (моложе ttl_hours) цена парсера в БД — возвращаем её, не трогая сайт.
+    2. Иначе, если передан парсер — пробуем спарсить и сохранить свежую цену.
+    3. Если парсер упал/не передан/нет источника — берём seed-цену из БД.
+    4. force_refresh=True заставляет дёрнуть парсер даже при свежем кэше (для CLI update_prices).
+    5. Наверх исключение не пробрасываем никогда.
+    '''
+    if ttl_hours is None:
+        ttl_hours = settings.PRICE_TTL_HOURS
+
     session = SessionLocal()
     try:
         material = session.query(Material).filter(Material.name == material_name).first()
@@ -27,21 +46,26 @@ def get_price(material_name: str, parser: BaseParser | None = None) -> MaterialP
 
         # Пробуем парсер
         if parser is not None:
+            source = session.query(PriceSource).filter(
+                PriceSource.name == parser.source_name
+            ).first()
+
+            price_entry = None
+            if source:
+                price_entry = session.query(MaterialPrice).filter(
+                    MaterialPrice.material_id == material.id,
+                    MaterialPrice.source_id == source.id
+                ).first()
+
+            # Свежий кэш парсера — отдаём без сетевого запроса
+            if not force_refresh and price_entry and _is_fresh(price_entry.updated_at, ttl_hours):
+                logger.info(f"Цена для '{material_name}' взята из кэша {parser.source_name}")
+                return price_entry
+
             try:
                 parsed = parser.fetch_price(material_name)
 
-                # Находим или создаем запись источника
-                source = session.query(PriceSource).filter(
-                    PriceSource.name == parser.source_name
-                ).first()
-
                 if source:
-                    # Ищем существующую запись цены для этого источника
-                    price_entry = session.query(MaterialPrice).filter(
-                        MaterialPrice.material_id == material.id,
-                        MaterialPrice.source_id == source.id
-                    ).first()
-
                     if price_entry:
                         # Обновляем
                         price_entry.price_min = parsed.price_min

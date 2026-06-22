@@ -2,7 +2,7 @@ import { Table } from "../ui/Table";
 import styles from "./EstimateTables.module.css";
 
 // Поля строго по контракту docs/api.md (labor[])
-interface LaborItem {
+export interface LaborItem {
   service: string;
   specialist: string;
   volume: number;

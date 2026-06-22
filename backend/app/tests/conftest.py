@@ -34,7 +34,14 @@ def seed_test_data(session):
         url="http://localhost",
         last_checked=datetime.now(timezone.utc)
     )
+    src_megastroy = PriceSource(
+        name="Мегастрой",
+        type="parser",
+        url="https://megastroy.com",
+        last_checked=datetime.now(timezone.utc)
+    )
     session.add(src)
+    session.add(src_megastroy)
     session.flush()
 
     # Материалы (с категорией)

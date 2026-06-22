@@ -1,24 +1,21 @@
-# app/schemas/estimate.py
-
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
-# ---- Входные схемы ----
 class Point(BaseModel):
     x: float
     y: float
 
 class Opening(BaseModel):
-    type: str  # "door" | "window"
+    type: str
     width: float
     height: float
 
 class RoomInput(BaseModel):
     name: str
     height: float = Field(gt=0)
-    points: List[Point] = Field(min_items=3)
-    room_type: str  # "living", "bedroom", etc.
+    points: List[Point] = Field(min_length=3)
+    room_type: str
     openings: List[Opening] = []
 
 class RepairOptions(BaseModel):
@@ -36,7 +33,6 @@ class EstimateRequest(BaseModel):
     repair_options: RepairOptions
 
 
-# ---- Выходные схемы ----
 class GeometrySummary(BaseModel):
     floor_area: float
     ceiling_area: float
@@ -50,7 +46,7 @@ class MaterialItem(BaseModel):
     price_avg: float
     total_avg: float
     source: str
-    updated_at: str  # YYYY-MM-DD
+    updated_at: str
 
 class LaborItem(BaseModel):
     service: str

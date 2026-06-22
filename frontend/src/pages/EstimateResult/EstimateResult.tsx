@@ -23,24 +23,25 @@ export function EstimateResult() {
   const laborTotal = mockLabors.reduce((acc, item) => acc + item.total_avg, 0);
   const totalCost = matTotal + laborTotal;
   const mockSummary = {
-  materials_min: 45000, 
-  materials_avg: 52000, 
-  materials_max: 61000, 
-  labor_min: 70000, 
-  labor_avg: 85000,
-  labor_max: 105000, 
-  total_min: 115000, 
-  total_avg: 137000, 
-  total_max: 166000
-};
+    materials_min: 45000,
+    materials_avg: 52000,
+    materials_max: 61000,
+    labor_min: 70000,
+    labor_avg: 85000,
+    labor_max: 105000,
+    total_min: 115000,
+    total_avg: 137000,
+    total_max: 166000,
+  };
 
   return (
     <div className={styles.container}>
       <div className={styles.headerRow}>
         <h2>Результат расчёта сметы</h2>
-        <EstimateSummary summary={mockSummary} />
         <Button variant="secondary" onClick={() => window.print()}>Печать сметы</Button>
       </div>
+
+      <EstimateSummary summary={mockSummary} />
 
       <RepairOptionsForm />
 

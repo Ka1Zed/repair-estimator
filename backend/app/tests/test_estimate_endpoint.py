@@ -235,4 +235,3 @@ def test_two_rooms_grouping_and_rounding():
     double_total_avg = data["summary"]["total_avg"]
     # Из-за округления double может быть не ровно в 2 раза, но должно быть больше single
     assert double_total_avg > single_total_avg
-

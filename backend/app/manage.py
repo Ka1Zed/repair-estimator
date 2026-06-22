@@ -33,7 +33,7 @@ def update_prices():
 
     for name in material_names:
         try:
-            price = get_price(name, parser=parser)
+            price = get_price(name, parser=parser, force_refresh=True)
             if price:
                 logger.info(f"  ✓ {name}: avg={price.price_avg}")
                 success += 1

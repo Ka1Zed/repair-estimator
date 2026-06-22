@@ -263,10 +263,45 @@ PAINT_PAYLOAD = {
 }
 
 
+def test_detail_totals_match_summary():
+    """Сумма построчных total_avg должна совпадать с summary.*_avg (детализация бьётся с итогом)."""
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    data = response.json()
+
+    materials_sum = sum(m["total_avg"] for m in data["materials"])
+    labor_sum = sum(lab["total_avg"] for lab in data["labor"])
+
+    assert materials_sum == pytest.approx(data["summary"]["materials_avg"], rel=1e-6)
+    assert labor_sum == pytest.approx(data["summary"]["labor_avg"], rel=1e-6)
+    # И итог равен сумме материалов и работ
+    assert data["summary"]["total_avg"] == pytest.approx(
+        data["summary"]["materials_avg"] + data["summary"]["labor_avg"], rel=1e-6
+    )
+
+
+def _clear_parser_prices():
+    """Удаляет закэшированные цены парсера 'Мегастрой', чтобы тесты не зависели
+    от порядка выполнения (из-за TTL-кэша свежая цена иначе переживает между тестами)."""
+    from app.tests.conftest import TestingSessionLocal
+    from app.db.models import MaterialPrice, PriceSource
+
+    s = TestingSessionLocal()
+    try:
+        mega = s.query(PriceSource).filter(PriceSource.name == "Мегастрой").first()
+        if mega:
+            s.query(MaterialPrice).filter(MaterialPrice.source_id == mega.id).delete()
+            s.commit()
+    finally:
+        s.close()
+
+
 def test_parser_source_in_response(monkeypatch):
     """Когда парсер отдаёт цену, source у краски становится 'Мегастрой', а не 'seed'."""
     from decimal import Decimal
     from app.parsers.base import ParsedPrice
+
+    _clear_parser_prices()
 
     def fake_fetch(self, material_name):
         return ParsedPrice(
@@ -289,6 +324,8 @@ def test_parser_source_in_response(monkeypatch):
 
 def test_parser_fallback_on_error(monkeypatch):
     """Когда парсер падает, расчёт не ломается и source остаётся 'seed'."""
+    _clear_parser_prices()
+
     def failing_fetch(self, material_name):
         raise RuntimeError("сайт недоступен")
 

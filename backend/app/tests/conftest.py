@@ -49,6 +49,7 @@ def seed_test_data(session):
         {"name": "Плиточный клей", "category": "tile", "unit": "кг", "consumption_per_m2": 3.5, "waste_factor": 1.1, "package_size": 25},
         {"name": "Затирка", "category": "tile", "unit": "кг", "consumption_per_m2": 0.5, "waste_factor": 1.1, "package_size": 2},
         {"name": "Обои", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1},
+        {"name": "Линолеум", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.0, "package_size": 1.0},
     ]
     for m in materials_data:
         mat = Material(**m)
@@ -111,4 +112,3 @@ def db_session(setup_test_db):
     finally:
         db.close()
 
-        

@@ -104,7 +104,7 @@ export default function BlueprintUpload() {
     fontSize: "11px",
     letterSpacing: ".16em",
     textTransform: "uppercase",
-    color: "#B0B0B0",
+    color: "var(--text)",
     marginBottom: "8px",
     display: "flex",
     alignItems: "center",
@@ -117,7 +117,7 @@ export default function BlueprintUpload() {
     padding: "20px",
     textAlign: "center",
     cursor: uploading ? "not-allowed" : "pointer",
-    color: "#6B6B6B",
+    color: "var(--text)",
     fontSize: "13px",
     transition: "border-color 0.15s",
   };
@@ -129,9 +129,9 @@ export default function BlueprintUpload() {
         <span
           style={{
             fontSize: "10px",
-            background: "#2a2a2a",
-            color: "#B0B0B0",
-            border: "1px solid var(--border)",
+            background: "var(--accent-bg)",
+            color: "var(--accent)",
+            border: "1px solid var(--accent-border)",
             borderRadius: "3px",
             padding: "1px 6px",
             letterSpacing: ".08em",
@@ -161,7 +161,7 @@ export default function BlueprintUpload() {
           <>
             PNG / JPG / PDF · до 10 MB
             <br />
-            <span style={{ fontSize: "12px", color: "#B0B0B0" }}>
+            <span style={{ fontSize: "12px", color: "var(--text)" }}>
               нажмите или перетащите файл
             </span>
           </>
@@ -173,10 +173,10 @@ export default function BlueprintUpload() {
           style={{
             marginTop: "10px",
             padding: "10px",
-            background: "#2a1a1a",
-            border: "1px solid #6b2020",
+            background: "#fdecea",
+            border: "1px solid #f5c6c2",
             borderRadius: "4px",
-            color: "#f44336",
+            color: "#c0392b",
             fontSize: "13px",
           }}
         >
@@ -189,7 +189,7 @@ export default function BlueprintUpload() {
           style={{
             marginTop: "12px",
             padding: "12px",
-            background: "#1e1e1e",
+            background: "var(--bg-canvas)",
             border: "1px solid var(--border)",
             borderRadius: "6px",
             fontSize: "13px",
@@ -203,7 +203,7 @@ export default function BlueprintUpload() {
               marginBottom: "8px",
             }}
           >
-            <span style={{ color: "#B0B0B0" }}>
+            <span style={{ color: "var(--text)" }}>
               {METHOD_LABEL[result.method] ?? result.method}
             </span>
             <span
@@ -216,7 +216,7 @@ export default function BlueprintUpload() {
             </span>
           </div>
 
-          <div style={{ color: "#ccc", marginBottom: "6px" }}>
+          <div style={{ color: "var(--text-h)", marginBottom: "6px" }}>
             Точек: {result.points.length}
             {result.height !== null && ` · Высота: ${result.height} м`}
             {result.openings.length > 0 &&
@@ -224,7 +224,7 @@ export default function BlueprintUpload() {
           </div>
 
           {result.raw_dimensions.length > 0 && (
-            <div style={{ color: "#6B6B6B", marginBottom: "6px", fontSize: "12px" }}>
+            <div style={{ color: "var(--text)", marginBottom: "6px", fontSize: "12px" }}>
               {result.raw_dimensions.join(", ")}
             </div>
           )}
@@ -249,9 +249,9 @@ export default function BlueprintUpload() {
               style={{
                 marginTop: "10px",
                 padding: "7px 14px",
-                background: applied ? "#2a2a2a" : "var(--text-h)",
-                color: applied ? "#6B6B6B" : "#fff",
-                border: "none",
+                background: applied ? "var(--bg)" : "var(--text-h)",
+                color: applied ? "var(--text)" : "#fff",
+                border: applied ? "1px solid var(--border)" : "none",
                 borderRadius: "3px",
                 fontSize: "12px",
                 cursor: applied ? "default" : "pointer",
@@ -265,7 +265,7 @@ export default function BlueprintUpload() {
             style={{
               margin: "10px 0 0",
               fontSize: "11px",
-              color: "#6B6B6B",
+              color: "var(--text)",
               fontStyle: "italic",
             }}
           >

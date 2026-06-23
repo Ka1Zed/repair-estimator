@@ -50,9 +50,9 @@ export default function OpeningsForm() {
                     }
                     style={{
                       padding: "5px",
-                      background: "#333",
-                      color: "#fff",
-                      border: "1px solid #555",
+                      background: "#fff",
+                      color: "var(--text-h)",
+                      border: "1px solid var(--border)",
                       borderRadius: "4px",
                     }}
                   >
@@ -74,9 +74,9 @@ export default function OpeningsForm() {
                     style={{
                       width: "80px",
                       padding: "5px",
-                      background: "#333",
-                      color: "#fff",
-                      border: "1px solid #555",
+                      background: "#fff",
+                      color: "var(--text-h)",
+                      border: "1px solid var(--border)",
                       borderRadius: "4px",
                     }}
                   />
@@ -95,9 +95,9 @@ export default function OpeningsForm() {
                     style={{
                       width: "80px",
                       padding: "5px",
-                      background: "#333",
-                      color: "#fff",
-                      border: "1px solid #555",
+                      background: "#fff",
+                      color: "var(--text-h)",
+                      border: "1px solid var(--border)",
                       borderRadius: "4px",
                     }}
                   />
@@ -108,10 +108,10 @@ export default function OpeningsForm() {
                     style={{
                       padding: "5px 10px",
                       cursor: "pointer",
-                      background: "#551111",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "4px",
+                      background: "#fff",
+                      color: "#B5524A",
+                      border: "1px solid #E3C9C4",
+                      borderRadius: "3px",
                     }}
                   >
                     Удалить
@@ -128,10 +128,12 @@ export default function OpeningsForm() {
         style={{
           padding: "8px 15px",
           cursor: "pointer",
-          background: "#4a90e2",
-          color: "white",
+          background: "var(--accent)",
+          color: "#fff",
           border: "none",
-          borderRadius: "4px",
+          borderRadius: "3px",
+          fontSize: "13px",
+          letterSpacing: ".01em",
         }}
       >
         + Добавить проем

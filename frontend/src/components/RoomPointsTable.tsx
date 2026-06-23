@@ -98,10 +98,10 @@ export default function RoomPointsTable() {
                   style={{
                     padding: "5px 10px",
                     cursor: "pointer",
-                    background: "#551111",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
+                    background: "#fff",
+                    color: "#B5524A",
+                    border: "1px solid #E3C9C4",
+                    borderRadius: "3px",
                   }}
                 >
                   Удалить
@@ -117,10 +117,12 @@ export default function RoomPointsTable() {
         style={{
           padding: "8px 15px",
           cursor: "pointer",
-          background: "#225522",
-          color: "white",
+          background: "var(--accent)",
+          color: "#fff",
           border: "none",
-          borderRadius: "4px",
+          borderRadius: "3px",
+          fontSize: "13px",
+          letterSpacing: ".01em",
         }}
       >
         + Добавить точку

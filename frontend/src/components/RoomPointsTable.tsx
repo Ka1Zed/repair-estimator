@@ -1,18 +1,13 @@
-import { useState } from "react";
-import RoomPolygonPreview from "./RoomPolygonPreview";
-
-interface Point {
-  x: number | string;
-  y: number | string;
-}
+import { useProjectStore } from "../store/projectStore";
 
 export default function RoomPointsTable() {
-  const [points, setPoints] = useState<Point[]>([
-    { x: 0, y: 0 },
-    { x: 4, y: 0 },
-    { x: 4, y: 3 },
-    { x: 0, y: 3 },
-  ]);
+  const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
+  const points = useProjectStore(
+    (state) => state.rooms[activeRoomIndex].points,
+  );
+
+  const setPoints = useProjectStore((state) => state.setPoints);
+  const updatePoint = useProjectStore((state) => state.updatePoint);
 
   const handleAddPoint = () => {
     setPoints([...points, { x: 0, y: 0 }]);
@@ -31,33 +26,17 @@ export default function RoomPointsTable() {
     field: "x" | "y",
     value: string,
   ) => {
-    const newPoints = [...points];
-
     if (value === "") {
-      newPoints[index][field] = "";
-      setPoints(newPoints);
+      if (field === "x") updatePoint(index, "", points[index].y);
+      else updatePoint(index, points[index].x, "");
       return;
     }
 
-    let cleanValue = value.replace(/^0+(?=\d)/, "");
-    if (
-      cleanValue.startsWith("-0") &&
-      cleanValue.length > 2 &&
-      cleanValue[2] !== "."
-    ) {
-      cleanValue = "-" + cleanValue.slice(2);
-    }
-
-    if (cleanValue === "-") {
-      newPoints[index][field] = "-";
-      setPoints(newPoints);
-      return;
-    }
-
-    const num = Number(cleanValue);
+    const num = Number(value);
+    // Убрали проверку на num >= 0, теперь можно вводить минус
     if (!isNaN(num)) {
-      newPoints[index][field] = num;
-      setPoints(newPoints);
+      if (field === "x") updatePoint(index, num, points[index].y);
+      else updatePoint(index, points[index].x, num);
     }
   };
 
@@ -94,7 +73,7 @@ export default function RoomPointsTable() {
               <td>
                 <input
                   type="number"
-                  min="0"
+                  step="0.1"
                   value={point.x}
                   onChange={(e) =>
                     handlePointChange(index, "x", e.target.value)
@@ -105,7 +84,7 @@ export default function RoomPointsTable() {
               <td>
                 <input
                   type="number"
-                  min="0"
+                  step="0.1"
                   value={point.y}
                   onChange={(e) =>
                     handlePointChange(index, "y", e.target.value)
@@ -146,8 +125,6 @@ export default function RoomPointsTable() {
       >
         + Добавить точку
       </button>
-
-      <RoomPolygonPreview points={points} />
     </div>
   );
 }

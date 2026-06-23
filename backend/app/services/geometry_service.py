@@ -70,7 +70,7 @@ def perimeter(points: List[Union[tuple, list, dict]]) -> Decimal:
         perim += distance
     return perim
 
-def wall_area(points: List[Union[tuple, list, dict]], height: Union[int, float, str, Decimal]) -> Decimal:
+def wall_area(points: List[Union[tuple, list, dict]], height: Union[int, float, str, Decimal], openings=None) -> Decimal:
     """
     Площадь стен = периметр × высота (Decimal).
     
@@ -81,5 +81,43 @@ def wall_area(points: List[Union[tuple, list, dict]], height: Union[int, float, 
     Возвращает:
         площадь стен.
     """
-    return perimeter(points) * to_decimal(height)
+    if openings is None:
+        openings = []
+    perim = perimeter(points)
+    wall_area_before = perim * to_decimal(height)
+    # Вычитаем площади проёмов
+    opening_area = Decimal('0.0')
+    for opening in openings:
+        # opening может быть словарём или объектом с полями width, height
+        w = opening.get('width') if isinstance(opening, dict) else opening.width
+        h = opening.get('height') if isinstance(opening, dict) else opening.height
+        opening_area += to_decimal(w) * to_decimal(h)
+    return wall_area_before - opening_area
 
+def calculate_room_geometry(points, height, openings=None):
+    if points and isinstance(points[0], dict):
+        pts = [(p['x'], p['y']) for p in points]
+    else:
+        pts = [(float(p[0]), float(p[1])) for p in points]
+
+    floor = floor_area(pts)
+    perim = perimeter(pts)
+
+    if openings is None:
+        openings = []
+    openings_dict = []
+    for op in openings:
+        if isinstance(op, dict):
+            openings_dict.append(op)
+        else:
+            _, w, h = op
+            openings_dict.append({'width': w, 'height': h})
+
+    wall = wall_area(pts, height, openings_dict)
+
+    return {
+        'floor_area': floor,
+        'ceiling_area': floor,
+        'wall_area': wall,
+        'perimeter': perim
+    }

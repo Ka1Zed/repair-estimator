@@ -1,64 +1,118 @@
+import  { useState } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { MaterialsTable } from '../../components/EstimateTables/MaterialsTable';
-import { LaborTable } from '../../components/EstimateTables/LaborTable';
+import { MaterialsTable, type MaterialItem } from '../../components/EstimateTables/MaterialsTable';
+import { LaborTable, type LaborItem } from '../../components/EstimateTables/LaborTable';
+import { RepairOptionsForm } from '../../components/RepairOptionsForm/RepairOptionsForm';
+import { EstimateSummary, type SummaryData } from '../../components/EstimateSummary';
 import styles from './EstimateResult.module.css';
 
-// Расширенные mock-данные по требованиям задачи #12
-const mockMaterials = [
-  { id: 1, name: 'Грунтовка глубокого проникновения', count: 2, unit: 'канистра', price: 450 },
-  { id: 2, name: 'Штукатурка гипcapitalовая (30 кг)', count: 12, unit: 'мешок', price: 550 },
-  { id: 3, name: 'Краска интерьерная матовая', count: 3, unit: 'галон', price: 3200 },
-];
 
-const mockLabors = [
-  { id: 1, workName: 'Выравнивание стен по маякам', specialist: 'Штукатур-маляр', volume: 70, price: 450 },
-  { id: 2, workName: 'Грунтовка поверхностей в 2 слоя', specialist: 'Мастер-отделочник', volume: 70, price: 80 },
-  { id: 3, workName: 'Покраска стен безвоздушная', specialist: 'Маляр', volume: 70, price: 200 },
-];
+import { useProjectStore } from '../../store/projectStore';
+import { calculateEstimate } from '../../api/estimates';
 
+
+interface GeometryData {
+  floor_area: number;
+  ceiling_area: number;
+  wall_area: number;
+  perimeter: number;
+}
+
+// Обновляем интерфейс всего ответа
+interface EstimateResponse {
+  summary: SummaryData;
+  geometry: GeometryData;
+  materials: MaterialItem[];
+  labor: LaborItem[];
+}
 export function EstimateResult() {
-  // Быстрый расчет общей суммы для верхней карточки
-  const matTotal = mockMaterials.reduce((acc, item) => acc + item.count * item.price, 0);
-  const laborTotal = mockLabors.reduce((acc, item) => acc + item.volume * item.price, 0);
-  const totalCost = matTotal + laborTotal;
+  const { rooms, repair_type, repair_options } = useProjectStore();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [estimateData, setEstimateData] = useState<EstimateResponse | null>(null);
+  const handleCalculate = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const payload = {
+        city: "Казань", // TODO: взять из стора когда появится поле city
+        repair_type,
+        repair_options,
+        rooms: rooms.map(room => ({
+          name: room.name,
+          room_type: room.room_type,
+          height: Number(room.height),
+          openings: room.openings.map(op => ({
+            ...op,
+            width: Number(op.width),
+            height: Number(op.height)
+          })),
+          points: room.points.map(p => ({
+            x: Number(p.x),
+            y: Number(p.y)
+          }))
+        }))
+      };
+
+    
+      const data = await calculateEstimate(payload);
+      setEstimateData(data as EstimateResponse);
+    } catch (err) {
+      console.error(err);
+      setError("Не удалось рассчитать смету. Проверьте подключение к серверу.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <div className={styles.container}>
+      {/* Шапка с кнопками */}
       <div className={styles.headerRow}>
         <h2>Результат расчёта сметы</h2>
-        <Button variant="secondary" onClick={() => window.print()}>Печать сметы</Button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <Button variant="primary" onClick={handleCalculate} disabled={isLoading}>
+            {isLoading ? 'Считаем...' : 'Рассчитать'}
+          </Button>
+          <Button variant="secondary" onClick={() => window.print()}>
+            Печать сметы
+          </Button>
+        </div>
       </div>
 
-      <div className={styles.statsGrid}>
-        <Card title="Общая стоимость ремонта" className={styles.totalCard}>
-          <div className={styles.priceValue}>
-            {totalCost.toLocaleString('ru-RU')} ₽
-          </div>
-          <p className={styles.subtext}>Материалы: {matTotal.toLocaleString('ru-RU')} ₽ | Работы: {laborTotal.toLocaleString('ru-RU')} ₽</p>
-        </Card>
+      <RepairOptionsForm />
 
-        <Card title="Характеристики помещений">
-          <div className={styles.paramItem}>
-            <span>Площадь пола:</span>
-            <strong>45 кв. м.</strong>
-          </div>
-          <div className={styles.paramItem}>
-            <span>Периметр комнат:</span>
-            <strong>28 м.</strong>
-          </div>
-          <div className={styles.paramItem}>
-            <span>Площадь стен:</span>
-            <strong>70 кв. м.</strong>
-          </div>
-        </Card>
-      </div>
+      {/* Показываем ошибки, если сервер упал */}
+      {error && <div style={{ color: 'red', marginTop: '20px' }}>{error}</div>}
 
-      {/* Выводим новые таблицы */}
-      <Card title="Детальный расчет" style={{ marginTop: '25px' }}>
-        <MaterialsTable data={mockMaterials} />
-        <LaborTable data={mockLabors} />
-      </Card>
+      {/* Показываем лоадер во время загрузки */}
+      {isLoading && <div style={{ marginTop: '20px', fontSize: '18px' }}>Загрузка данных с сервера... ⏳</div>}
+
+      {/* Отрисовываем таблицы ТОЛЬКО если данные успешно пришли */}
+      {!isLoading && !error && estimateData && (
+        <>
+          {estimateData.geometry && (
+            <Card title="Параметры помещения" style={{ marginTop: '25px' }}>
+              <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', fontSize: '14px' }}>
+                <span>Площадь пола: <strong>{estimateData.geometry.floor_area} м²</strong></span>
+                <span>Площадь потолка: <strong>{estimateData.geometry.ceiling_area} м²</strong></span>
+                <span>Площадь стен: <strong>{estimateData.geometry.wall_area} м²</strong></span>
+                <span>Периметр: <strong>{estimateData.geometry.perimeter} м</strong></span>
+              </div>
+            </Card>
+          )}
+
+          <EstimateSummary summary={estimateData.summary} />
+
+          <Card title="Детальный расчет" style={{ marginTop: '25px' }}>
+            {/* Передаем реальные массивы из estimateData в таблицы */}
+            <MaterialsTable data={estimateData.materials} />
+            <LaborTable data={estimateData.labor} />
+          </Card>
+        </>
+      )}
     </div>
   );
 }

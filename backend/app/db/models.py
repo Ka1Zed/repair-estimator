@@ -1,6 +1,7 @@
 from app.db.session import Base
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import ForeignKey, Numeric, func
+from sqlalchemy.dialects.postgresql import JSONB
 
 from datetime import datetime
 from decimal import Decimal
@@ -24,6 +25,8 @@ class Material(Base):
     category: Mapped[str]
     unit: Mapped[str]
     package_size: Mapped[float | None]   # nullable - просто через | None
+    consumption_per_m2: Mapped[float | None]   # расход на м²
+    waste_factor: Mapped[float | None]          # коэффициент запаса (1.1 / 1.08 ...)
 
 
 class LaborService(Base):
@@ -59,3 +62,12 @@ class LaborPrice(Base):
     price_max: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     region: Mapped[str | None]
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class RoomType(Base):
+    __tablename__ = "room_types"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(unique=True)   # living / kitchen / bathroom / hallway
+    label: Mapped[str]
+    rules: Mapped[dict] = mapped_column(JSONB)       # весь объект правил типа (floor/walls/.../plumbing)

@@ -40,23 +40,23 @@ class BlueprintService:
         self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
     def process_blueprint(self, file_bytes: bytes, filename: str) -> Dict[str, Any]:
-        print(f"[BP] START process_blueprint: {filename}", flush=True)
+        logger.debug(f"START process_blueprint: {filename}")
 
         if os.getenv("BLUEPRINT_MOCK", "").lower() == "true":
-            print("[BP] MOCK mode", flush=True)
+            logger.debug("MOCK mode")
             return self._mock_response()
 
         try:
             image = self._prepare_image(file_bytes, filename)
-            print(f"[BP] image ready: {image.size}", flush=True)
+            logger.debug(f"image ready: {image.size}")
         except NotImplementedError as e:
             return self._error_response(str(e))
         except Exception as e:
-            print(f"[BP] image error: {e}", flush=True)
+            logger.warning(f"image error: {e}")
             return self._error_response(f"Ошибка обработки файла: {str(e)}")
 
         method = self._choose_method()
-        print(f"[BP] method: {method}", flush=True)
+        logger.debug(f"method: {method}")
 
         try:
             if method == "gemini":
@@ -66,7 +66,7 @@ class BlueprintService:
             if method == "ollama":
                 return self._process_with_ollama(image)
         except Exception as e:
-            print(f"[BP] {method} error: {e}", flush=True)
+            logger.warning(f"{method} error: {e}")
             return self._error_response(f"Ошибка {method}: {str(e)}")
 
         return self._error_response("Нет доступного метода распознавания. Проверь .env и доступность Ollama/API.")
@@ -100,10 +100,10 @@ class BlueprintService:
             resp = requests.get(url, timeout=4)
             if resp.status_code == 200:
                 return True
-            print(f"[BP] Gemini API вернул {resp.status_code}, переключаюсь на Ollama", flush=True)
+            logger.warning(f"Gemini API вернул {resp.status_code}, переключаюсь на Ollama")
             return False
         except Exception:
-            print("[BP] Gemini API недоступен (сеть/регион), переключаюсь на Ollama", flush=True)
+            logger.warning("Gemini API недоступен (сеть/регион), переключаюсь на Ollama")
             return False
 
     def _mock_response(self) -> Dict[str, Any]:
@@ -142,34 +142,34 @@ class BlueprintService:
             models = [m["name"] for m in resp.json().get("models", [])]
             has_llava = any("llava" in m for m in models)
             if not has_llava:
-                print(f"[BP] Ollama запущен, но llava не найдена. Модели: {models}", flush=True)
+                logger.warning(f"Ollama запущен, но llava не найдена. Модели: {models}")
             return has_llava
         except Exception as e:
-            print(f"[BP] Ollama недоступен: {e}", flush=True)
+            logger.warning(f"Ollama недоступен: {e}")
             return False
 
     def _process_with_gemini(self, image: Image.Image) -> Dict[str, Any]:
         import google.generativeai as genai
         from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
-        print("[BP] configuring Gemini...", flush=True)
+        logger.debug("configuring Gemini...")
         genai.configure(api_key=self.gemini_key)
         model = genai.GenerativeModel("gemini-2.5-flash")
 
         # Уменьшаем до 1024px по длинной стороне — меньше токенов, быстрее
         image = self._resize_image(image, max_side=1024)
-        print(f"[BP] image resized to {image.size}", flush=True)
+        logger.debug(f"image resized to {image.size}")
 
-        print("[BP] calling generate_content (timeout=60s)...", flush=True)
+        logger.debug("calling generate_content (timeout=60s)...")
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(model.generate_content, [VISION_PROMPT, image])
             try:
                 response = future.result(timeout=60)
             except FuturesTimeout:
-                print("[BP] Gemini timeout!", flush=True)
+                logger.warning("Gemini timeout!")
                 raise RuntimeError("Gemini API не ответил за 60 секунд. Проверь соединение.")
 
-        print(f"[BP] Gemini response: {response.text[:300]}", flush=True)
+        logger.debug(f"Gemini response: {response.text[:300]}")
         result = self._parse_vision_json(response.text)
         result["method"] = "gemini"
         return result
@@ -183,7 +183,7 @@ class BlueprintService:
         image.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode()
 
-        print("[BP] calling Claude API (claude-opus-4-8)...", flush=True)
+        logger.debug("calling Claude API (claude-opus-4-8)...")
         client = anthropic.Anthropic(api_key=self.anthropic_key)
         response = client.messages.create(
             model="claude-opus-4-8",
@@ -206,7 +206,7 @@ class BlueprintService:
             ],
         )
         text = response.content[0].text
-        print(f"[BP] Claude response: {text[:300]}", flush=True)
+        logger.debug(f"Claude response: {text[:300]}")
         result = self._parse_vision_json(text)
         result["method"] = "claude"
         return result
@@ -225,11 +225,11 @@ class BlueprintService:
             "images": [b64],
             "stream": False,
         }
-        print(f"[BP] calling Ollama llava (timeout=180s, image size {len(b64)//1024}KB base64)...", flush=True)
+        logger.debug(f"calling Ollama llava (timeout=180s, image size {len(b64)//1024}KB base64)...")
         resp = requests.post(f"{self.ollama_url}/api/generate", json=payload, timeout=180)
         resp.raise_for_status()
         text = resp.json().get("response", "")
-        print(f"[BP] Ollama response: {text[:200]}", flush=True)
+        logger.debug(f"Ollama response: {text[:200]}")
         result = self._parse_vision_json(text)
         result["method"] = "ollama"
         return result

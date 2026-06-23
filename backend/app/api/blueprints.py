@@ -27,7 +27,9 @@ async def upload_blueprint(file: UploadFile = File(...)):
     1. Google Gemini Vision API (бесплатно, если есть GEMINI_API_KEY)
     2. Claude Vision API (платно, если есть ANTHROPIC_API_KEY)
     3. Ollama + LLaVA (локально, если запущен)
-    4. EasyOCR (базовый fallback, всегда доступен)
+
+    Если ни один метод не настроен, ответ вернётся с `success: false` и
+    предупреждением (сервер не падает).
 
     **⚠️ Важно:** Результат всегда требует ручной проверки и корректировки пользователем!
 

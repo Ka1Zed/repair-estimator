@@ -5,6 +5,8 @@ from typing import List, Optional, Literal
 class Point(BaseModel):
     x: float
     y: float
+    nx: Optional[float] = None
+    ny: Optional[float] = None
 
 
 class Opening(BaseModel):

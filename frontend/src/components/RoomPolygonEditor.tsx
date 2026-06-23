@@ -34,13 +34,14 @@ export default function RoomPolygonEditor() {
       <button
         onClick={resetProject}
         style={{
-          padding: "8px 12px",
-          background: "#c0392b",
-          color: "#fff",
-          border: "none",
-          borderRadius: "4px",
+          padding: "8px 14px",
+          background: "#fff",
+          color: "#B5524A",
+          border: "1px solid #E3C9C4",
+          borderRadius: "3px",
           cursor: "pointer",
-          fontSize: "14px",
+          fontSize: "13px",
+          letterSpacing: ".01em",
           marginRight: "auto",
         }}
       >
@@ -49,13 +50,14 @@ export default function RoomPolygonEditor() {
       <button
         onClick={clearActiveRoom}
         style={{
-          padding: "8px 12px",
-          background: "transparent",
-          color: "#e74c3c",
-          border: "1px solid #e74c3c",
-          borderRadius: "4px",
+          padding: "8px 14px",
+          background: "#fff",
+          color: "#8A8A8A",
+          border: "1px solid var(--border)",
+          borderRadius: "3px",
           cursor: "pointer",
-          fontSize: "14px",
+          fontSize: "13px",
+          letterSpacing: ".01em",
         }}
       >
         Очистить комнату
@@ -63,13 +65,14 @@ export default function RoomPolygonEditor() {
       <button
         onClick={loadDemoRoom}
         style={{
-          padding: "8px 12px",
-          background: "#3498db",
-          color: "#fff",
-          border: "none",
-          borderRadius: "4px",
+          padding: "8px 14px",
+          background: "var(--accent-bg)",
+          color: "var(--accent)",
+          border: "1px solid var(--accent-border)",
+          borderRadius: "3px",
           cursor: "pointer",
-          fontSize: "14px",
+          fontSize: "13px",
+          letterSpacing: ".01em",
         }}
       >
         Загрузить пример

@@ -1,9 +1,12 @@
 import { useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
+import BlueprintReview from "./BlueprintReview";
 
 interface Point {
   x: number;
   y: number;
+  nx?: number;
+  ny?: number;
 }
 
 interface Opening {
@@ -12,7 +15,7 @@ interface Opening {
   height: number;
 }
 
-interface BlueprintResult {
+export interface BlueprintResult {
   success: boolean;
   method: string;
   confidence: number;
@@ -38,8 +41,9 @@ export default function BlueprintUpload() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<BlueprintResult | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [applied, setApplied] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
 
   const setPoints = useProjectStore((s) => s.setPoints);
   const setHeight = useProjectStore((s) => s.setHeight);
@@ -47,8 +51,11 @@ export default function BlueprintUpload() {
   const handleFile = async (file: File) => {
     setError(null);
     setResult(null);
-    setApplied(false);
+    setReviewing(false);
     setUploading(true);
+    // Старый превью-URL больше не нужен — освобождаем
+    if (imageUrl) URL.revokeObjectURL(imageUrl);
+    setImageUrl(URL.createObjectURL(file));
 
     const formData = new FormData();
     formData.append("file", file);
@@ -66,11 +73,8 @@ export default function BlueprintUpload() {
 
       const data: BlueprintResult = await res.json();
       setResult(data);
-
-      // Автоприменение при высокой уверенности
-      if (data.confidence >= 0.7 && data.points.length >= 3) {
-        applyResult(data);
-      }
+      // Никакого авто-применения: ведём через ручную проверку и калибровку
+      if (data.points.length >= 3) setReviewing(true);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Неизвестная ошибка");
     } finally {
@@ -78,14 +82,10 @@ export default function BlueprintUpload() {
     }
   };
 
-  const applyResult = (r: BlueprintResult) => {
-    if (r.points.length >= 3) {
-      setPoints(r.points);
-    }
-    if (r.height !== null) {
-      setHeight(String(r.height));
-    }
-    setApplied(true);
+  const handleApply = (points: Point[], height: number | null) => {
+    setPoints(points);
+    if (height !== null) setHeight(String(height));
+    setReviewing(false);
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -242,35 +242,27 @@ export default function BlueprintUpload() {
             </div>
           ))}
 
-          {result.points.length >= 3 && (
-            <button
-              onClick={() => applyResult(result)}
-              disabled={applied}
+          {reviewing && imageUrl && result.points.length >= 3 ? (
+            <BlueprintReview
+              imageUrl={imageUrl}
+              result={result}
+              onApply={handleApply}
+              onCancel={() => setReviewing(false)}
+            />
+          ) : (
+            <p
               style={{
-                marginTop: "10px",
-                padding: "7px 14px",
-                background: applied ? "var(--bg)" : "var(--text-h)",
-                color: applied ? "var(--text)" : "#fff",
-                border: applied ? "1px solid var(--border)" : "none",
-                borderRadius: "3px",
-                fontSize: "12px",
-                cursor: applied ? "default" : "pointer",
+                margin: "10px 0 0",
+                fontSize: "11px",
+                color: "var(--text)",
+                fontStyle: "italic",
               }}
             >
-              {applied ? "Применено" : "Применить точки"}
-            </button>
+              {result.points.length >= 3
+                ? "Точки применены в редактор"
+                : "Не удалось распознать контур — нужно минимум 3 точки"}
+            </p>
           )}
-
-          <p
-            style={{
-              margin: "10px 0 0",
-              fontSize: "11px",
-              color: "var(--text)",
-              fontStyle: "italic",
-            }}
-          >
-            Результат требует ручной проверки
-          </p>
         </div>
       )}
     </div>

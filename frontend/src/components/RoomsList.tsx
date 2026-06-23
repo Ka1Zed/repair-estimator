@@ -12,109 +12,84 @@ export default function RoomsList() {
   return (
     <div
       style={{
-        padding: "20px",
-        background: "#222",
-        borderRadius: "8px",
-        width: "100%",
-        maxWidth: "250px",
-        color: "#fff",
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        flexWrap: "wrap",
+        marginBottom: "32px",
       }}
     >
-      <div
+      {rooms.map((room, index) => {
+        const active = activeRoomIndex === index;
+        return (
+          <div
+            key={room.id}
+            onClick={() => setActiveRoom(index)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "7px 13px",
+              border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
+              background: active ? "var(--bg-canvas)" : "transparent",
+              borderRadius: "3px",
+              cursor: "pointer",
+              transition: "all .15s",
+            }}
+          >
+            <input
+              type="text"
+              value={room.name}
+              onChange={(e) => updateRoomName(index, e.target.value)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveRoom(index);
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                fontSize: "12.5px",
+                letterSpacing: ".01em",
+                color: active ? "var(--text-h)" : "#6B6B6B",
+                width: Math.max(64, room.name.length * 8),
+              }}
+            />
+
+            {rooms.length > 1 && (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteRoom(index);
+                }}
+                style={{
+                  fontSize: "13px",
+                  color: "#C4C4C4",
+                  lineHeight: 1,
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </span>
+            )}
+          </div>
+        );
+      })}
+
+      <button
+        onClick={addRoom}
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "15px",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          fontSize: "12.5px",
+          color: "#9A9A9A",
+          padding: "7px 6px",
+          letterSpacing: ".01em",
         }}
       >
-        <h3 style={{ margin: 0 }}>Помещения</h3>
-        <button
-          onClick={addRoom}
-          style={{
-            background: "#5cba5c",
-            color: "#fff",
-            border: "none",
-            padding: "6px 12px",
-            borderRadius: "4px",
-            cursor: "pointer",
-            fontWeight: "bold",
-          }}
-        >
-          + Добавить
-        </button>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-        {rooms.map((room, index) => {
-          const isActive = activeRoomIndex === index;
-          return (
-            <div
-              key={room.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                padding: "10px",
-                background: isActive ? "#333" : "#1a1a1a",
-                border: isActive
-                  ? "2px solid #5cba5c"
-                  : "2px solid transparent",
-                borderRadius: "6px",
-                cursor: "pointer",
-                transition: "all 0.2s",
-              }}
-              onClick={() => setActiveRoom(index)}
-            >
-              <div style={{ flexGrow: 1 }}>
-                <input
-                  type="text"
-                  value={room.name}
-                  onChange={(e) => updateRoomName(index, e.target.value)}
-                  // ИСПРАВЛЕНО: теперь при клике на текст мы тоже принудительно активируем эту комнату
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActiveRoom(index);
-                  }}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    borderBottom: isActive
-                      ? "1px solid #555"
-                      : "1px solid transparent",
-                    color: "#fff",
-                    fontSize: "15px",
-                    outline: "none",
-                    width: "100%",
-                    paddingBottom: "2px",
-                    cursor: "pointer",
-                  }}
-                />
-              </div>
-
-              {rooms.length > 1 && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteRoom(index);
-                  }}
-                  style={{
-                    background: "transparent",
-                    color: "#ba5c5c",
-                    border: "1px solid #ba5c5c",
-                    padding: "4px 8px",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                  }}
-                >
-                  Удалить
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
+        + комната
+      </button>
     </div>
   );
 }

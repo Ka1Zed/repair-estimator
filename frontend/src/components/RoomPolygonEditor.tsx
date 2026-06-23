@@ -266,13 +266,22 @@ export default function RoomPolygonEditor() {
         }}
       >
         <div>
-          <h3>Редактор помещения:</h3>
+          <div
+            style={{
+              fontSize: "11px",
+              letterSpacing: ".16em",
+              textTransform: "uppercase",
+              color: "#B0B0B0",
+              marginBottom: "8px",
+            }}
+          >
+            Проект · план помещения
+          </div>
           <p
             style={{
               fontSize: "13px",
-              color: "#888",
+              color: "#8A8A8A",
               margin: 0,
-              marginTop: "5px",
             }}
           >
             💡 Клик по границе — добавить точку.
@@ -295,19 +304,19 @@ export default function RoomPolygonEditor() {
               display: "flex",
               alignItems: "center",
               cursor: "pointer",
-              fontSize: "14px",
-              color: "#ddd",
+              fontSize: "12px",
+              color: "#8A8A8A",
             }}
           >
             <input
               type="checkbox"
               checked={snapToGrid}
               onChange={(e) => setSnapToGrid(e.target.checked)}
-              style={{ marginRight: "6px" }}
+              style={{ marginRight: "6px", accentColor: "var(--accent)" }}
             />
             Привязка к узлам
           </label>
-          <span style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
+          <span style={{ fontSize: "11px", color: "#B8B8B8", marginTop: "4px" }}>
             1 клетка = 0.5 м
           </span>
         </div>
@@ -315,9 +324,10 @@ export default function RoomPolygonEditor() {
 
       <div
         style={{
-          background: "#222",
+          background: "var(--bg-canvas)",
+          border: "1px solid var(--border)",
           padding: "20px",
-          borderRadius: "8px",
+          borderRadius: "4px",
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
@@ -349,21 +359,22 @@ export default function RoomPolygonEditor() {
               patternUnits="userSpaceOnUse"
               patternTransform={`translate(${gridOffsetX}, ${gridOffsetY})`}
             >
-              <path
-                d={`M ${gridPixelSize} 0 L 0 0 0 ${gridPixelSize}`}
-                fill="none"
-                stroke="#333"
-                strokeWidth="1"
+              <circle
+                cx={gridPixelSize / 2}
+                cy={gridPixelSize / 2}
+                r="1"
+                fill="#DDDDDD"
               />
             </pattern>
           </defs>
+          <rect width="100%" height="100%" fill="#FFFFFF" />
           <rect width="100%" height="100%" fill="url(#grid)" />
 
           <polygon
             points={pointsString}
-            fill="rgba(100, 200, 100, 0.3)"
-            stroke="#5cba5c"
-            strokeWidth="3"
+            fill="rgba(176,123,94,0.06)"
+            stroke="var(--accent)"
+            strokeWidth="1.5"
           />
 
           {safePoints.map((p, i) => {
@@ -427,11 +438,11 @@ export default function RoomPolygonEditor() {
                       width: "100%",
                       height: "100%",
                       textAlign: "center",
-                      fontSize: "13px",
-                      border: "2px solid #5cba5c",
-                      borderRadius: "4px",
-                      background: "#111",
-                      color: "#fff",
+                      fontSize: "12px",
+                      border: "1px solid var(--accent)",
+                      borderRadius: "3px",
+                      background: "#fff",
+                      color: "var(--text-h)",
                       outline: "none",
                       boxSizing: "border-box",
                     }}
@@ -455,17 +466,16 @@ export default function RoomPolygonEditor() {
                   y={screenMidY - 11}
                   width="50"
                   height="22"
-                  rx="4"
-                  fill="#1a1a1a"
-                  stroke="#444"
+                  rx="3"
+                  fill="#FFFFFF"
+                  stroke="var(--border)"
                   strokeWidth="1"
                 />
                 <text
                   x={screenMidX}
                   y={screenMidY}
-                  fill="#fff"
-                  fontSize="12"
-                  fontWeight="bold"
+                  fill="#6B6B6B"
+                  fontSize="11"
                   textAnchor="middle"
                   dominantBaseline="central"
                 >
@@ -480,10 +490,10 @@ export default function RoomPolygonEditor() {
               key={i}
               cx={(p.x - offsetX) * scale}
               cy={(p.y - offsetY) * scale}
-              r={draggingIdx === i ? "8" : "6"}
-              fill={draggingIdx === i ? "#5cba5c" : "#fff"}
-              stroke="#5cba5c"
-              strokeWidth="2"
+              r={draggingIdx === i ? "6.5" : "5"}
+              fill={draggingIdx === i ? "var(--accent)" : "#FFFFFF"}
+              stroke="var(--accent)"
+              strokeWidth="1.4"
               onPointerDown={(e) => handleDeletePoint(i, e)}
               style={{ cursor: "grab" }}
             />

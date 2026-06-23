@@ -91,6 +91,14 @@ pip install -r requirements.txt
 # применить миграции БД
 alembic upgrade head
 
+# > macOS на Apple Silicon (M1/M2/...): если pytest/uvicorn падают с
+# > `incompatible architecture (have 'arm64', need 'x86_64')`, значит venv
+# > создан x86_64-питоном под Rosetta, а колёса поставились arm64. Лечится
+# > пересозданием venv нативным питоном:
+# >   rm -rf .venv && arch -arm64 python3 -m venv .venv && source .venv/bin/activate
+# >   pip install -r requirements.txt
+# > Проверить разрядность активного питона: `python -c "import platform; print(platform.machine())"`
+
 # заполнить базу стартовыми данными (материалы, услуги, цены)
 python -m app.db.seed
 
@@ -115,6 +123,25 @@ Backend будет доступен на `http://localhost:8000`.
 | `POSTGRES_DB` | Имя базы | `repair_estimator` |
 | `POSTGRES_HOST` | Хост БД | `localhost` |
 | `POSTGRES_PORT` | Порт БД | `5432` |
+| `GEMINI_API_KEY` | Ключ Google Gemini Vision для beta-загрузки чертежа (опц.) | — |
+| `ANTHROPIC_API_KEY` | Ключ Claude Vision для beta-загрузки чертежа (опц.) | — |
+| `OLLAMA_BASE_URL` | URL локального Ollama для beta-загрузки чертежа (опц.) | `http://localhost:11434` |
+
+Ключи для распознавания чертежа необязательны: без них работает весь основной
+сценарий (ручной 2D-ввод), beta-загрузка просто вернёт понятную ошибку.
+
+### Beta: загрузка чертежа (системные зависимости)
+
+Распознавание PDF-чертежей использует `pdf2image`, которому нужен системный
+бинарь **poppler** (для PNG/JPG он не требуется):
+
+- **macOS:** `brew install poppler`
+- **Windows:** скачать [poppler для Windows](https://github.com/oschwartz10612/poppler-windows/releases),
+  распаковать и добавить папку `bin` в `PATH`
+- **Linux:** `sudo apt install poppler-utils`
+
+Если poppler не установлен — PNG/JPG распознаются как обычно, а на PDF придёт
+понятная ошибка вместо падения сервера.
 
 ### Тесты backend
 

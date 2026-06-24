@@ -43,15 +43,30 @@ export const WorksCheckboxes: React.FC = () => {
           (key === 'plumbing' && !rules?.plumbing.available);
 
         return (
-          <label key={key} style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+          <label
+            key={key}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              marginBottom: '10px',
+              cursor: isBlocked ? 'default' : 'pointer',
+              opacity: isBlocked ? 0.4 : 1,
+            }}
+          >
             <input
               type="checkbox"
               checked={!!repairOptions[key]}
               onChange={() => handleToggle(key)}
               disabled={isBlocked}
-              style={{ marginRight: '8px' }}
+              style={{
+                width: '16px',
+                height: '16px',
+                marginRight: '10px',
+                accentColor: 'var(--accent)',
+                cursor: isBlocked ? 'default' : 'pointer',
+              }}
             />
-            <span style={{ fontSize: '14px', color: '#333' }}>{labelsMap[key]}</span>
+            <span style={{ fontSize: '14px', color: 'var(--text-h)' }}>{labelsMap[key]}</span>
           </label>
         );
       })}

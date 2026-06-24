@@ -7,7 +7,7 @@
     чтобы глазами проверить, садятся ли углы на контур.
 
 Нужен ключ в корневом .env (GEMINI_API_KEY) — без него метод будет "none".
-Модель переопределяется через GEMINI_MODEL (по умолчанию gemini-2.5-pro).
+Модель переопределяется через GEMINI_MODEL (по умолчанию gemini-2.5-flash).
 Сравнить pro и flash:
     GEMINI_MODEL=gemini-2.5-pro  python scripts/eval_blueprint.py
     GEMINI_MODEL=gemini-2.5-flash python scripts/eval_blueprint.py

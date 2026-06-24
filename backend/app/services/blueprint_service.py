@@ -91,8 +91,9 @@ class BlueprintService:
         # gemini-2.5-flash по умолчанию: gemini-2.5-pro недоступен на бесплатном
         # тарифе (free-tier quota = 0), нужен платный проект. Переопределяется env.
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        # Модель Claude (fallback/альтернатива). Дешевле — claude-sonnet-4-6 / claude-haiku-4-5.
-        self.claude_model = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
+        # Модель Claude (fallback/альтернатива). Дефолт — sonnet (баланс цена/качество);
+        # claude-haiku-4-5 дешевле, claude-opus-4-8 точнее и дороже.
+        self.claude_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
     def process_blueprint(self, file_bytes: bytes, filename: str) -> Dict[str, Any]:
         logger.debug(f"START process_blueprint: {filename}")

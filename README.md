@@ -124,8 +124,13 @@ Backend будет доступен на `http://localhost:8000`.
 | `POSTGRES_HOST` | Хост БД | `localhost` |
 | `POSTGRES_PORT` | Порт БД | `5432` |
 | `GEMINI_API_KEY` | Ключ Google Gemini Vision для beta-загрузки чертежа (опц.) | — |
+| `GEMINI_MODEL` | Модель Gemini для распознавания (опц.) | `gemini-2.5-flash` |
+| `GEMINI_ENABLED` | Включить Gemini; `false` — использовать Claude (опц.) | `true` |
 | `ANTHROPIC_API_KEY` | Ключ Claude Vision для beta-загрузки чертежа (опц.) | — |
+| `ANTHROPIC_MODEL` | Модель Claude для распознавания (опц.) | `claude-sonnet-4-6` |
 | `OLLAMA_BASE_URL` | URL локального Ollama для beta-загрузки чертежа (опц.) | `http://localhost:11434` |
+| `BLUEPRINT_MAX_SIDE` | До скольких px ужимать чертёж перед распознаванием (опц.) | `2048` |
+| `BLUEPRINT_TIMEOUT` | Таймаут ответа Gemini в секундах (опц.) | `90` |
 
 Ключи для распознавания чертежа необязательны: без них работает весь основной
 сценарий (ручной 2D-ввод), beta-загрузка просто вернёт понятную ошибку.

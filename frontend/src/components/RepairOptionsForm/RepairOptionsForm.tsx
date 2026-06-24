@@ -4,8 +4,8 @@ import { useProjectStore, type RepairType } from '../../store/projectStore';
 
 const OPTIONS: { value: RepairType; label: string }[] = [
   { value: 'cosmetic', label: 'Косметический' },
-  { value: 'base', label: 'Базовый' },
-  { value: 'extended', label: 'Расширенный' },
+  { value: 'base', label: 'Капитальный' },
+  { value: 'extended', label: 'Дизайнерский' },
 ];
 
 export const RepairOptionsForm: React.FC = () => {

@@ -14,3 +14,6 @@ venv/
 # IDE
 .vscode/
 .idea/
+
+# beta blueprint eval output
+backend/scripts/eval_out/

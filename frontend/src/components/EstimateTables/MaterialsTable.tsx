@@ -10,6 +10,7 @@ export interface MaterialItem {
   total_avg: number;
   source: string;
   updated_at?: string;
+  region?: string | null;
 }
 
 interface MaterialsTableProps {

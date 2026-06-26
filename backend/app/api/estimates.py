@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.db.models import LaborService, LaborPrice, PriceSource
+from app.db.models import PriceSource
 from app.schemas.estimate import (
     EstimateRequest, EstimateResponse, Summary, GeometrySummary,
     MaterialItem, LaborItem
@@ -15,7 +15,7 @@ from app.services.geometry_service import calculate_room_geometry
 from app.services.material_calc_service import calculate_materials, packs_to_buy
 from app.services.labor_calc_service import calculate_labor
 from app.services.repair_coeffs_service import apply_repair_coeffs, REPAIR_COEFFS, CONTINGENCY
-from app.services.price_aggregator_service import get_price
+from app.services.price_aggregator_service import get_price, get_labor_price
 from app.parsers.megastroy_parser import MegastroyParser
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ def calculate_estimate(
         packs = packs_to_buy(group['pack_quantity'])
         final_quantity = Decimal(packs) * group['package_size']
 
-        price_obj = get_price(name, parser=parser)
+        price_obj = get_price(name, parser=parser, region=request.city)
         if not price_obj:
             # Цены нет даже в seed — не теряем позицию молча, показываем её с пометкой.
             logger.warning(f"Цена для материала '{name}' не найдена, показываем без цены")
@@ -101,7 +101,8 @@ def calculate_estimate(
                 price_avg=0.0,
                 total_avg=0.0,
                 source="нет цены",
-                updated_at=""
+                updated_at="",
+                region=None
             ))
             continue
 
@@ -120,7 +121,8 @@ def calculate_estimate(
             price_avg=float(price_avg),
             total_avg=float(total_avg),
             source=source_name,
-            updated_at=updated_at
+            updated_at=updated_at,
+            region=price_obj.region
         ))
 
         materials_sum['min'] += final_quantity * price_obj.price_min
@@ -143,12 +145,7 @@ def calculate_estimate(
     labor_sum = {'min': Decimal(0), 'avg': Decimal(0), 'max': Decimal(0)}
 
     for service, group in labor_groups.items():
-        labor_service = db.query(LaborService).filter(LaborService.name == service).first()
-        if not labor_service:
-            continue
-        labor_price = db.query(LaborPrice).filter(
-            LaborPrice.labor_service_id == labor_service.id
-        ).first()
+        labor_price = get_labor_price(service, region=request.city)
         if not labor_price:
             continue
 
@@ -168,7 +165,8 @@ def calculate_estimate(
             unit=group['unit'],
             price_avg=float(price_avg),
             total_avg=float(total_avg),
-            source=labor_source_name
+            source=labor_source_name,
+            region=labor_price.region
         ))
 
         labor_sum['min'] += volume * labor_price.price_min

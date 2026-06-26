@@ -12,6 +12,7 @@ from app.api.admin import router as admin_router
 from app.api.room_types import router as room_types_router
 from app.api.estimates import router as estimates_router
 from app.api.blueprints import router as blueprints_router
+from app.api.regions import router as regions_router
 
 # Подгружаем .env (ключи Vision-API для beta-загрузки чертежей)
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
@@ -36,6 +37,7 @@ app.include_router(admin_router)
 app.include_router(room_types_router)
 app.include_router(estimates_router)
 app.include_router(blueprints_router)
+app.include_router(regions_router)
 
 @app.get("/")
 def root():

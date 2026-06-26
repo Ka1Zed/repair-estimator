@@ -100,6 +100,12 @@
   color: #9a9a9a;
 }
 
+.cityField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* координаты углов — раскрывающийся тогл */
 .pointsDetails {
   margin-top: 28px;

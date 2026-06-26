@@ -6,6 +6,10 @@
   {"material": "Плинтус", "source": "seed", "price_min": "80.00", "price_avg": "150.00", "price_max": "300.00", "region": null},
   {"material": "Плитка", "source": "seed", "price_min": "500.00", "price_avg": "1000.00", "price_max": "2500.00", "region": null},
   {"material": "Плиточный клей", "source": "seed", "price_min": "350.00", "price_avg": "500.00", "price_max": "800.00", "region": null},
+  {"material": "Обои", "source": "seed", "price_min": "400.00", "price_avg": "900.00", "price_max": "2500.00", "region": null},
+  {"material": "Краска потолочная", "source": "seed", "price_min": "250.00", "price_avg": "400.00", "price_max": "700.00", "region": null},
+  {"material": "Линолеум", "source": "seed", "price_min": "300.00", "price_avg": "600.00", "price_max": "1500.00", "region": null},
+  {"material": "Затирка", "source": "seed", "price_min": "150.00", "price_avg": "300.00", "price_max": "600.00", "region": null},
 
   {"material": "Краска для стен", "source": "seed", "price_min": "380.00", "price_avg": "560.00", "price_max": "760.00", "region": "Москва"},
   {"material": "Ламинат", "source": "seed", "price_min": "750.00", "price_avg": "1500.00", "price_max": "3100.00", "region": "Москва"},

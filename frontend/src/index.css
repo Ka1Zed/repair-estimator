@@ -10,6 +10,10 @@
   --serif: 'Newsreader', Georgia, serif;
   --sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
 
+  /* Интерфейс полностью светлый. Без этого нативные контролы (<select> и их выпадающие
+     списки, скроллбары) в тёмной теме ОС рендерятся тёмными → нечитаемо. */
+  color-scheme: light;
+
   font: 14px/1.5 var(--sans);
   letter-spacing: 0.01em;
   color: var(--text);

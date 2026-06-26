@@ -38,6 +38,8 @@ const formatNum = (n: number) =>
   n.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const formatQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
+// Регион, по которому реально взялась цена; null → базовая seed-цена (не зависит от города).
+const regionLabel = (region?: string | null) => region ?? "базовая цена";
 
 export function Workspace() {
   const rooms = useProjectStore((s) => s.rooms);
@@ -149,11 +151,11 @@ export function Workspace() {
           { label: "Цена за единицу", value: rub(m.price_avg) },
           { label: "Итог по позиции", value: rub(m.total_avg) },
           { label: "Источник цены", value: m.source },
-          { label: "Регион", value: city },
+          { label: "Регион", value: regionLabel(m.region) },
           ...(m.updated_at ? [{ label: "Обновлено", value: m.updated_at }] : []),
         ],
       })),
-    [data, city],
+    [data],
   );
 
   const laborRows: LedgerRow[] = useMemo(
@@ -168,10 +170,10 @@ export function Workspace() {
           { label: "Цена за единицу", value: rub(l.price_avg) },
           { label: "Итог по позиции", value: rub(l.total_avg) },
           { label: "Источник цены", value: l.source },
-          { label: "Регион", value: city },
+          { label: "Регион", value: regionLabel(l.region) },
         ],
       })),
-    [data, city],
+    [data],
   );
 
   return (

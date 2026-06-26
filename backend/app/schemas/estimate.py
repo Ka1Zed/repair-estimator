@@ -47,6 +47,9 @@ class MaterialItem(BaseModel):
     total_avg: float
     source: str
     updated_at: str
+    # Регион, по которому реально взялась цена: город при региональной seed-цене
+    # или null, если цена базовая (region IS NULL) / парсерная. См. city в запросе.
+    region: Optional[str] = None
 
 class LaborItem(BaseModel):
     service: str
@@ -56,6 +59,7 @@ class LaborItem(BaseModel):
     price_avg: float
     total_avg: float
     source: str
+    region: Optional[str] = None
 
 class Summary(BaseModel):
     materials_min: float

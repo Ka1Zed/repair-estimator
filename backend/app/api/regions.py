@@ -1,6 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
-from app.db.session import SessionLocal
+from app.db.session import get_db
 from app.db.models import MaterialPrice, LaborPrice
 
 router = APIRouter(prefix="/api", tags=["regions"])
@@ -11,19 +12,15 @@ DEFAULT_REGION = "Казань"
 
 
 @router.get("/regions")
-def get_regions():
+def get_regions(db: Session = Depends(get_db)):
     '''
     Справочник доступных городов для селектора на странице сметы.
 
     Возвращает distinct непустые region из ценовых таблиц плюс город по умолчанию,
     чтобы он всегда присутствовал в списке, даже если своих строк цен у него ещё нет.
     '''
-    session = SessionLocal()
-    try:
-        material_regions = session.query(MaterialPrice.region).distinct().all()
-        labor_regions = session.query(LaborPrice.region).distinct().all()
-    finally:
-        session.close()
+    material_regions = db.query(MaterialPrice.region).distinct().all()
+    labor_regions = db.query(LaborPrice.region).distinct().all()
 
     regions = {r[0] for r in material_regions + labor_regions if r[0]}
     regions.add(DEFAULT_REGION)

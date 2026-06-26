@@ -52,7 +52,7 @@ def test_labor_fallback_to_seed_when_region_missing():
 
 # --- справочник регионов ---
 
-@pytest.mark.usefixtures("setup_test_db")
+@pytest.mark.usefixtures("override_get_db")
 def test_regions_endpoint():
     response = client.get("/api/regions")
     assert response.status_code == 200
@@ -94,3 +94,18 @@ def test_estimate_labor_differs_by_city():
     moscow = client.post("/api/estimates/calculate", json=_payload("Москва")).json()
     other = client.post("/api/estimates/calculate", json=_payload("Тверь")).json()
     assert moscow["summary"]["labor_avg"] != other["summary"]["labor_avg"]
+
+
+@pytest.mark.usefixtures("override_get_db")
+def test_estimate_item_reports_actual_region():
+    """Строка ответа несёт фактический регион цены: город при региональной seed,
+    null при fallback на базовую — а не просто эхо запрошенного city."""
+    moscow = client.post("/api/estimates/calculate", json=_payload("Москва")).json()
+    other = client.post("/api/estimates/calculate", json=_payload("Тверь")).json()
+
+    paint_msk = next(m for m in moscow["materials"] if m["name"] == "Краска для стен")
+    paint_other = next(m for m in other["materials"] if m["name"] == "Краска для стен")
+
+    assert paint_msk["region"] == "Москва"
+    # Для города без своих цен сработал fallback на базовую → region == null, а не "Тверь".
+    assert paint_other["region"] is None

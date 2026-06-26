@@ -45,28 +45,29 @@ class TestMaterialCalc:
         # Площадь пола 12 * 1.08 = 12.96
         assert laminate['quantity'] == Decimal('12.96')
         # Проверяем дробное значение pack_quantity до агрегации — ceil делается в B1-5
-        assert laminate['pack_quantity'] == Decimal('5.184')
-        assert packs_to_buy(laminate['pack_quantity']) == 6  # демонстрация, что ceil работает
+        # package_size=2.0 -> 12.96 / 2.0 = 6.48
+        assert laminate['pack_quantity'] == Decimal('6.48')
+        assert packs_to_buy(laminate['pack_quantity']) == 7  # демонстрация, что ceil работает
 
-        # Проверка плинтуса: периметр - дверь = 14 - 0.8 = 13.2, *1.1 = 14.52
+        # Проверка плинтуса: периметр - дверь = 14 - 0.8 = 13.2, *1.05 = 13.86
         plinth = next(m for m in materials if m['name'] == 'Плинтус')
-        assert plinth['quantity'] == Decimal('14.52')
+        assert plinth['quantity'] == Decimal('13.86')
 
-        # Грунтовка: 34.1 * 0.1 * 1.1 = 3.751
+        # Грунтовка: 34.1 * 0.12 * 1.1 = 4.5012
         primer = next(m for m in materials if m['name'] == 'Грунтовка')
-        assert primer['quantity'] == Decimal('3.751')
+        assert primer['quantity'] == Decimal('4.5012')
 
-        # Шпаклевка: 34.1 * 1.2 * 1.1 = 45.012
+        # Шпаклевка: 34.1 * 1.0 * 1.1 = 37.51
         putty = next(m for m in materials if m['name'] == 'Шпаклевка')
-        assert putty['quantity'] == Decimal('45.012')
+        assert putty['quantity'] == Decimal('37.51')
 
         # Краска стен: 34.1 * 2 * 0.13 * 1.1 = 9.7526
         paint_walls = next(m for m in materials if m['name'] == 'Краска для стен')
         assert paint_walls['quantity'] == Decimal('9.7526')
 
-        # Краска потолка: 12 * 2 * 0.12 * 1.1 = 3.168
+        # Краска потолка: 12 * 2 * 0.15 * 1.1 = 3.96
         paint_ceiling = next(m for m in materials if m['name'] == 'Краска потолочная')
-        assert paint_ceiling['quantity'] == Decimal('3.168')
+        assert paint_ceiling['quantity'] == Decimal('3.96')
 
 
 
@@ -202,13 +203,13 @@ class TestLShape:
         # Периметр: (0,0)→(4,0)=4, (4,0)→(4,2)=2, (4,2)→(2,2)=2, (2,2)→(2,4)=2, (2,4)→(0,4)=2, (0,4)→(0,0)=4 → итого 16
         assert geometry['perimeter'] == Decimal('16.0')
 
-        # Ламинат: площадь 12 * 1.08 = 12.96, package_size=2.5 -> 5.184 (дробно)
+        # Ламинат: площадь 12 * 1.08 = 12.96, package_size=2.0 -> 6.48 (дробно)
         laminate = next(m for m in materials if m['name'] == 'Ламинат')
-        assert laminate['pack_quantity'] == Decimal('5.184')
+        assert laminate['pack_quantity'] == Decimal('6.48')
 
-        # Плинтус: периметр (16) - дверь (0.8) = 15.2, *1.1 = 16.72
+        # Плинтус: периметр (16) - дверь (0.8) = 15.2, *1.05 = 15.96
         plinth = next(m for m in materials if m['name'] == 'Плинтус')
-        assert plinth['quantity'] == Decimal('16.72')
+        assert plinth['quantity'] == Decimal('15.96')
 
         # Проверяем, что есть грунтовка, шпаклёвка, краска
         primer = next(m for m in materials if m['name'] == 'Грунтовка')
@@ -278,7 +279,7 @@ class TestDifferentRooms:
         # Линолеум — только из второй
         linoleum = next((v for k, v in aggregated.items() if v['name'] == 'Линолеум'), None)
         assert linoleum is not None
-        assert linoleum['quantity'] == Decimal('20.0')  # 20 * 1.0 (waste_factor=1.0 в seed)
+        assert linoleum['quantity'] == Decimal('21.0')  # 20 * 1.0 * 1.05 (waste_factor=1.05 в seed)
 
         # Обои — только из второй (wallpaper)
         wallpaper = next((v for k, v in aggregated.items() if v['name'] == 'Обои'), None)
@@ -295,16 +296,16 @@ class TestDifferentRooms:
         # Плинтус суммируется из обеих комнат (разные значения)
         plinth = next((v for k, v in aggregated.items() if v['name'] == 'Плинтус'), None)
         assert plinth is not None
-        # Комната1: (14-0.8)*1.1 = 14.52
-        # Комната2: (18-1.2)*1.1 = 18.48
-        # Итого: 33.0
-        assert plinth['quantity'] == Decimal('33.0')
+        # Комната1: (14-0.8)*1.05 = 13.86
+        # Комната2: (18-1.2)*1.05 = 17.64
+        # Итого: 31.5
+        assert plinth['quantity'] == Decimal('31.5')
 
         # Проверяем, что грунтовка и шпаклёвка есть только из первой (где стены красятся)
         primer = next((v for k, v in aggregated.items() if v['name'] == 'Грунтовка'), None)
         assert primer is not None
-        assert primer['quantity'] == Decimal('3.751')  # 34.1 * 0.1 * 1.1
+        assert primer['quantity'] == Decimal('4.5012')  # 34.1 * 0.12 * 1.1
 
         putty = next((v for k, v in aggregated.items() if v['name'] == 'Шпаклевка'), None)
         assert putty is not None
-        assert putty['quantity'] == Decimal('45.012')  # 34.1 * 1.2 * 1.1
+        assert putty['quantity'] == Decimal('37.51')  # 34.1 * 1.0 * 1.1

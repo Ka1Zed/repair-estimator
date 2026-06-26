@@ -37,11 +37,13 @@ export interface Room {
 }
 
 interface ProjectState {
+  city: string;
   repair_type: RepairType;
   repair_options: RepairOptions;
   rooms: Room[];
   activeRoomIndex: number;
 
+  setCity: (city: string) => void;
   setRepairType: (type: RepairType) => void;
   updateRepairOptions: (options: Partial<RepairOptions>) => void;
   addRoom: () => void;
@@ -87,7 +89,12 @@ const createDefaultRoom = (name: string): Room => ({
   openings: [],
 });
 
+// Город по умолчанию совпадает с DEFAULT_REGION на бэкенде (app/api/regions.py):
+// для него и для любого города без своих цен расчёт идёт по базовым seed-ценам.
+const DEFAULT_CITY = "Казань";
+
 const initialState = {
+  city: DEFAULT_CITY,
   repair_type: "cosmetic" as RepairType,
   repair_options: { ...DEFAULT_REPAIR_OPTIONS },
   rooms: [createDefaultRoom("Комната 1")],
@@ -98,6 +105,8 @@ export const useProjectStore = create<ProjectState>()(
   persist(
     (set) => ({
       ...initialState,
+
+      setCity: (city) => set({ city }),
 
       setRepairType: (type) => set({ repair_type: type }),
 

@@ -16,6 +16,8 @@ import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/
 
 import { useProjectStore } from "../../store/projectStore";
 import { calculateEstimate } from "../../api/estimates";
+import { apiClient } from "../../api/client";
+import { Select } from "../../components/ui/Select";
 
 interface GeometryData {
   floor_area: number;
@@ -36,9 +38,13 @@ const formatNum = (n: number) =>
   n.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const formatQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
+// Регион, по которому реально взялась цена; null → базовая seed-цена (не зависит от города).
+const regionLabel = (region?: string | null) => region ?? "базовая цена";
 
 export function Workspace() {
   const rooms = useProjectStore((s) => s.rooms);
+  const city = useProjectStore((s) => s.city);
+  const setCity = useProjectStore((s) => s.setCity);
   const repairType = useProjectStore((s) => s.repair_type);
   const repairOptions = useProjectStore((s) => s.repair_options);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
@@ -49,6 +55,21 @@ export function Workspace() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<EstimateResponse | null>(null);
   const [tab, setTab] = useState<"materials" | "labor">("materials");
+  const [regions, setRegions] = useState<string[]>([]);
+
+  // Список городов для селектора. Если текущего города нет в ответе бэка,
+  // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
+  useEffect(() => {
+    apiClient
+      .fetchRegions()
+      .then((res) => setRegions(res.regions))
+      .catch((err) => console.error("Не удалось загрузить список городов:", err));
+  }, []);
+
+  const cityOptions = useMemo(
+    () => (regions.includes(city) ? regions : [city, ...regions]),
+    [regions, city],
+  );
 
   // silent=true — авто-пересчёт по дебаунсу: молча пропускаем невалидное состояние,
   // не пугаем пользователя ошибкой, пока он редактирует.
@@ -68,7 +89,7 @@ export function Workspace() {
       setError(null);
       try {
         const payload = {
-          city: "Казань",
+          city,
           repair_type: repairType,
           repair_options: repairOptions,
           rooms: rooms.map((room) => ({
@@ -94,7 +115,7 @@ export function Workspace() {
         setIsLoading(false);
       }
     },
-    [rooms, repairType, repairOptions],
+    [rooms, city, repairType, repairOptions],
   );
 
   // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
@@ -130,6 +151,7 @@ export function Workspace() {
           { label: "Цена за единицу", value: rub(m.price_avg) },
           { label: "Итог по позиции", value: rub(m.total_avg) },
           { label: "Источник цены", value: m.source },
+          { label: "Регион", value: regionLabel(m.region) },
           ...(m.updated_at ? [{ label: "Обновлено", value: m.updated_at }] : []),
         ],
       })),
@@ -148,6 +170,7 @@ export function Workspace() {
           { label: "Цена за единицу", value: rub(l.price_avg) },
           { label: "Итог по позиции", value: rub(l.total_avg) },
           { label: "Источник цены", value: l.source },
+          { label: "Регион", value: regionLabel(l.region) },
         ],
       })),
     [data],
@@ -176,6 +199,16 @@ export function Workspace() {
 
         {/* высота потолка + класс ремонта — сразу под холстом */}
         <div className={styles.paramsRow}>
+          <div className={styles.cityField}>
+            <div className={styles.blockLabel}>Город (цены)</div>
+            <Select
+              variant="underline"
+              ariaLabel="Город для расчёта цен"
+              value={city}
+              options={cityOptions.map((c) => ({ value: c, label: c }))}
+              onChange={setCity}
+            />
+          </div>
           <div className={styles.heightField}>
             <div className={styles.blockLabel}>Высота потолка</div>
             <div>

@@ -1,4 +1,10 @@
 import { useProjectStore } from "../store/projectStore";
+import { Select } from "./ui/Select";
+
+const OPENING_TYPE_OPTIONS = [
+  { value: "door", label: "Дверь" },
+  { value: "window", label: "Окно" },
+];
 
 export default function OpeningsForm() {
   const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
@@ -43,22 +49,12 @@ export default function OpeningsForm() {
             {openings.map((opening, index) => (
               <tr key={opening.id}>
                 <td style={{ padding: "5px 0" }}>
-                  <select
+                  <Select
+                    ariaLabel="Тип проёма"
                     value={opening.type}
-                    onChange={(e) =>
-                      updateOpening(index, "type", e.target.value)
-                    }
-                    style={{
-                      padding: "5px",
-                      background: "#fff",
-                      color: "var(--text-h)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "4px",
-                    }}
-                  >
-                    <option value="door">Дверь</option>
-                    <option value="window">Окно</option>
-                  </select>
+                    options={OPENING_TYPE_OPTIONS}
+                    onChange={(v) => updateOpening(index, "type", v)}
+                  />
                 </td>
                 <td>
                   <input

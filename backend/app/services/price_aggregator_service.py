@@ -21,6 +21,7 @@ def _is_fresh(updated_at: datetime | None, ttl_hours: int) -> bool:
 def get_price(
     material_name: str,
     parser: BaseParser | None = None,
+    region: str | None = None,
     ttl_hours: int | None = None,
     force_refresh: bool = False,
 ) -> MaterialPrice | None:
@@ -31,6 +32,8 @@ def get_price(
     1. Если есть свежая (моложе ttl_hours) цена парсера в БД — возвращаем её, не трогая сайт.
     2. Иначе, если передан парсер — пробуем спарсить и сохранить свежую цену.
     3. Если парсер упал/не передан/нет источника — берём seed-цену из БД.
+       При заданном region сначала ищем seed-цену этого региона, при отсутствии —
+       базовую seed-цену с region IS NULL. Парсер региону не подчиняется (одна цена на всех).
     4. force_refresh=True заставляет дёрнуть парсер даже при свежем кэше (для CLI update_prices).
     5. Наверх исключение не пробрасываем никогда.
     '''
@@ -99,18 +102,74 @@ def get_price(
             logger.error("Источник 'seed' не найден в БД")
             return None
 
-        seed_price = session.query(MaterialPrice).filter(
-            MaterialPrice.material_id == material.id,
-            MaterialPrice.source_id == seed_source.id
-        ).first()
+        seed_price = None
+        if region is not None:
+            # Региональная seed-цена имеет приоритет над базовой.
+            seed_price = session.query(MaterialPrice).filter(
+                MaterialPrice.material_id == material.id,
+                MaterialPrice.source_id == seed_source.id,
+                MaterialPrice.region == region,
+            ).first()
+
+        if seed_price is None:
+            # Базовая seed-цена (region IS NULL) — fallback по умолчанию.
+            seed_price = session.query(MaterialPrice).filter(
+                MaterialPrice.material_id == material.id,
+                MaterialPrice.source_id == seed_source.id,
+                MaterialPrice.region.is_(None),
+            ).first()
 
         if seed_price:
-            logger.info(f"Цена для '{material_name}' взята из seed (fallback)")
+            logger.info(f"Цена для '{material_name}' взята из seed (fallback), region={region}")
         else:
             logger.warning(f"Seed-цена для '{material_name}' не найдена")
 
         return seed_price
 
+    finally:
+        session.close()
+
+
+def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice | None:
+    '''
+    Возвращает seed-цену работы с учётом региона.
+
+    При заданном region сначала ищем seed-цену этого региона, при отсутствии —
+    базовую seed-цену с region IS NULL. Исключение наверх не пробрасываем.
+    '''
+    session = SessionLocal()
+    try:
+        service = session.query(LaborService).filter(LaborService.name == service_name).first()
+        if not service:
+            logger.warning(f"Услуга '{service_name}' не найдена в БД")
+            return None
+
+        seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
+        if not seed_source:
+            logger.error("Источник 'seed' не найден в БД")
+            return None
+
+        price = None
+        if region is not None:
+            price = session.query(LaborPrice).filter(
+                LaborPrice.labor_service_id == service.id,
+                LaborPrice.source_id == seed_source.id,
+                LaborPrice.region == region,
+            ).first()
+
+        if price is None:
+            price = session.query(LaborPrice).filter(
+                LaborPrice.labor_service_id == service.id,
+                LaborPrice.source_id == seed_source.id,
+                LaborPrice.region.is_(None),
+            ).first()
+
+        if price:
+            logger.info(f"Цена работы '{service_name}' взята из seed, region={region}")
+        else:
+            logger.warning(f"Seed-цена для работы '{service_name}' не найдена")
+
+        return price
     finally:
         session.close()
 

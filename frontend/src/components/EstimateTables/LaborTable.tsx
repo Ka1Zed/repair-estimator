@@ -10,6 +10,7 @@ export interface LaborItem {
   price_avg: number;
   total_avg: number;
   source: string;
+  region?: string | null;
 }
 
 interface LaborTableProps {

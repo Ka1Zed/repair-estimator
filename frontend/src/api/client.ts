@@ -67,6 +67,11 @@ class ApiClient {
       body: JSON.stringify(estimateData),
     });
   }
+
+  // 5. Справочник городов для регионального ценообразования (GET /api/regions)
+  async fetchRegions(): Promise<{ default: string; regions: string[] }> {
+    return this.request<{ default: string; regions: string[] }>("/api/regions");
+  }
 }
 
 // Экспортируем готовый экземпляр класса

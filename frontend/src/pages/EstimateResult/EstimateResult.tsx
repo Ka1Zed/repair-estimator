@@ -6,7 +6,7 @@ import { LaborTable, type LaborItem } from '../../components/EstimateTables/Labo
 import { RepairOptionsForm } from '../../components/RepairOptionsForm/RepairOptionsForm';
 import { EstimateSummary, type SummaryData } from '../../components/EstimateSummary';
 import styles from './EstimateResult.module.css';
-
+import { exportPdf, exportXlsx, type EstimateExportData } from '../../utils/exportEstimate';
 
 import { useProjectStore } from '../../store/projectStore';
 import { calculateEstimate } from '../../api/estimates';
@@ -67,21 +67,39 @@ export function EstimateResult() {
     }
   };
 
-  return (
+ return (
     <div className={styles.container}>
       {/* Шапка с кнопками */}
       <div className={styles.headerRow}>
         <h2>Результат расчёта сметы</h2>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <Button variant="primary" onClick={handleCalculate} disabled={isLoading}>
             {isLoading ? 'Считаем...' : 'Рассчитать'}
           </Button>
+          
+          {/* Кнопки появляются только когда данные загружены и нет ошибок */}
+          {!isLoading && !error && estimateData && (
+            <>
+              <Button 
+                variant="secondary" 
+                onClick={() => exportPdf(estimateData as unknown as EstimateExportData, "Казань", repair_type)}
+              >
+                Скачать PDF
+              </Button>
+              <Button 
+                variant="secondary" 
+                onClick={() => exportXlsx(estimateData as unknown as EstimateExportData)}
+              >
+                Скачать Excel
+              </Button>
+            </>
+          )}
+
           <Button variant="secondary" onClick={() => window.print()}>
             Печать сметы
           </Button>
         </div>
       </div>
-
       <RepairOptionsForm />
 
       {/* Показываем ошибки, если сервер упал */}

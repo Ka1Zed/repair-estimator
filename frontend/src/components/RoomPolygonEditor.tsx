@@ -20,7 +20,7 @@ export default function RoomPolygonEditor() {
   const [edgeInputValue, setEdgeInputValue] = useState("");
 
   const svgRef = useRef<SVGSVGElement>(null);
-  const dragSnapshotRef = useRef<{
+  const [dragSnapshot, setDragSnapshot] = useState<{
     scale: number;
     offsetX: number;
     offsetY: number;
@@ -142,7 +142,7 @@ export default function RoomPolygonEditor() {
 
   // Freeze coordinate system during drag to prevent feedback loop:
   // updatePoint → bbox change → scale/offset change → wrong cursor coord → updatePoint → ...
-  const snap = dragSnapshotRef.current;
+  const snap = dragSnapshot;
   const activeScale = snap ? snap.scale : scale;
   const activeOffsetX = snap ? snap.offsetX : offsetX;
   const activeOffsetY = snap ? snap.offsetY : offsetY;
@@ -160,15 +160,15 @@ export default function RoomPolygonEditor() {
     .join(" ");
 
   const handlePointerDown = (index: number) => {
-    dragSnapshotRef.current = { scale, offsetX, offsetY, svgWidth, svgHeight };
+    setDragSnapshot({ scale, offsetX, offsetY, svgWidth, svgHeight });
     setDraggingIdx(index);
     setEditingEdge(null);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (draggingIdx === null || !svgRef.current || !dragSnapshotRef.current) return;
+    if (draggingIdx === null || !svgRef.current || !dragSnapshot) return;
 
-    const { scale: s, offsetX: ox, offsetY: oy } = dragSnapshotRef.current;
+    const { scale: s, offsetX: ox, offsetY: oy } = dragSnapshot;
     const svg = svgRef.current;
     const ctm = svg.getScreenCTM();
     if (!ctm) return;
@@ -193,7 +193,7 @@ export default function RoomPolygonEditor() {
   };
 
   const handlePointerUp = () => {
-    dragSnapshotRef.current = null;
+    setDragSnapshot(null);
     setDraggingIdx(null);
   };
 

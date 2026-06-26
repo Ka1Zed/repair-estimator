@@ -16,6 +16,7 @@ import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/
 
 import { useProjectStore } from "../../store/projectStore";
 import { calculateEstimate } from "../../api/estimates";
+import { apiClient } from "../../api/client";
 
 interface GeometryData {
   floor_area: number;
@@ -39,6 +40,8 @@ const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
 
 export function Workspace() {
   const rooms = useProjectStore((s) => s.rooms);
+  const city = useProjectStore((s) => s.city);
+  const setCity = useProjectStore((s) => s.setCity);
   const repairType = useProjectStore((s) => s.repair_type);
   const repairOptions = useProjectStore((s) => s.repair_options);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
@@ -49,6 +52,21 @@ export function Workspace() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<EstimateResponse | null>(null);
   const [tab, setTab] = useState<"materials" | "labor">("materials");
+  const [regions, setRegions] = useState<string[]>([]);
+
+  // Список городов для селектора. Если текущего города нет в ответе бэка,
+  // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
+  useEffect(() => {
+    apiClient
+      .fetchRegions()
+      .then((res) => setRegions(res.regions))
+      .catch((err) => console.error("Не удалось загрузить список городов:", err));
+  }, []);
+
+  const cityOptions = useMemo(
+    () => (regions.includes(city) ? regions : [city, ...regions]),
+    [regions, city],
+  );
 
   // silent=true — авто-пересчёт по дебаунсу: молча пропускаем невалидное состояние,
   // не пугаем пользователя ошибкой, пока он редактирует.
@@ -68,7 +86,7 @@ export function Workspace() {
       setError(null);
       try {
         const payload = {
-          city: "Казань",
+          city,
           repair_type: repairType,
           repair_options: repairOptions,
           rooms: rooms.map((room) => ({
@@ -94,7 +112,7 @@ export function Workspace() {
         setIsLoading(false);
       }
     },
-    [rooms, repairType, repairOptions],
+    [rooms, city, repairType, repairOptions],
   );
 
   // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
@@ -130,10 +148,11 @@ export function Workspace() {
           { label: "Цена за единицу", value: rub(m.price_avg) },
           { label: "Итог по позиции", value: rub(m.total_avg) },
           { label: "Источник цены", value: m.source },
+          { label: "Регион", value: city },
           ...(m.updated_at ? [{ label: "Обновлено", value: m.updated_at }] : []),
         ],
       })),
-    [data],
+    [data, city],
   );
 
   const laborRows: LedgerRow[] = useMemo(
@@ -148,9 +167,10 @@ export function Workspace() {
           { label: "Цена за единицу", value: rub(l.price_avg) },
           { label: "Итог по позиции", value: rub(l.total_avg) },
           { label: "Источник цены", value: l.source },
+          { label: "Регион", value: city },
         ],
       })),
-    [data],
+    [data, city],
   );
 
   return (
@@ -176,6 +196,20 @@ export function Workspace() {
 
         {/* высота потолка + класс ремонта — сразу под холстом */}
         <div className={styles.paramsRow}>
+          <div className={styles.cityField}>
+            <div className={styles.blockLabel}>Город (цены)</div>
+            <select
+              className={styles.citySelect}
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+            >
+              {cityOptions.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className={styles.heightField}>
             <div className={styles.blockLabel}>Высота потолка</div>
             <div>

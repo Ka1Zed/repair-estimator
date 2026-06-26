@@ -20,6 +20,13 @@ export default function RoomPolygonEditor() {
   const [edgeInputValue, setEdgeInputValue] = useState("");
 
   const svgRef = useRef<SVGSVGElement>(null);
+  const dragSnapshotRef = useRef<{
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+    svgWidth: number;
+    svgHeight: number;
+  } | null>(null);
 
   const controlButtonsJSX = (
     <div
@@ -133,24 +140,35 @@ export default function RoomPolygonEditor() {
   const offsetX = minX - paddingX;
   const offsetY = minY - paddingY;
 
-  const GRID_STEP = 0.5;
-  const gridPixelSize = GRID_STEP * scale;
+  // Freeze coordinate system during drag to prevent feedback loop:
+  // updatePoint → bbox change → scale/offset change → wrong cursor coord → updatePoint → ...
+  const snap = dragSnapshotRef.current;
+  const activeScale = snap ? snap.scale : scale;
+  const activeOffsetX = snap ? snap.offsetX : offsetX;
+  const activeOffsetY = snap ? snap.offsetY : offsetY;
+  const activeSvgWidth = snap ? snap.svgWidth : svgWidth;
+  const activeSvgHeight = snap ? snap.svgHeight : svgHeight;
 
-  const gridOffsetX = (-offsetX * scale) % gridPixelSize;
-  const gridOffsetY = (-offsetY * scale) % gridPixelSize;
+  const GRID_STEP = 0.5;
+  const gridPixelSize = GRID_STEP * activeScale;
+
+  const gridOffsetX = (-activeOffsetX * activeScale) % gridPixelSize;
+  const gridOffsetY = (-activeOffsetY * activeScale) % gridPixelSize;
 
   const pointsString = safePoints
-    .map((p) => `${(p.x - offsetX) * scale},${(p.y - offsetY) * scale}`)
+    .map((p) => `${(p.x - activeOffsetX) * activeScale},${(p.y - activeOffsetY) * activeScale}`)
     .join(" ");
 
   const handlePointerDown = (index: number) => {
+    dragSnapshotRef.current = { scale, offsetX, offsetY, svgWidth, svgHeight };
     setDraggingIdx(index);
     setEditingEdge(null);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (draggingIdx === null || !svgRef.current) return;
+    if (draggingIdx === null || !svgRef.current || !dragSnapshotRef.current) return;
 
+    const { scale: s, offsetX: ox, offsetY: oy } = dragSnapshotRef.current;
     const svg = svgRef.current;
     const ctm = svg.getScreenCTM();
     if (!ctm) return;
@@ -160,8 +178,8 @@ export default function RoomPolygonEditor() {
     pt.y = e.clientY;
     const cursorPt = pt.matrixTransform(ctm.inverse());
 
-    let newRealX = cursorPt.x / scale + offsetX;
-    let newRealY = cursorPt.y / scale + offsetY;
+    let newRealX = cursorPt.x / s + ox;
+    let newRealY = cursorPt.y / s + oy;
 
     if (snapToGrid) {
       newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
@@ -175,6 +193,7 @@ export default function RoomPolygonEditor() {
   };
 
   const handlePointerUp = () => {
+    dragSnapshotRef.current = null;
     setDraggingIdx(null);
   };
 
@@ -341,7 +360,7 @@ export default function RoomPolygonEditor() {
       >
         <svg
           ref={svgRef}
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          viewBox={`0 0 ${activeSvgWidth} ${activeSvgHeight}`}
           style={{
             display: "block",
             touchAction: "none",
@@ -386,10 +405,10 @@ export default function RoomPolygonEditor() {
             return (
               <line
                 key={`edge-${i}`}
-                x1={(p.x - offsetX) * scale}
-                y1={(p.y - offsetY) * scale}
-                x2={(nextP.x - offsetX) * scale}
-                y2={(nextP.y - offsetY) * scale}
+                x1={(p.x - activeOffsetX) * activeScale}
+                y1={(p.y - activeOffsetY) * activeScale}
+                x2={(nextP.x - activeOffsetX) * activeScale}
+                y2={(nextP.y - activeOffsetY) * activeScale}
                 stroke="transparent"
                 strokeWidth="15"
                 style={{ cursor: "crosshair" }}
@@ -405,8 +424,8 @@ export default function RoomPolygonEditor() {
             const midX = (p.x + nextP.x) / 2;
             const midY = (p.y + nextP.y) / 2;
 
-            const screenMidX = (midX - offsetX) * scale;
-            const screenMidY = (midY - offsetY) * scale;
+            const screenMidX = (midX - activeOffsetX) * activeScale;
+            const screenMidY = (midY - activeOffsetY) * activeScale;
 
             const currentLen = calculateDistance(p, nextP);
             const displayLen = Number.isInteger(currentLen)
@@ -491,8 +510,8 @@ export default function RoomPolygonEditor() {
           {safePoints.map((p, i) => (
             <circle
               key={i}
-              cx={(p.x - offsetX) * scale}
-              cy={(p.y - offsetY) * scale}
+              cx={(p.x - activeOffsetX) * activeScale}
+              cy={(p.y - activeOffsetY) * activeScale}
               r={draggingIdx === i ? "6.5" : "5"}
               fill={draggingIdx === i ? "var(--accent)" : "#FFFFFF"}
               stroke="var(--accent)"

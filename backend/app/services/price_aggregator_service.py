@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.db.models import Material, MaterialPrice, PriceSource, LaborService, LaborPrice
-from app.parsers.base import BaseParser
+from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,23 @@ def _is_fresh(updated_at: datetime | None, ttl_hours: int) -> bool:
     if updated_at.tzinfo is None:
         updated_at = updated_at.replace(tzinfo=timezone.utc)
     return datetime.now(timezone.utc) - updated_at < timedelta(hours=ttl_hours)
+
+
+def _is_valid_parsed(parsed: ParsedPrice | None) -> bool:
+    '''
+    Результат парсера валиден, только если все три цены заданы и строго положительны.
+
+    При VPN/блок-странице сайт может вернуть HTTP 200 с мусором → парсер не падает,
+    а отдаёт нулевую/пустую цену. Такой ответ НЕ считаем ценой: его нельзя ни возвращать
+    наверх (иначе в смете 0), ни сохранять в БД (иначе кэш закрепит 0 на весь TTL).
+    Вместо этого вызывающий код откатывается на seed — наравне с веткой except.
+    '''
+    if parsed is None:
+        return False
+    for value in (parsed.price_min, parsed.price_avg, parsed.price_max):
+        if value is None or value <= 0:
+            return False
+    return True
 
 
 def get_price(
@@ -62,13 +79,20 @@ def get_price(
 
             # Свежий кэш парсера — отдаём без сетевого запроса
             if not force_refresh and price_entry and _is_fresh(price_entry.updated_at, ttl_hours):
-                logger.info(f"Цена для '{material_name}' взята из кэша {parser.source_name}")
+                logger.info(f"Цена для '{material_name}': источник=cache ({parser.source_name})")
                 return price_entry
 
             try:
                 parsed = parser.fetch_price(material_name)
 
-                if source:
+                # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —
+                # это закрепило бы 0 в кэше на весь TTL. Уходим в seed, как при исключении.
+                if not _is_valid_parsed(parsed):
+                    logger.warning(
+                        f"Парсер {parser.source_name} вернул пустую/нулевую цену для "
+                        f"'{material_name}' — fallback на seed (parser=0/empty)"
+                    )
+                elif source:
                     if price_entry:
                         # Обновляем
                         price_entry.price_min = parsed.price_min
@@ -89,7 +113,7 @@ def get_price(
 
                     session.commit()
                     session.refresh(price_entry)
-                    logger.info(f"Цена для '{material_name}' получена от парсера {parser.source_name}")
+                    logger.info(f"Цена для '{material_name}': источник=parser ({parser.source_name})")
                     return price_entry
 
             except Exception as e:
@@ -120,7 +144,7 @@ def get_price(
             ).first()
 
         if seed_price:
-            logger.info(f"Цена для '{material_name}' взята из seed (fallback), region={region}")
+            logger.info(f"Цена для '{material_name}': источник=seed (fallback), region={region}")
         else:
             logger.warning(f"Seed-цена для '{material_name}' не найдена")
 
@@ -132,10 +156,22 @@ def get_price(
 
 def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice | None:
     '''
-    Возвращает seed-цену работы с учётом региона.
+    Возвращает цену работы. Источник правды — парсер (#144): сначала ищем валидную
+    спарсенную цену (любой не-seed источник, записанный CLI update_prices), seed —
+    только fallback.
 
-    При заданном region сначала ищем seed-цену этого региона, при отсутствии —
-    базовую seed-цену с region IS NULL. Исключение наверх не пробрасываем.
+    Сетевого запроса здесь нет: спарсенные цены работ пишет в БД команда
+    `python -m app.manage update_prices`, а расчёт сметы их только читает.
+
+    ВНИМАНИЕ: в отличие от кэша материалов (get_price), свежесть parser-цены здесь
+    НЕ проверяется — возвращаем любую валидную не-seed цену независимо от возраста.
+    Добавление TTL-проверки и детерминированного выбора источника — отдельная issue.
+
+    Порядок выбора:
+      1. parser-цена региона → 2. базовая parser-цена (region IS NULL),
+      3. seed региона        → 4. базовая seed-цена (region IS NULL).
+    Нулевые/пустые parser-цены игнорируются (как и в get_price). Исключение наверх
+    не пробрасываем.
     '''
     session = SessionLocal()
     try:
@@ -149,6 +185,26 @@ def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice 
             logger.error("Источник 'seed' не найден в БД")
             return None
 
+        def _valid(p: LaborPrice | None) -> bool:
+            return p is not None and all(
+                v is not None and v > 0 for v in (p.price_min, p.price_avg, p.price_max)
+            )
+
+        # 1-2. Цена из парсера (любой не-seed источник): региональная, затем базовая.
+        parser_q = session.query(LaborPrice).filter(
+            LaborPrice.labor_service_id == service.id,
+            LaborPrice.source_id != seed_source.id,
+        )
+        parser_price = None
+        if region is not None:
+            parser_price = parser_q.filter(LaborPrice.region == region).first()
+        if not _valid(parser_price):
+            parser_price = parser_q.filter(LaborPrice.region.is_(None)).first()
+        if _valid(parser_price):
+            logger.info(f"Цена работы '{service_name}': источник=parser, region={region}")
+            return parser_price
+
+        # 3-4. Fallback на seed: региональная, затем базовая.
         price = None
         if region is not None:
             price = session.query(LaborPrice).filter(
@@ -165,7 +221,7 @@ def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice 
             ).first()
 
         if price:
-            logger.info(f"Цена работы '{service_name}' взята из seed, region={region}")
+            logger.info(f"Цена работы '{service_name}': источник=seed (fallback), region={region}")
         else:
             logger.warning(f"Seed-цена для работы '{service_name}' не найдена")
 
@@ -190,6 +246,14 @@ def update_labor_price(service_name: str, parser) -> LaborPrice | None:
             parsed = parser.fetch_price(service_name)
         except Exception as e:
             logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{service_name}': {e}")
+            return None
+
+        # Нулевую/пустую цену не сохраняем — старые цены остаются, расчёт уйдёт на seed.
+        if not _is_valid_parsed(parsed):
+            logger.warning(
+                f"Парсер {parser.source_name} вернул пустую/нулевую цену для "
+                f"'{service_name}' — не сохраняем (parser=0/empty)"
+            )
             return None
 
         source = session.query(PriceSource).filter(PriceSource.name == parser.source_name).first()

@@ -17,6 +17,7 @@ import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/
 import { useProjectStore } from "../../store/projectStore";
 import { calculateEstimate } from "../../api/estimates";
 import { apiClient } from "../../api/client";
+import { Select } from "../../components/ui/Select";
 
 interface GeometryData {
   floor_area: number;
@@ -198,17 +199,13 @@ export function Workspace() {
         <div className={styles.paramsRow}>
           <div className={styles.cityField}>
             <div className={styles.blockLabel}>Город (цены)</div>
-            <select
-              className={styles.citySelect}
+            <Select
+              variant="underline"
+              ariaLabel="Город для расчёта цен"
               value={city}
-              onChange={(e) => setCity(e.target.value)}
-            >
-              {cityOptions.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+              options={cityOptions.map((c) => ({ value: c, label: c }))}
+              onChange={setCity}
+            />
           </div>
           <div className={styles.heightField}>
             <div className={styles.blockLabel}>Высота потолка</div>

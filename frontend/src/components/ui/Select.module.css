@@ -1,0 +1,101 @@
+.wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.wrapperFull {
+  display: block;
+  width: 100%;
+}
+
+/* Триггер — кнопка, заменяющая нативный <select>. */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  background: #fff;
+  color: var(--text-h);
+  cursor: pointer;
+  outline: none;
+  text-align: left;
+}
+
+/* Вариант «box» — как у тип комнаты / тип проёма. */
+.box {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--sans);
+  font-size: 14px;
+}
+
+.box:focus-visible {
+  border-color: var(--accent);
+}
+
+/* Вариант «underline» — крупный serif под холстом (город). */
+.underline {
+  padding: 6px 4px;
+  border: none;
+  border-bottom: 1.5px solid var(--border);
+  font-family: var(--serif);
+  font-size: 22px;
+}
+
+.underline:focus-visible {
+  border-bottom-color: var(--accent);
+}
+
+.caret {
+  font-size: 13px;
+  color: #9a9a9a;
+  flex-shrink: 0;
+}
+
+/* Выпадающий список — всегда светлый, независимо от темы ОС. */
+.list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 100%;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: var(--sans);
+  font-size: 15px;
+  color: var(--text-h);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.option:hover {
+  background: var(--accent-bg);
+}
+
+.optionSelected {
+  color: var(--accent);
+}
+
+.check {
+  display: inline-block;
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--accent);
+}

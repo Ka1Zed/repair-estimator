@@ -106,25 +106,6 @@
   gap: 8px;
 }
 
-.citySelect {
-  padding: 6px 4px;
-  font-size: 22px;
-  font-family: var(--serif);
-  color: var(--text-h);
-  background: #fff;
-  /* Принудительно светлая отрисовка нативного списка опций — иначе в тёмной теме ОС
-     выпадающий список рендерится тёмным и текст становится нечитаемым (чёрное на чёрном). */
-  color-scheme: light;
-  border: none;
-  border-bottom: 1.5px solid var(--border);
-  outline: none;
-  cursor: pointer;
-}
-
-.citySelect:focus {
-  border-bottom-color: var(--accent);
-}
-
 /* координаты углов — раскрывающийся тогл */
 .pointsDetails {
   margin-top: 28px;

@@ -101,7 +101,8 @@ def calculate_estimate(
                 price_avg=0.0,
                 total_avg=0.0,
                 source="нет цены",
-                updated_at=""
+                updated_at="",
+                region=None
             ))
             continue
 
@@ -120,7 +121,8 @@ def calculate_estimate(
             price_avg=float(price_avg),
             total_avg=float(total_avg),
             source=source_name,
-            updated_at=updated_at
+            updated_at=updated_at,
+            region=price_obj.region
         ))
 
         materials_sum['min'] += final_quantity * price_obj.price_min
@@ -163,7 +165,8 @@ def calculate_estimate(
             unit=group['unit'],
             price_avg=float(price_avg),
             total_avg=float(total_avg),
-            source=labor_source_name
+            source=labor_source_name,
+            region=labor_price.region
         ))
 
         labor_sum['min'] += volume * labor_price.price_min

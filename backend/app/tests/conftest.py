@@ -67,6 +67,14 @@ def seed_test_data(session):
         mp = MaterialPrice(material_id=mat.id, source_id=src.id, price_min=100, price_avg=120, price_max=140)
         session.add(mp)
 
+    # Региональная seed-цена для теста регионального lookup (#127):
+    # отличается от базовой (avg 200 против 120), чтобы выбор региона был заметен.
+    paint = session.query(Material).filter(Material.name == "Краска для стен").first()
+    session.add(MaterialPrice(
+        material_id=paint.id, source_id=src.id,
+        price_min=180, price_avg=200, price_max=240, region="Москва",
+    ))
+
     # Услуги 
     services_data = [
         {"name": "Покраска стен", "specialist_type": "Маляр", "unit": "м²"},
@@ -85,6 +93,13 @@ def seed_test_data(session):
     for svc in session.query(LaborService).all():
         lp = LaborPrice(labor_service_id=svc.id, source_id=src.id, price_min=300, price_avg=450, price_max=600)
         session.add(lp)
+
+    # Региональная seed-цена работы (#127): отличается от базовой (avg 700 против 450).
+    paint_walls = session.query(LaborService).filter(LaborService.name == "Покраска стен").first()
+    session.add(LaborPrice(
+        labor_service_id=paint_walls.id, source_id=src.id,
+        price_min=600, price_avg=700, price_max=800, region="Москва",
+    ))
 
     session.commit()
 

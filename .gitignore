@@ -11,6 +11,8 @@ venv/
 # env
 .env
 .env.*
+# но шаблоны .env.example (в т.ч. frontend/) — версионируем
+!.env.example
 
 # IDE
 .vscode/

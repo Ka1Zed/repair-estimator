@@ -7,7 +7,9 @@ from app.services.price_aggregator_service import get_price, update_labor_price
 from app.parsers.rembrigada_parser import RembrigadaParser, SERVICE_MAP
 from app.parsers.labor_table_parser import LABOR_SERVICE_MAP
 from app.parsers.garantstroikompleks_parser import GarantStroiParser
+from app.parsers.remont_uroven_parser import RemontUrovenParser
 from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
+from app.parsers.prorabneva_parser import ProrabnevaParser
 
 # Настройка логирования — чтобы видеть прогресс в консоли
 logging.basicConfig(
@@ -67,7 +69,10 @@ def update_prices():
 
     # Региональные прайсы отделочных работ: цены пишутся с region сайта.
     # Ошибка одного сайта/услуги не прерывает остальные.
-    regional_labor_parsers = [GarantStroiParser(), OtdelkaSpbParser()]
+    regional_labor_parsers = [
+        GarantStroiParser(), RemontUrovenParser(),   # Москва
+        OtdelkaSpbParser(), ProrabnevaParser(),       # Санкт-Петербург
+    ]
     for labor_parser in regional_labor_parsers:
         logger.info(
             f"Региональный прайс работ: {labor_parser.source_name} "

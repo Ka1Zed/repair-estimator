@@ -48,6 +48,9 @@ class MaterialPrice(Base):
     price_avg: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     price_max: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     region: Mapped[str | None]
+    # Ссылка на карточку/категорию товара у источника. Заполняет парсер;
+    # для seed-цен NULL (показать «нет ссылки» / не делать ссылку на фронте).
+    source_url: Mapped[str | None]
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
@@ -61,6 +64,8 @@ class LaborPrice(Base):
     price_avg: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     price_max: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     region: Mapped[str | None]
+    # Ссылка на страницу услуги у источника. Заполняет парсер; для seed NULL.
+    source_url: Mapped[str | None]
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 

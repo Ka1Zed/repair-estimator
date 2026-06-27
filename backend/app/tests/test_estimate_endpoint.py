@@ -322,6 +322,51 @@ def test_parser_source_in_response(monkeypatch):
     assert paint["source"] == "Мегастрой"
 
 
+def test_parser_source_url_in_response(monkeypatch):
+    """Цена от парсера несёт source_url; seed-позиция отдаёт source_url = null."""
+    from decimal import Decimal
+    from app.parsers.base import ParsedPrice
+
+    _clear_parser_prices()
+
+    card_url = "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"
+
+    def fake_fetch(self, material_name):
+        # Как настоящий парсер: цена есть только для материалов из CATEGORY_MAP.
+        if material_name != "Краска для стен":
+            raise ValueError(f"нет категории для '{material_name}'")
+        return ParsedPrice(
+            price_min=Decimal("500"),
+            price_avg=Decimal("700"),
+            price_max=Decimal("900"),
+            source_url=card_url,
+        )
+
+    monkeypatch.setattr(
+        "app.parsers.megastroy_parser.MegastroyParser.fetch_price", fake_fetch
+    )
+
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    materials = response.json()["materials"]
+
+    # Парсерная цена краски — ссылка ведёт на карточку.
+    paint = next((m for m in materials if m["name"] == "Краска для стен"), None)
+    assert paint is not None
+    assert paint["source"] == "Мегастрой"
+    assert paint["source_url"] == card_url
+
+    # Ламинат парсер не знает → seed → ссылки нет.
+    laminate = next((m for m in materials if m["name"] == "Ламинат"), None)
+    assert laminate is not None
+    assert laminate["source"] == "seed"
+    assert laminate["source_url"] is None
+
+    # Работы берутся из seed → ссылки нет.
+    for lab in response.json()["labor"]:
+        assert lab["source_url"] is None
+
+
 def test_parser_fallback_on_error(monkeypatch):
     """Когда парсер падает, расчёт не ломается и source остаётся 'seed'."""
     _clear_parser_prices()

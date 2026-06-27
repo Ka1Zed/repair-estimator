@@ -98,6 +98,7 @@ def get_price(
                         price_entry.price_min = parsed.price_min
                         price_entry.price_avg = parsed.price_avg
                         price_entry.price_max = parsed.price_max
+                        price_entry.source_url = parsed.source_url
                         price_entry.updated_at = datetime.now(timezone.utc)
                     else:
                         # Создаем новую
@@ -107,6 +108,7 @@ def get_price(
                             price_min=parsed.price_min,
                             price_avg=parsed.price_avg,
                             price_max=parsed.price_max,
+                            source_url=parsed.source_url,
                             updated_at=datetime.now(timezone.utc)
                         )
                         session.add(price_entry)
@@ -272,6 +274,7 @@ def update_labor_price(service_name: str, parser) -> LaborPrice | None:
         price.price_min = parsed.price_min
         price.price_avg = parsed.price_avg
         price.price_max = parsed.price_max
+        price.source_url = parsed.source_url
         price.updated_at = datetime.now(timezone.utc)
 
         session.commit()

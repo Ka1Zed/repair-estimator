@@ -46,6 +46,9 @@ class MaterialItem(BaseModel):
     price_avg: float
     total_avg: float
     source: str
+    # Ссылка на карточку/категорию товара у источника цены: задана для парсерных
+    # цен, null для seed и для позиций без цены. Фронт (F2-8) делает из неё ссылку.
+    source_url: Optional[str] = None
     updated_at: str
     # Регион, по которому реально взялась цена: город при региональной seed-цене
     # или null, если цена базовая (region IS NULL) / парсерная. См. city в запросе.
@@ -59,6 +62,8 @@ class LaborItem(BaseModel):
     price_avg: float
     total_avg: float
     source: str
+    # Ссылка на страницу услуги у источника цены: задана для парсерных цен, null для seed.
+    source_url: Optional[str] = None
     region: Optional[str] = None
 
 class Summary(BaseModel):

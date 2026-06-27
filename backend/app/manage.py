@@ -5,6 +5,11 @@ from app.parsers.megastroy_parser import MegastroyParser, CATEGORY_MAP
 from app.services.price_aggregator_service import get_price, update_labor_price
 
 from app.parsers.rembrigada_parser import RembrigadaParser, SERVICE_MAP
+from app.parsers.labor_table_parser import LABOR_SERVICE_MAP
+from app.parsers.garantstroikompleks_parser import GarantStroiParser
+from app.parsers.remont_uroven_parser import RemontUrovenParser
+from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
+from app.parsers.prorabneva_parser import ProrabnevaParser
 
 # Настройка логирования — чтобы видеть прогресс в консоли
 logging.basicConfig(
@@ -61,6 +66,34 @@ def update_prices():
         except Exception as e:
             logger.error(f"  ✗ {service}: {e}")
             failed += 1
+
+    # Региональные прайсы отделочных работ: цены пишутся с region сайта.
+    # Ошибка одного сайта/услуги не прерывает остальные.
+    regional_labor_parsers = [
+        GarantStroiParser(), RemontUrovenParser(),   # Москва
+        OtdelkaSpbParser(), ProrabnevaParser(),       # Санкт-Петербург
+    ]
+    for labor_parser in regional_labor_parsers:
+        logger.info(
+            f"Региональный прайс работ: {labor_parser.source_name} "
+            f"({labor_parser.region}), {len(LABOR_SERVICE_MAP)} позиций"
+        )
+        for service in LABOR_SERVICE_MAP:
+            try:
+                price = update_labor_price(
+                    service, parser=labor_parser, region=labor_parser.region
+                )
+                if price:
+                    logger.info(f"  ✓ {service} [{labor_parser.region}]: avg={price.price_avg}")
+                    success += 1
+                else:
+                    logger.warning(
+                        f"  ✗ {service} [{labor_parser.region}]: не обновлено (fallback на seed)"
+                    )
+                    failed += 1
+            except Exception as e:
+                logger.error(f"  ✗ {service} [{labor_parser.region}]: {e}")
+                failed += 1
 
     logger.info(f"Готово. Успешно: {success}, с проблемами: {failed}")
 

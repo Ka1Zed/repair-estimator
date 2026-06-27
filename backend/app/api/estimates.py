@@ -169,7 +169,9 @@ def calculate_estimate(
             total_avg=float(total_avg),
             source=labor_source_name,
             source_url=labor_price.source_url,
-            region=labor_price.region
+            region=labor_price.region,
+            # Полный список сайтов, объединённых в вилку (#166); None для seed.
+            sources=getattr(labor_price, "contributing_sources", None),
         ))
 
         labor_sum['min'] += volume * labor_price.price_min

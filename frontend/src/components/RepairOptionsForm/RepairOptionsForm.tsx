@@ -8,6 +8,12 @@ const OPTIONS: { value: RepairType; label: string }[] = [
   { value: 'extended', label: 'Дизайнерский' },
 ];
 
+const REPAIR_CLASS_INFO: Record<RepairType, string> = {
+  cosmetic: 'Покраска, обои, замена пола. Черновые поверхности не затрагиваются.',
+  base: 'Полный цикл: штукатурка, стяжка, чистовая отделка всех поверхностей.',
+  extended: 'Авторский ремонт с дизайн-проектом, нестандартными материалами и повышенными нормами.',
+};
+
 export const RepairOptionsForm: React.FC = () => {
   const repairType = useProjectStore((state) => state.repair_type);
   const setRepairType = useProjectStore((state) => state.setRepairType);
@@ -48,6 +54,9 @@ export const RepairOptionsForm: React.FC = () => {
           );
         })}
       </div>
+      <p style={{ margin: '8px 0 0', fontSize: '13px', color: '#6B6B6B' }}>
+        {REPAIR_CLASS_INFO[repairType]}
+      </p>
     </div>
   );
 };

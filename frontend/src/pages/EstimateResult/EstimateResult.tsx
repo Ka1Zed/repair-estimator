@@ -1,11 +1,47 @@
-import  { useState } from 'react';
+import { useState } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { MaterialsTable, type MaterialItem } from '../../components/EstimateTables/MaterialsTable';
-import { LaborTable, type LaborItem } from '../../components/EstimateTables/LaborTable';
+import type { MaterialItem } from '../../components/EstimateTables/MaterialsTable';
+import type { LaborItem } from '../../components/EstimateTables/LaborTable';
+import { EstimateLedger, type LedgerRow } from '../../components/EstimateLedger/EstimateLedger';
 import { RepairOptionsForm } from '../../components/RepairOptionsForm/RepairOptionsForm';
 import { EstimateSummary, type SummaryData } from '../../components/EstimateSummary';
 import styles from './EstimateResult.module.css';
+
+const fmt = (n: number) => n.toLocaleString('ru-RU');
+
+function materialToLedgerRow(item: MaterialItem): LedgerRow {
+  const details: LedgerRow['details'] = [
+    { label: 'Цена за единицу', value: `${fmt(item.price_avg)} ₽/${item.unit}` },
+    { label: 'Количество', value: `${item.quantity} ${item.unit}` },
+    { label: 'Итого', value: `${fmt(item.total_avg)} ₽` },
+    { label: 'Источник', value: item.source },
+  ];
+  if (item.updated_at) details.push({ label: 'Обновлено', value: item.updated_at });
+  return {
+    name: item.name,
+    subtitle: item.source,
+    volume: `${item.quantity} ${item.unit}`,
+    price: `${fmt(item.total_avg)} ₽`,
+    details,
+  };
+}
+
+function laborToLedgerRow(item: LaborItem): LedgerRow {
+  return {
+    name: item.service,
+    subtitle: item.specialist,
+    volume: `${item.volume} ${item.unit}`,
+    price: `${fmt(item.total_avg)} ₽`,
+    details: [
+      { label: 'Специалист', value: item.specialist },
+      { label: 'Ставка', value: `${fmt(item.price_avg)} ₽/${item.unit}` },
+      { label: 'Объём', value: `${item.volume} ${item.unit}` },
+      { label: 'Итого', value: `${fmt(item.total_avg)} ₽` },
+      { label: 'Источник', value: item.source },
+    ],
+  };
+}
 
 
 import { useProjectStore } from '../../store/projectStore';
@@ -106,10 +142,11 @@ export function EstimateResult() {
 
           <EstimateSummary summary={estimateData.summary} />
 
-          <Card title="Детальный расчет" style={{ marginTop: '25px' }}>
-            {/* Передаем реальные массивы из estimateData в таблицы */}
-            <MaterialsTable data={estimateData.materials} />
-            <LaborTable data={estimateData.labor} />
+          <Card title="Ведомость материалов" style={{ marginTop: '25px' }}>
+            <EstimateLedger rows={estimateData.materials.map(materialToLedgerRow)} />
+          </Card>
+          <Card title="Ремонтные работы" style={{ marginTop: '16px' }}>
+            <EstimateLedger rows={estimateData.labor.map(laborToLedgerRow)} />
           </Card>
         </>
       )}

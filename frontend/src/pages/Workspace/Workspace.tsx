@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import styles from "./Workspace.module.css";
-import { exportPdf, exportXlsx } from '../../utils/exportEstimate';
+import { exportPdf, exportXlsx } from "../../utils/exportEstimate";
 
 import RoomsList from "../../components/RoomsList";
 import RoomPolygonEditor from "../../components/RoomPolygonEditor";
@@ -39,7 +39,7 @@ const formatNum = (n: number) =>
   n.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const formatQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
-
+// Регион, по которому реально взялась цена; null → базовая seed-цена (не зависит от города).
 const regionLabel = (region?: string | null) => region ?? "базовая цена";
 
 export function Workspace() {
@@ -58,7 +58,8 @@ export function Workspace() {
   const [tab, setTab] = useState<"materials" | "labor">("materials");
   const [regions, setRegions] = useState<string[]>([]);
 
-  
+  // Список городов для селектора. Если текущего города нет в ответе бэка,
+  // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
   useEffect(() => {
     apiClient
       .fetchRegions()
@@ -118,7 +119,8 @@ export function Workspace() {
     [rooms, city, repairType, repairOptions],
   );
 
- 
+  // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
+  // Дебаунс схлопывает всё перетаскивание угла в один запрос к бэку.
   useEffect(() => {
     const timer = setTimeout(() => runCalculate(true), 500);
     return () => clearTimeout(timer);
@@ -264,26 +266,22 @@ export function Workspace() {
                 {data && ` · общая площадь пола ${formatNum(data.geometry.floor_area)} м²`}
               </div>
             </div>
-           <div className={styles.exportRow}>
-              <button 
-                className={styles.exportBtn} 
-                onClick={() => data && exportPdf(data, city, repairType)} 
+            <div className={styles.exportRow}>
+              <button
+                className={styles.exportBtn}
+                onClick={() => data && exportPdf(data, city, repairType)}
                 disabled={!data}
               >
                 Скачать PDF
               </button>
-              <button 
-                className={styles.exportBtn} 
-                onClick={() => data && exportXlsx(data)} 
+              <button
+                className={styles.exportBtn}
+                onClick={() => data && exportXlsx(data)}
                 disabled={!data}
               >
                 Экспорт в Excel
               </button>
-              <button 
-                className={styles.exportBtn} 
-                onClick={() => window.print()} 
-                disabled={!data}
-              >
+              <button className={styles.exportBtn} onClick={() => window.print()} disabled={!data}>
                 Печать
               </button>
             </div>
@@ -368,7 +366,7 @@ export function Workspace() {
                   План работ
                 </button>
               </div>
-              
+
               <EstimateLedger rows={tab === "materials" ? materialRows : laborRows} />
 
               <div className={styles.sectionTotal}>

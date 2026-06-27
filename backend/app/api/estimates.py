@@ -101,6 +101,7 @@ def calculate_estimate(
                 price_avg=0.0,
                 total_avg=0.0,
                 source="нет цены",
+                source_url=None,
                 updated_at="",
                 region=None
             ))
@@ -121,6 +122,7 @@ def calculate_estimate(
             price_avg=float(price_avg),
             total_avg=float(total_avg),
             source=source_name,
+            source_url=price_obj.source_url,
             updated_at=updated_at,
             region=price_obj.region
         ))
@@ -166,6 +168,7 @@ def calculate_estimate(
             price_avg=float(price_avg),
             total_avg=float(total_avg),
             source=labor_source_name,
+            source_url=labor_price.source_url,
             region=labor_price.region
         ))
 

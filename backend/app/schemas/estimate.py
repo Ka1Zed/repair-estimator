@@ -22,7 +22,6 @@ class RepairOptions(BaseModel):
     floor: Optional[str] = None
     walls: Optional[str] = None
     ceiling: Optional[str] = None
-    tile: Optional[bool] = False
     electric: Optional[str] = None
     plumbing: Optional[bool] = False
 

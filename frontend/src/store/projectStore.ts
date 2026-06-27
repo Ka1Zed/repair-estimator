@@ -22,7 +22,6 @@ export interface RepairOptions {
   floor?: string | null;
   walls?: string | null;
   ceiling?: string | null;
-  tile?: boolean;
   electric?: string | null;
   plumbing?: boolean;
 }
@@ -70,7 +69,6 @@ const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
   floor: null,
   walls: null,
   ceiling: null,
-  tile: false,
   electric: null,
   plumbing: false,
 };

@@ -25,7 +25,6 @@ class TestMaterialCalc:
             'floor': 'laminate',
             'walls': 'paint',
             'ceiling': 'paint',
-            'tile': False,
             'electric': 'basic',
             'plumbing': False
         }
@@ -88,7 +87,6 @@ class TestLaborCalc:
             'floor': 'laminate',
             'walls': 'paint',
             'ceiling': 'paint',
-            'tile': False,
             'electric': 'basic',
             'plumbing': True
         }
@@ -191,7 +189,6 @@ class TestLShape:
             'floor': 'laminate',
             'walls': 'paint',
             'ceiling': 'paint',
-            'tile': False,
             'electric': 'basic',
             'plumbing': False
         }
@@ -232,7 +229,6 @@ class TestDifferentRooms:
             'floor': 'laminate',
             'walls': 'paint',
             'ceiling': 'paint',
-            'tile': False,
             'electric': 'basic',
             'plumbing': False
         }
@@ -250,7 +246,6 @@ class TestDifferentRooms:
             'floor': 'linoleum',
             'walls': 'wallpaper',
             'ceiling': None,
-            'tile': False,
             'electric': 'basic',
             'plumbing': False
         }

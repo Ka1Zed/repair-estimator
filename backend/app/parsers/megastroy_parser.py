@@ -106,4 +106,11 @@ class MegastroyParser(BaseParser):
             f"min={price_min}, avg={price_avg}, max={price_max}"
         )
 
-        return ParsedPrice(price_min=price_min, price_avg=price_avg, price_max=price_max)
+        # Ссылку отдаём на исходную (человекочитаемую) страницу категории, а не на
+        # ASCII-кодированный URL — её видит пользователь в смете.
+        return ParsedPrice(
+            price_min=price_min,
+            price_avg=price_avg,
+            price_max=price_max,
+            source_url=CATEGORY_MAP[material_name],
+        )

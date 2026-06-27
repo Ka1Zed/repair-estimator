@@ -128,4 +128,10 @@ class RembrigadaParser(BaseParser):
             f"company_price: '{material_name}' — {len(prices)} строк, "
             f"min={price_min}, avg={price_avg}, max={price_max}"
         )
-        return ParsedPrice(price_min=price_min, price_avg=price_avg, price_max=price_max)
+        # Все услуги берём из одного прайс-листа — ссылка на него общая.
+        return ParsedPrice(
+            price_min=price_min,
+            price_avg=price_avg,
+            price_max=price_max,
+            source_url=PRICE_URL,
+        )

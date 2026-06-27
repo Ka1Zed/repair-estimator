@@ -15,6 +15,7 @@ COPY . .
 
 EXPOSE 8000
 
-# При старте: миграции -> seed стартовых данных -> сервер.
+# При старте: миграции -> seed только пустой БД -> сервер.
+# --if-empty не перетирает данные (и правки цен) при рестарте контейнера.
 # Готовность Postgres гарантирует depends_on healthcheck в docker-compose.
-CMD ["sh", "-c", "alembic upgrade head && python -m app.db.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "alembic upgrade head && python -m app.db.seed --if-empty && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

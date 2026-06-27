@@ -4,8 +4,7 @@ import * as XLSX from 'xlsx';
 
 
 import type { SummaryData } from '../components/EstimateSummary';
-import type { MaterialItem } from '../components/EstimateTables/MaterialsTable';
-import type { LaborItem } from '../components/EstimateTables/LaborTable';
+import type { MaterialItem, LaborItem } from '../types/estimate';
 
 export interface EstimateExportData {
   summary: SummaryData;

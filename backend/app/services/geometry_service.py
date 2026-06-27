@@ -115,9 +115,22 @@ def calculate_room_geometry(points, height, openings=None):
 
     wall = wall_area(pts, height, openings_dict)
 
+    # Сумма ширин дверных проёмов — для плинтуса (периметр за вычетом дверей).
+    # Окна не вычитаем: плинтус ими не прерывается (estimation-rules.md).
+    door_width_sum = Decimal('0.0')
+    for op in openings:
+        if isinstance(op, dict):
+            op_type = op.get('type')
+            width = op.get('width')
+        else:
+            op_type, width, _ = op
+        if op_type == 'door':
+            door_width_sum += to_decimal(width)
+
     return {
         'floor_area': floor,
         'ceiling_area': floor,
         'wall_area': wall,
-        'perimeter': perim
+        'perimeter': perim,
+        'door_width_sum': door_width_sum,
     }

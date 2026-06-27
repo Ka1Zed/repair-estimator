@@ -384,3 +384,109 @@ def test_parser_fallback_on_error(monkeypatch):
     assert len(materials) > 0
     for m in materials:
         assert m["source"] == "seed"
+
+
+def _seed_only(monkeypatch):
+    """Гарантирует расчёт по seed-ценам (парсер падает → fallback), чтобы тест
+    не зависел от сети."""
+    _clear_parser_prices()
+
+    def failing_fetch(self, material_name):
+        raise RuntimeError("сеть выключена в тесте")
+
+    monkeypatch.setattr(
+        "app.parsers.megastroy_parser.MegastroyParser.fetch_price", failing_fetch
+    )
+
+
+def test_full_workset_has_electric_and_plumbing(monkeypatch):
+    """Санузел с полным набором: электрика и сантехника попадают в смету с объёмом > 0
+    и ненулевой ценой; ни одна строка не остаётся без цены (silent P0 #181)."""
+    _seed_only(monkeypatch)
+
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Санузел",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0}, {"x": 2, "y": 0},
+                    {"x": 2, "y": 2}, {"x": 0, "y": 2}
+                ],
+                "room_type": "bathroom",
+                "openings": [
+                    {"type": "door", "width": 0.8, "height": 2.0}
+                ]
+            }
+        ],
+        "repair_type": "base",
+        "repair_options": {
+            "floor": "tile",
+            "walls": "tile",
+            "ceiling": "stretch",
+            "tile": True,
+            "electric": "extended",
+            "plumbing": True
+        }
+    }
+
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+
+    labor = data["labor"]
+    electric = next((x for x in labor if x["service"] == "Электромонтаж"), None)
+    plumbing = next((x for x in labor if x["service"] == "Сантехнические работы"), None)
+
+    # Объём по дефолтам room_type=bathroom: электрика extended = 5, сантехника = 3.
+    assert electric is not None and electric["volume"] == pytest.approx(5.0)
+    assert plumbing is not None and plumbing["volume"] == pytest.approx(3.0)
+    assert electric["total_avg"] > 0 and plumbing["total_avg"] > 0
+    assert electric["unit"] == "точка" and plumbing["unit"] == "точка"
+
+    # Ни материалы, ни работы не остаются без цены на боевом наборе.
+    for row in data["materials"] + data["labor"]:
+        assert row["source"] != "нет цены"
+
+
+def test_plinth_subtracts_door_width(monkeypatch):
+    """Плинтус считается от периметра за вычетом ширины дверей, а не по полному
+    периметру (silent P0 #181)."""
+    _seed_only(monkeypatch)
+
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Комната",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0}, {"x": 4, "y": 0},
+                    {"x": 4, "y": 3}, {"x": 0, "y": 3}
+                ],
+                "room_type": "living",
+                "openings": [
+                    {"type": "door", "width": 0.8, "height": 2.0}
+                ]
+            }
+        ],
+        "repair_type": "cosmetic",
+        "repair_options": {
+            "floor": "laminate",
+            "walls": "paint",
+            "ceiling": "paint",
+            "tile": False,
+            "electric": "basic",
+            "plumbing": False
+        }
+    }
+
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 200
+    plinth = next(m for m in response.json()["materials"] if m["name"] == "Плинтус")
+
+    # Периметр 14, дверь 0.8, waste 1.05, package_size 1.0:
+    # (14 − 0.8) × 1.05 = 13.86 → ceil = 14 пог.м (с дверью).
+    # Без вычета двери было бы 14 × 1.05 = 14.7 → ceil = 15.
+    assert plinth["quantity"] == pytest.approx(14.0)

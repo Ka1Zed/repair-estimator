@@ -46,7 +46,6 @@ ProjectState {
 | `floor`    | `string \| null`     | `"laminate"`, `"linoleum"`, `"parquet"`, `"tile"`, `null` |
 | `walls`    | `string \| null`     | `"paint"`, `"wallpaper"`, `"tile"`, `null`         |
 | `ceiling`  | `string \| null`     | `"paint"`, `"stretch"`, `null`                     |
-| `tile`     | `boolean`            | Дополнительная плитка (фартук/стены санузла)       |
 | `electric` | `string \| null`     | `"basic"`, `"extended"`, `null`                    |
 | `plumbing` | `boolean`            | Сантехника                                         |
 

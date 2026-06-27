@@ -34,7 +34,6 @@ def test_single_room():
             "floor": "laminate",
             "walls": "paint",
             "ceiling": "paint",
-            "tile": False,
             "electric": "basic",
             "plumbing": False
         }
@@ -87,7 +86,6 @@ def test_response_schema():
             "floor": "laminate",
             "walls": "paint",
             "ceiling": "paint",
-            "tile": False,
             "electric": "basic",
             "plumbing": False
         }
@@ -134,7 +132,6 @@ def test_single_room_exact_values():
             "floor": "laminate",
             "walls": "paint",
             "ceiling": "paint",
-            "tile": False,
             "electric": "basic",
             "plumbing": False
         }
@@ -207,7 +204,6 @@ def test_two_rooms_grouping_and_rounding():
             "floor": "laminate",
             "walls": "paint",
             "ceiling": "paint",
-            "tile": False,
             "electric": "basic",
             "plumbing": False
         }
@@ -256,7 +252,6 @@ PAINT_PAYLOAD = {
         "floor": "laminate",
         "walls": "paint",
         "ceiling": "paint",
-        "tile": False,
         "electric": "basic",
         "plumbing": False
     }
@@ -425,7 +420,6 @@ def test_full_workset_has_electric_and_plumbing(monkeypatch):
             "floor": "tile",
             "walls": "tile",
             "ceiling": "stretch",
-            "tile": True,
             "electric": "extended",
             "plumbing": True
         }
@@ -476,7 +470,6 @@ def test_plinth_subtracts_door_width(monkeypatch):
             "floor": "laminate",
             "walls": "paint",
             "ceiling": "paint",
-            "tile": False,
             "electric": "basic",
             "plumbing": False
         }

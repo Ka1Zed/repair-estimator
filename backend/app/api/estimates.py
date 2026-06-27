@@ -16,10 +16,20 @@ from app.services.material_calc_service import calculate_materials, packs_to_buy
 from app.services.labor_calc_service import calculate_labor
 from app.services.repair_coeffs_service import apply_repair_coeffs, REPAIR_COEFFS, CONTINGENCY
 from app.services.price_aggregator_service import get_price, get_labor_price
+from app.parsers.base import BaseParser
 from app.parsers.megastroy_parser import MegastroyParser
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
+
+
+def get_material_parser() -> BaseParser:
+    '''Парсер цен материалов для расчёта сметы.
+
+    Вынесен в зависимость FastAPI, чтобы тесты могли подменить его заглушкой
+    (app.dependency_overrides) и не ходить в сеть. В проде — живой Мегастрой.
+    '''
+    return MegastroyParser()
 
 # Дефолты точек электрики/сантехники по типу комнаты — MVP-допущение: UI пока не
 # даёт задавать точки вручную, поэтому объём этих работ выводим из room_type.
@@ -40,7 +50,8 @@ PLUMBING_POINTS = {
 @router.post("/calculate", response_model=EstimateResponse)
 def calculate_estimate(
     request: EstimateRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    parser: BaseParser = Depends(get_material_parser),
 ) -> EstimateResponse:
     all_materials: List[Dict[str, Any]] = []
     all_labor: List[Dict[str, Any]] = []
@@ -82,8 +93,6 @@ def calculate_estimate(
             db=db
         )
         all_labor.extend(labor)
-
-    parser = MegastroyParser()
 
     # Множитель строк детализации: коэффициент типа ремонта × непредвиденные расходы (avg).
     # Нужен, чтобы сумма построчных total_avg точно совпадала с summary.*_avg.

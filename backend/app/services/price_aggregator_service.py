@@ -1,5 +1,7 @@
 import logging
+import statistics
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -156,24 +158,60 @@ def get_price(
         session.close()
 
 
+def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
+                          region: str | None) -> LaborPrice:
+    '''
+    Объединяет parser-цены нескольких сайтов одного региона в одну вилку:
+    min = минимум по сайтам, max = максимум, avg = среднее средних (так среднее
+    точнее, чем по одному прайсу). Возвращает несохраняемый (transient) LaborPrice.
+
+    Представительный сайт — чья средняя ближе всего к объединённой средней: его
+    показываем в строке сметы (source/source_url). Полный список сайтов кладём в
+    транзитивный атрибут .contributing_sources (его читает estimates → поле sources).
+    '''
+    price_min = min(r.price_min for r in rows)
+    price_max = max(r.price_max for r in rows)
+    price_avg = Decimal(round(statistics.mean([r.price_avg for r in rows])))
+    representative = min(rows, key=lambda r: abs(r.price_avg - price_avg))
+
+    source_names = [
+        s.name for s in session.query(PriceSource).filter(
+            PriceSource.id.in_({r.source_id for r in rows})
+        ).all()
+    ]
+
+    combined = LaborPrice(
+        labor_service_id=service_id,
+        source_id=representative.source_id,
+        price_min=price_min,
+        price_avg=price_avg,
+        price_max=price_max,
+        region=region,
+        source_url=representative.source_url,
+    )
+    combined.contributing_sources = sorted(source_names)
+    return combined
+
+
 def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice | None:
     '''
-    Возвращает цену работы. Источник правды — парсер (#144): сначала ищем валидную
-    спарсенную цену (любой не-seed источник, записанный CLI update_prices), seed —
+    Возвращает цену работы. Источник правды — парсер (#144): сначала ищем валидные
+    спарсенные цены (любой не-seed источник, записанный CLI update_prices), seed —
     только fallback.
 
     Сетевого запроса здесь нет: спарсенные цены работ пишет в БД команда
     `python -m app.manage update_prices`, а расчёт сметы их только читает.
 
     ВНИМАНИЕ: в отличие от кэша материалов (get_price), свежесть parser-цены здесь
-    НЕ проверяется — возвращаем любую валидную не-seed цену независимо от возраста.
-    Добавление TTL-проверки и детерминированного выбора источника — отдельная issue.
+    НЕ проверяется — берём любые валидные не-seed цены независимо от возраста.
+    Добавление TTL-проверки — отдельная issue.
 
     Порядок выбора:
-      1. parser-цена региона → 2. базовая parser-цена (region IS NULL),
+      1. parser-цены региона → 2. базовые parser-цены (region IS NULL),
       3. seed региона        → 4. базовая seed-цена (region IS NULL).
-    Нулевые/пустые parser-цены игнорируются (как и в get_price). Исключение наверх
-    не пробрасываем.
+    Если на шаге 1/2 цену дали несколько сайтов — объединяем их вилки в одну
+    (#166), иначе берём единственную. Нулевые/пустые parser-цены игнорируются
+    (как и в get_price). Исключение наверх не пробрасываем.
     '''
     session = SessionLocal()
     try:
@@ -192,19 +230,30 @@ def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice 
                 v is not None and v > 0 for v in (p.price_min, p.price_avg, p.price_max)
             )
 
-        # 1-2. Цена из парсера (любой не-seed источник): региональная, затем базовая.
+        # 1-2. Цены из парсеров (любой не-seed источник): сначала региональные,
+        # при их отсутствии — базовые (region IS NULL). Несколько сайтов одного
+        # уровня объединяем в одну вилку.
         parser_q = session.query(LaborPrice).filter(
             LaborPrice.labor_service_id == service.id,
             LaborPrice.source_id != seed_source.id,
         )
-        parser_price = None
+        pool, scope_region = [], None
         if region is not None:
-            parser_price = parser_q.filter(LaborPrice.region == region).first()
-        if not _valid(parser_price):
-            parser_price = parser_q.filter(LaborPrice.region.is_(None)).first()
-        if _valid(parser_price):
-            logger.info(f"Цена работы '{service_name}': источник=parser, region={region}")
-            return parser_price
+            region_rows = [p for p in parser_q.filter(LaborPrice.region == region).all() if _valid(p)]
+            if region_rows:
+                pool, scope_region = region_rows, region
+        if not pool:
+            base_rows = [p for p in parser_q.filter(LaborPrice.region.is_(None)).all() if _valid(p)]
+            if base_rows:
+                pool, scope_region = base_rows, None
+
+        if pool:
+            result = _combine_labor_prices(session, service.id, pool, scope_region)
+            logger.info(
+                f"Цена работы '{service_name}': источник=parser "
+                f"({', '.join(result.contributing_sources)}), region={scope_region}"
+            )
+            return result
 
         # 3-4. Fallback на seed: региональная, затем базовая.
         price = None
@@ -232,9 +281,12 @@ def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice 
         session.close()
 
 
-def update_labor_price(service_name: str, parser) -> LaborPrice | None:
+def update_labor_price(service_name: str, parser, region: str | None = None) -> LaborPrice | None:
     '''
-    Берет цену услуги через парсер и пишет в labor_prices с источником парсера
+    Берет цену услуги через парсер и пишет в labor_prices с источником парсера.
+    region — регион цены (город), пишется в LaborPrice.region; None для базовой
+    (не региональной) цены. Запись адресуется по (услуга, источник, регион):
+    у регионального парсера свой источник-сайт, поэтому регионы не конфликтуют.
     При любой ошибке парсера — ничего не меняет, возвращает None (старые цены остаются)
     '''
     session = SessionLocal()
@@ -265,10 +317,11 @@ def update_labor_price(service_name: str, parser) -> LaborPrice | None:
 
         price = session.query(LaborPrice).filter(
             LaborPrice.labor_service_id == service.id,
-            LaborPrice.source_id == source.id
+            LaborPrice.source_id == source.id,
+            LaborPrice.region == region,
         ).first()
         if not price:
-            price = LaborPrice(labor_service_id=service.id, source_id=source.id)
+            price = LaborPrice(labor_service_id=service.id, source_id=source.id, region=region)
             session.add(price)
 
         price.price_min = parsed.price_min

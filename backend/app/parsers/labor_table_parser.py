@@ -19,6 +19,10 @@ HEADERS = {
 }
 REQUEST_TIMEOUT = 10
 
+# Цена работы не бывает меньше этого порога. Нужен, чтобы reversed-скан строки не
+# принял ячейку-единицу за цену: 'м2'/'м3' содержат цифру и парсятся в 2/3.
+MIN_PRICE = Decimal(10)
+
 # Карта: наша услуга -> правила отбора строк прайса.
 #   include_all — все эти слова должны встретиться в названии
 #   include_any — хотя бы одно из этих (если список не пуст)
@@ -98,9 +102,11 @@ class LaborTableParser(BaseParser):
     Базовый парсер прайса отделочных работ из HTML-таблицы.
     Подкласс задаёт PRICE_URL, source_name и region; остальное общее.
 
-    Вёрстка прайсов: строка таблицы = ячейки, среди которых есть название работы
-    и цена. Имя берём из первой ячейки с буквами (у части сайтов первая ячейка
-    пустая), цену — из последней ячейки (первое число). Услуги сопоставляем с
+    Вёрстка прайсов разная: строка таблицы = ячейки, среди которых есть название
+    работы и цена. Имя берём из первой ячейки с буквами (у части сайтов первая
+    ячейка пустая), цену — из последней ячейки с числом >= MIN_PRICE (у части
+    сайтов последняя ячейка — единица «м2», а цена в предпоследней; из
+    «600 руб. 534 руб.» берём первую — цену без скидки). Услуги сопоставляем с
     LABOR_SERVICE_MAP по include/exclude словам, как в RembrigadaParser.
     '''
 
@@ -127,8 +133,15 @@ class LaborTableParser(BaseParser):
             name = next((c for c in cells if re.search(r"[А-Яа-яA-Za-z]", c)), None)
             if not name:
                 continue
-            price = _parse_price(cells[-1])
-            if price and price > 0:
+            # Цена — последняя ячейка с числом >= MIN_PRICE (последней может быть
+            # единица измерения «м2» -> 2, её пропускаем).
+            price = None
+            for cell in reversed(cells):
+                value = _parse_price(cell)
+                if value is not None and value >= MIN_PRICE:
+                    price = value
+                    break
+            if price:
                 rows.append((name.lower(), price))
         self._rows_cache = rows
         return rows

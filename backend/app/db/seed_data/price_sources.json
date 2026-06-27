@@ -5,5 +5,7 @@
   {"name": "Avito", "type": "parser", "url": "https://www.avito.ru"},
   {"name": "company_price", "type": "parser", "url": "https://rembrigada116.ru/price"},
   {"name": "garantstroikompleks.ru", "type": "parser", "url": "https://garantstroikompleks.ru/prajs-list"},
-  {"name": "otdelka-spb.ru", "type": "parser", "url": "https://otdelka-spb.ru/prajjs/"}
+  {"name": "remont-uroven.ru", "type": "parser", "url": "https://remont-uroven.ru/price.html"},
+  {"name": "otdelka-spb.ru", "type": "parser", "url": "https://otdelka-spb.ru/prajjs/"},
+  {"name": "prorabneva.ru", "type": "parser", "url": "https://www.prorabneva.ru/price"}
 ]

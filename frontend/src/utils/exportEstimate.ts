@@ -3,45 +3,62 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 
 
+import type { SummaryData } from '../components/EstimateSummary';
+import type { MaterialItem } from '../components/EstimateTables/MaterialsTable';
+import type { LaborItem } from '../components/EstimateTables/LaborTable';
+
 export interface EstimateExportData {
-  summary: Record<string, number>;
-  geometry?: Record<string, string | number>;
-  materials: {
-    name: string;
-    quantity: number;
-    unit: string;
-    price_avg: number;
-    total_avg: number;
-  }[];
-  labor: {
-    service: string;
-    specialist: string;
-    volume: number;
-    unit: string;
-    price_avg: number;
-    total_avg: number;
-  }[];
+  summary: SummaryData;
+  geometry?: {
+    floor_area: number;
+    ceiling_area: number;
+    wall_area: number;
+    perimeter: number;
+  }; 
+  materials: MaterialItem[];
+  labor: LaborItem[];
 }
 
+const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
 
-const formatPrice = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
+
+
+
+
+
+const applyCurrencyFormat = (ws: XLSX.WorkSheet) => {
+  for (const key in ws) {
+    if (key[0] === '!') continue; 
+    if (ws[key].t === 'n') { 
+      ws[key].z = '#,##0.00" ₽"';
+    }
+  }
+};
+
+
+const geometryLocales: Record<string, string> = {
+  floor_area: 'Площадь пола',
+  wall_area: 'Площадь стен',
+  ceiling_area: 'Площадь потолка',
+  perimeter: 'Периметр',
+  openings_area: 'Площадь проемов'
+};
 
 
 export const exportXlsx = (data: EstimateExportData) => {
   const wb = XLSX.utils.book_new();
-
 
   const materialsSheet = XLSX.utils.json_to_sheet(
     data.materials.map(m => ({
       'Наименование': m.name,
       'Количество': m.quantity,
       'Ед. изм.': m.unit,
-      'Цена за ед.': formatPrice(m.price_avg),
-      'Итого': formatPrice(m.total_avg),
+      'Цена за ед.': m.price_avg, // Теперь передаем числа, а не строки!
+      'Итого': m.total_avg,
     }))
   );
+  applyCurrencyFormat(materialsSheet);
   XLSX.utils.book_append_sheet(wb, materialsSheet, 'Материалы');
-
 
   const laborSheet = XLSX.utils.json_to_sheet(
     data.labor.map(l => ({
@@ -49,36 +66,38 @@ export const exportXlsx = (data: EstimateExportData) => {
       'Специалист': l.specialist,
       'Объем': l.volume,
       'Ед. изм.': l.unit,
-      'Цена за ед.': formatPrice(l.price_avg),
-      'Итого': formatPrice(l.total_avg),
+      'Цена за ед.': l.price_avg,
+      'Итого': l.total_avg,
     }))
   );
+  applyCurrencyFormat(laborSheet);
   XLSX.utils.book_append_sheet(wb, laborSheet, 'Работы');
 
-
   const summarySheet = XLSX.utils.json_to_sheet([
-    { 'Показатель': 'Материалы (Мин)', 'Сумма': formatPrice(data.summary.materials_min) },
-    { 'Показатель': 'Материалы (Средняя)', 'Сумма': formatPrice(data.summary.materials_avg) },
-    { 'Показатель': 'Материалы (Макс)', 'Сумма': formatPrice(data.summary.materials_max) },
-    { 'Показатель': 'Работы (Мин)', 'Сумма': formatPrice(data.summary.labor_min) },
-    { 'Показатель': 'Работы (Средняя)', 'Сумма': formatPrice(data.summary.labor_avg) },
-    { 'Показатель': 'Работы (Макс)', 'Сумма': formatPrice(data.summary.labor_max) },
-    { 'Показатель': 'ИТОГО (Мин)', 'Сумма': formatPrice(data.summary.total_min) },
-    { 'Показатель': 'ИТОГО (Средняя)', 'Сумма': formatPrice(data.summary.total_avg) },
-    { 'Показатель': 'ИТОГО (Макс)', 'Сумма': formatPrice(data.summary.total_max) },
+    { 'Показатель': 'Материалы (Мин)', 'Сумма': data.summary.materials_min },
+    { 'Показатель': 'Материалы (Средняя)', 'Сумма': data.summary.materials_avg },
+    { 'Показатель': 'Материалы (Макс)', 'Сумма': data.summary.materials_max },
+    { 'Показатель': 'Работы (Мин)', 'Сумма': data.summary.labor_min },
+    { 'Показатель': 'Работы (Средняя)', 'Сумма': data.summary.labor_avg },
+    { 'Показатель': 'Работы (Макс)', 'Сумма': data.summary.labor_max },
+    { 'Показатель': 'ИТОГО (Мин)', 'Сумма': data.summary.total_min },
+    { 'Показатель': 'ИТОГО (Средняя)', 'Сумма': data.summary.total_avg },
+    { 'Показатель': 'ИТОГО (Макс)', 'Сумма': data.summary.total_max },
   ]);
+  applyCurrencyFormat(summarySheet);
   XLSX.utils.book_append_sheet(wb, summarySheet, 'Итого');
 
   XLSX.writeFile(wb, 'Смета.xlsx');
 };
 
 
-export const exportPdf = async (data: EstimateExportData, city: string, repairType: string) => {
+export const exportPdf = async (data: EstimateExportData, city: string = 'Город не указан', repairType: string) => {
   const doc = new jsPDF();
 
-  
   try {
     const response = await fetch('/Roboto-Regular.ttf');
+    if (!response.ok) throw new Error('Ошибка сети при загрузке шрифта');
+    
     const buffer = await response.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     let binary = '';
@@ -92,9 +111,10 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
     doc.setFont('Roboto');
   } catch (err) {
     console.error('Ошибка загрузки шрифта', err);
+    alert('Не удалось загрузить кириллический шрифт. Выгрузка PDF отменена.');
+    return; 
   }
 
- 
   doc.setFontSize(16);
   doc.text('Проект: Смета на ремонт', 14, 15);
   doc.setFontSize(12);
@@ -104,30 +124,26 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
 
   let currentY = 42;
 
- 
   if (data.geometry && Object.keys(data.geometry).length > 0) {
     doc.text('Геометрия помещений:', 14, currentY);
     doc.setFontSize(10);
-    
     const geomText = Object.entries(data.geometry)
-      .map(([k, v]) => `${k}: ${v}`)
+      .map(([k, v]) => `${geometryLocales[k] || k}: ${v}`) // Используем русификатор
       .join(' | ');
     doc.text(geomText, 14, currentY + 6);
     currentY += 14;
     doc.setFontSize(12);
   }
 
-  
   doc.text('Материалы:', 14, currentY);
   autoTable(doc, {
     startY: currentY + 4,
     head: [['Наименование', 'Кол-во', 'Ед.', 'Цена', 'Итого']],
     body: data.materials.map(m => [
-      m.name, m.quantity, m.unit, formatPrice(m.price_avg), formatPrice(m.total_avg)
+      m.name, m.quantity, m.unit, formatPricePDF(m.price_avg), formatPricePDF(m.total_avg)
     ]),
     styles: { font: 'Roboto' }
   });
-
 
   currentY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
   doc.text('Работы:', 14, currentY);
@@ -135,17 +151,16 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
     startY: currentY + 4,
     head: [['Услуга', 'Специалист', 'Объем', 'Ед.', 'Цена', 'Итого']],
     body: data.labor.map(l => [
-      l.service, l.specialist, l.volume, l.unit, formatPrice(l.price_avg), formatPrice(l.total_avg)
+      l.service, l.specialist, l.volume, l.unit, formatPricePDF(l.price_avg), formatPricePDF(l.total_avg)
     ]),
     styles: { font: 'Roboto' }
   });
 
- 
   currentY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
   doc.setFontSize(12);
-  doc.text(`Итого (Мин): ${formatPrice(data.summary.total_min)}`, 14, currentY);
-  doc.text(`Итого (Средняя): ${formatPrice(data.summary.total_avg)}`, 14, currentY + 7);
-  doc.text(`Итого (Макс): ${formatPrice(data.summary.total_max)}`, 14, currentY + 14);
+  doc.text(`Итого (Мин): ${formatPricePDF(data.summary.total_min)}`, 14, currentY);
+  doc.text(`Итого (Средняя): ${formatPricePDF(data.summary.total_avg)}`, 14, currentY + 7);
+  doc.text(`Итого (Макс): ${formatPricePDF(data.summary.total_max)}`, 14, currentY + 14);
 
   doc.save('Смета.pdf');
 };

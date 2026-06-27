@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:16
     container_name: repair-estimator-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -19,6 +20,7 @@ services:
   backend:
     build: ./backend
     container_name: repair-estimator-backend
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,6 +50,7 @@ services:
         # Адрес backend зашивается в бандл при сборке.
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     container_name: repair-estimator-frontend
+    restart: unless-stopped
     depends_on:
       - backend
     ports:

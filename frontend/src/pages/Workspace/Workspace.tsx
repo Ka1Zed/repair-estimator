@@ -10,8 +10,7 @@ import OpeningsForm from "../../components/OpeningsForm";
 import { RoomTypeSelector } from "../../components/RoomTypeSelector";
 import { RepairOptionsForm } from "../../components/RepairOptionsForm/RepairOptionsForm";
 
-import type { MaterialItem } from "../../components/EstimateTables/MaterialsTable";
-import type { LaborItem } from "../../components/EstimateTables/LaborTable";
+import type { MaterialItem, LaborItem } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
 import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/EstimateLedger";
 
@@ -153,7 +152,7 @@ export function Workspace() {
           { label: "Итог по позиции", value: rub(m.total_avg) },
           { label: "Источник цены", value: m.source },
           { label: "Регион", value: regionLabel(m.region) },
-          ...(m.updated_at ? [{ label: "Обновлено", value: m.updated_at }] : []),
+          ...(m.updated_at ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }] : []),
         ],
       })),
     [data],

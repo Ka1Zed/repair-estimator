@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import type { MaterialItem } from '../../components/EstimateTables/MaterialsTable';
-import type { LaborItem } from '../../components/EstimateTables/LaborTable';
+import type { MaterialItem, LaborItem } from '../../types/estimate';
 import { EstimateLedger, type LedgerRow } from '../../components/EstimateLedger/EstimateLedger';
 import { RepairOptionsForm } from '../../components/RepairOptionsForm/RepairOptionsForm';
 import { EstimateSummary, type SummaryData } from '../../components/EstimateSummary';
@@ -17,7 +16,7 @@ function materialToLedgerRow(item: MaterialItem): LedgerRow {
     { label: 'Итого', value: `${fmt(item.total_avg)} ₽` },
     { label: 'Источник', value: item.source },
   ];
-  if (item.updated_at) details.push({ label: 'Обновлено', value: item.updated_at });
+  if (item.updated_at) details.push({ label: 'Обновлено', value: new Date(item.updated_at).toLocaleDateString('ru-RU') });
   return {
     name: item.name,
     subtitle: item.source,

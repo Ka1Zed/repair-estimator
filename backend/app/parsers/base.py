@@ -9,6 +9,9 @@ class ParsedPrice:
     price_min: Decimal
     price_avg: Decimal
     price_max: Decimal
+    # Ссылка на карточку/страницу, откуда взяты цены (для отображения источника
+    # в смете). Необязательна: парсер может не знать ссылку → остаётся None.
+    source_url: str | None = None
 
 
 class BaseParser(ABC):

@@ -5,28 +5,58 @@ from sqlalchemy.orm import sessionmaker
 
 os.environ.setdefault("POSTGRES_USER", "repair")
 os.environ.setdefault("POSTGRES_PASSWORD", "repair")
-os.environ.setdefault("POSTGRES_DB", "repair_estimator")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 
-from app.db.models import Base
-from app.db.session import engine
-from app.main import app
-from app.api.estimates import get_db
-from app.db.models import Material, LaborService, PriceSource, MaterialPrice, LaborPrice
+# --- Изоляция тестовой БД (#169) ---
+# Тесты НИКОГДА не должны писать в dev-базу repair_estimator: фикстуры дропают
+# таблицы и заливают тестовые цены (avg=120), что раньше затирало боевой seed.
+# Поднимаем отдельную БД (по умолчанию repair_estimator_test) и направляем туда
+# ВЕСЬ engine приложения — env выставляем ДО импорта app.*, иначе SessionLocal
+# в сервисах (price_aggregator, admin, room_types) свяжется с боевым engine.
+os.environ["POSTGRES_DB"] = os.environ.get("POSTGRES_TEST_DB", "repair_estimator_test")
+
+from app.core.config import settings  # noqa: E402 — читает уже тестовый POSTGRES_DB
+
+
+def _ensure_test_database() -> None:
+    """Создаёт тестовую БД, если её ещё нет.
+
+    CREATE DATABASE нельзя выполнить внутри транзакции, поэтому подключаемся к
+    служебной базе postgres в autocommit. Учётные данные берём из settings —
+    из того же источника, что и боевой engine, чтобы не разъехаться по паролю.
+    """
+    import psycopg
+
+    conn = psycopg.connect(
+        host=settings.POSTGRES_HOST,
+        port=settings.POSTGRES_PORT,
+        user=settings.POSTGRES_USER,
+        password=settings.POSTGRES_PASSWORD.get_secret_value(),
+        dbname="postgres",
+        autocommit=True,
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (settings.POSTGRES_DB,))
+            if cur.fetchone() is None:
+                cur.execute(f'CREATE DATABASE "{settings.POSTGRES_DB}"')
+    finally:
+        conn.close()
+
+
+_ensure_test_database()
+
+from app.db.models import Base  # noqa: E402 — импорт только после настройки тестовой БД
+from app.db.session import engine  # noqa: E402
+from app.main import app  # noqa: E402
+from app.api.estimates import get_db  # noqa: E402
+from app.db.models import Material, LaborService, PriceSource, MaterialPrice, LaborPrice  # noqa: E402
 
 test_engine = engine
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 def seed_test_data(session):
-    # Очищаем таблицы
-    session.query(LaborPrice).delete()
-    session.query(MaterialPrice).delete()
-    session.query(LaborService).delete()
-    session.query(Material).delete()
-    session.query(PriceSource).delete()
-    session.commit()
-
     # Источник
     src = PriceSource(
         name="seed",

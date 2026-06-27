@@ -4,7 +4,10 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 
-pytestmark = pytest.mark.usefixtures("override_get_db")
+# Все эндпоинт-тесты идут без сети: stub_material_parser по умолчанию глушит
+# парсер материалов (→ seed). Тесты ветки «цена от парсера» переопределяют его
+# вызовом stub_material_parser(fetch). См. conftest (#174).
+pytestmark = pytest.mark.usefixtures("override_get_db", "stub_material_parser")
 
 client = TestClient(app)
 
@@ -275,39 +278,19 @@ def test_detail_totals_match_summary():
     )
 
 
-def _clear_parser_prices():
-    """Удаляет закэшированные цены парсера 'Мегастрой', чтобы тесты не зависели
-    от порядка выполнения (из-за TTL-кэша свежая цена иначе переживает между тестами)."""
-    from app.tests.conftest import TestingSessionLocal
-    from app.db.models import MaterialPrice, PriceSource
-
-    s = TestingSessionLocal()
-    try:
-        mega = s.query(PriceSource).filter(PriceSource.name == "Мегастрой").first()
-        if mega:
-            s.query(MaterialPrice).filter(MaterialPrice.source_id == mega.id).delete()
-            s.commit()
-    finally:
-        s.close()
-
-
-def test_parser_source_in_response(monkeypatch):
+def test_parser_source_in_response(stub_material_parser):
     """Когда парсер отдаёт цену, source у краски становится 'Мегастрой', а не 'seed'."""
     from decimal import Decimal
     from app.parsers.base import ParsedPrice
 
-    _clear_parser_prices()
-
-    def fake_fetch(self, material_name):
+    def fake_fetch(material_name):
         return ParsedPrice(
             price_min=Decimal("500"),
             price_avg=Decimal("700"),
             price_max=Decimal("900"),
         )
 
-    monkeypatch.setattr(
-        "app.parsers.megastroy_parser.MegastroyParser.fetch_price", fake_fetch
-    )
+    stub_material_parser(fake_fetch)
 
     response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
     assert response.status_code == 200
@@ -317,16 +300,14 @@ def test_parser_source_in_response(monkeypatch):
     assert paint["source"] == "Мегастрой"
 
 
-def test_parser_source_url_in_response(monkeypatch):
+def test_parser_source_url_in_response(stub_material_parser):
     """Цена от парсера несёт source_url; seed-позиция отдаёт source_url = null."""
     from decimal import Decimal
     from app.parsers.base import ParsedPrice
 
-    _clear_parser_prices()
-
     card_url = "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"
 
-    def fake_fetch(self, material_name):
+    def fake_fetch(material_name):
         # Как настоящий парсер: цена есть только для материалов из CATEGORY_MAP.
         if material_name != "Краска для стен":
             raise ValueError(f"нет категории для '{material_name}'")
@@ -337,9 +318,7 @@ def test_parser_source_url_in_response(monkeypatch):
             source_url=card_url,
         )
 
-    monkeypatch.setattr(
-        "app.parsers.megastroy_parser.MegastroyParser.fetch_price", fake_fetch
-    )
+    stub_material_parser(fake_fetch)
 
     response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
     assert response.status_code == 200
@@ -362,17 +341,9 @@ def test_parser_source_url_in_response(monkeypatch):
         assert lab["source_url"] is None
 
 
-def test_parser_fallback_on_error(monkeypatch):
-    """Когда парсер падает, расчёт не ломается и source остаётся 'seed'."""
-    _clear_parser_prices()
-
-    def failing_fetch(self, material_name):
-        raise RuntimeError("сайт недоступен")
-
-    monkeypatch.setattr(
-        "app.parsers.megastroy_parser.MegastroyParser.fetch_price", failing_fetch
-    )
-
+def test_parser_fallback_on_error():
+    """Когда парсер падает, расчёт не ломается и source остаётся 'seed'.
+    Парсер по умолчанию заглушён падающим stub_material_parser → seed."""
     response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
     assert response.status_code == 200
     materials = response.json()["materials"]
@@ -381,24 +352,10 @@ def test_parser_fallback_on_error(monkeypatch):
         assert m["source"] == "seed"
 
 
-def _seed_only(monkeypatch):
-    """Гарантирует расчёт по seed-ценам (парсер падает → fallback), чтобы тест
-    не зависел от сети."""
-    _clear_parser_prices()
-
-    def failing_fetch(self, material_name):
-        raise RuntimeError("сеть выключена в тесте")
-
-    monkeypatch.setattr(
-        "app.parsers.megastroy_parser.MegastroyParser.fetch_price", failing_fetch
-    )
-
-
-def test_full_workset_has_electric_and_plumbing(monkeypatch):
+def test_full_workset_has_electric_and_plumbing():
     """Санузел с полным набором: электрика и сантехника попадают в смету с объёмом > 0
-    и ненулевой ценой; ни одна строка не остаётся без цены (silent P0 #181)."""
-    _seed_only(monkeypatch)
-
+    и ненулевой ценой; ни одна строка не остаётся без цены (silent P0 #181).
+    Цены — из seed (парсер заглушён по умолчанию), тест не зависит от сети."""
     payload = {
         "city": "Казань",
         "rooms": [
@@ -444,11 +401,9 @@ def test_full_workset_has_electric_and_plumbing(monkeypatch):
         assert row["source"] != "нет цены"
 
 
-def test_plinth_subtracts_door_width(monkeypatch):
+def test_plinth_subtracts_door_width():
     """Плинтус считается от периметра за вычетом ширины дверей, а не по полному
-    периметру (silent P0 #181)."""
-    _seed_only(monkeypatch)
-
+    периметру (silent P0 #181). Цены — из seed (парсер заглушён по умолчанию)."""
     payload = {
         "city": "Казань",
         "rooms": [

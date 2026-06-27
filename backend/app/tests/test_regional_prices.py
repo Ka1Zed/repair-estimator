@@ -113,7 +113,7 @@ def _payload(city: str) -> dict:
         "repair_type": "cosmetic",
         "repair_options": {
             "floor": "laminate", "walls": "paint", "ceiling": "paint",
-            "tile": False, "electric": "basic", "plumbing": False,
+            "electric": "basic", "plumbing": False,
         },
     }
 

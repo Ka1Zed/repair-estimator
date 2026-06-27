@@ -91,7 +91,7 @@ export const exportXlsx = (data: EstimateExportData) => {
 };
 
 
-export const exportPdf = async (data: EstimateExportData, city: string = 'Город не указан', repairType: string) => {
+export const exportPdf = async (data: EstimateExportData, city: string, repairType: string) => {
   const doc = new jsPDF();
 
   try {

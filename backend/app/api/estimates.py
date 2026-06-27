@@ -21,6 +21,21 @@ from app.parsers.megastroy_parser import MegastroyParser
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
+# Дефолты точек электрики/сантехники по типу комнаты — MVP-допущение: UI пока не
+# даёт задавать точки вручную, поэтому объём этих работ выводим из room_type.
+# Нормы и обоснование — в docs/estimation-rules.md (источник правды).
+# electric: (basic, extended); plumbing: число точек (0, если недоступно для типа).
+ELECTRICAL_POINTS = {
+    "living":   (4, 8),
+    "kitchen":  (6, 10),
+    "bathroom": (3, 5),
+    "hallway":  (2, 4),
+}
+PLUMBING_POINTS = {
+    "kitchen":  1,
+    "bathroom": 3,
+}
+
 
 @router.post("/calculate", response_model=EstimateResponse)
 def calculate_estimate(
@@ -42,6 +57,14 @@ def calculate_estimate(
             height=room.height,
             openings=[(o.type, o.width, o.height) for o in room.openings]
         )
+
+        # Точки электрики/сантехники по типу комнаты (см. ELECTRICAL_POINTS/PLUMBING_POINTS).
+        # Объём работ гейтится в calculate_labor по repair_options.electric/plumbing.
+        elec_basic, elec_extended = ELECTRICAL_POINTS.get(room.room_type, (0, 0))
+        geometry['electrical_points'] = (
+            elec_extended if request.repair_options.electric == "extended" else elec_basic
+        )
+        geometry['plumbing_points'] = PLUMBING_POINTS.get(room.room_type, 0)
 
         for key in total_geometry:
             total_geometry[key] += Decimal(str(geometry[key]))

@@ -40,8 +40,21 @@ def seed_test_data(session):
         url="https://megastroy.com",
         last_checked=datetime.now(timezone.utc)
     )
+    # Источники региональных парсеров работ (#166).
+    src_garant = PriceSource(
+        name="garantstroikompleks.ru", type="parser",
+        url="https://garantstroikompleks.ru/prajs-list",
+        last_checked=datetime.now(timezone.utc),
+    )
+    src_otdelka = PriceSource(
+        name="otdelka-spb.ru", type="parser",
+        url="https://otdelka-spb.ru/prajjs/",
+        last_checked=datetime.now(timezone.utc),
+    )
     session.add(src)
     session.add(src_megastroy)
+    session.add(src_garant)
+    session.add(src_otdelka)
     session.flush()
 
     # Материалы (с категорией)

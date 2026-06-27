@@ -232,9 +232,12 @@ def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice 
         session.close()
 
 
-def update_labor_price(service_name: str, parser) -> LaborPrice | None:
+def update_labor_price(service_name: str, parser, region: str | None = None) -> LaborPrice | None:
     '''
-    Берет цену услуги через парсер и пишет в labor_prices с источником парсера
+    Берет цену услуги через парсер и пишет в labor_prices с источником парсера.
+    region — регион цены (город), пишется в LaborPrice.region; None для базовой
+    (не региональной) цены. Запись адресуется по (услуга, источник, регион):
+    у регионального парсера свой источник-сайт, поэтому регионы не конфликтуют.
     При любой ошибке парсера — ничего не меняет, возвращает None (старые цены остаются)
     '''
     session = SessionLocal()
@@ -265,10 +268,11 @@ def update_labor_price(service_name: str, parser) -> LaborPrice | None:
 
         price = session.query(LaborPrice).filter(
             LaborPrice.labor_service_id == service.id,
-            LaborPrice.source_id == source.id
+            LaborPrice.source_id == source.id,
+            LaborPrice.region == region,
         ).first()
         if not price:
-            price = LaborPrice(labor_service_id=service.id, source_id=source.id)
+            price = LaborPrice(labor_service_id=service.id, source_id=source.id, region=region)
             session.add(price)
 
         price.price_min = parsed.price_min

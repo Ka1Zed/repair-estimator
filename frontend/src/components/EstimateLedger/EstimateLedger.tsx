@@ -6,7 +6,7 @@ export interface LedgerRow {
   subtitle?: string;
   volume: string;
   price: string;
-  details: { label: string; value: string }[];
+  details: { label: string; value: string; url?: string | null }[];
 }
 
 interface EstimateLedgerProps {
@@ -60,7 +60,20 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
                 {row.details.map((d, j) => (
                   <div key={j} className={styles.detailItem}>
                     <span className={styles.detailLabel}>{d.label}</span>
-                    <span className={styles.detailValue}>{d.value}</span>
+                    <span className={styles.detailValue}>
+                      {d.url ? (
+                        <a
+                          className={styles.sourceLink}
+                          href={d.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {d.value} ↗
+                        </a>
+                      ) : (
+                        d.value
+                      )}
+                    </span>
                   </div>
                 ))}
               </div>

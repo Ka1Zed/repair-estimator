@@ -5,28 +5,59 @@ from sqlalchemy.orm import sessionmaker
 
 os.environ.setdefault("POSTGRES_USER", "repair")
 os.environ.setdefault("POSTGRES_PASSWORD", "repair")
-os.environ.setdefault("POSTGRES_DB", "repair_estimator")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 
-from app.db.models import Base
-from app.db.session import engine
-from app.main import app
-from app.api.estimates import get_db
-from app.db.models import Material, LaborService, PriceSource, MaterialPrice, LaborPrice
+# --- Изоляция тестовой БД (#169) ---
+# Тесты НИКОГДА не должны писать в dev-базу repair_estimator: фикстуры дропают
+# таблицы и заливают тестовые цены (avg=120), что раньше затирало боевой seed.
+# Поднимаем отдельную БД (по умолчанию repair_estimator_test) и направляем туда
+# ВЕСЬ engine приложения — env выставляем ДО импорта app.*, иначе SessionLocal
+# в сервисах (price_aggregator, admin, room_types) свяжется с боевым engine.
+os.environ["POSTGRES_DB"] = os.environ.get("POSTGRES_TEST_DB", "repair_estimator_test")
+
+from app.core.config import settings  # noqa: E402 — читает уже тестовый POSTGRES_DB
+
+
+def _ensure_test_database() -> None:
+    """Создаёт тестовую БД, если её ещё нет.
+
+    CREATE DATABASE нельзя выполнить внутри транзакции, поэтому подключаемся к
+    служебной базе postgres в autocommit. Учётные данные берём из settings —
+    из того же источника, что и боевой engine, чтобы не разъехаться по паролю.
+    """
+    import psycopg
+
+    conn = psycopg.connect(
+        host=settings.POSTGRES_HOST,
+        port=settings.POSTGRES_PORT,
+        user=settings.POSTGRES_USER,
+        password=settings.POSTGRES_PASSWORD.get_secret_value(),
+        dbname="postgres",
+        autocommit=True,
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (settings.POSTGRES_DB,))
+            if cur.fetchone() is None:
+                cur.execute(f'CREATE DATABASE "{settings.POSTGRES_DB}"')
+    finally:
+        conn.close()
+
+
+_ensure_test_database()
+
+from app.db.models import Base  # noqa: E402 — импорт только после настройки тестовой БД
+from app.db.session import engine  # noqa: E402
+from app.main import app  # noqa: E402
+from app.api.estimates import get_db, get_material_parser  # noqa: E402
+from app.db.models import Material, LaborService, PriceSource, MaterialPrice, LaborPrice  # noqa: E402
+from app.parsers.base import BaseParser, ParsedPrice  # noqa: E402
 
 test_engine = engine
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 def seed_test_data(session):
-    # Очищаем таблицы
-    session.query(LaborPrice).delete()
-    session.query(MaterialPrice).delete()
-    session.query(LaborService).delete()
-    session.query(Material).delete()
-    session.query(PriceSource).delete()
-    session.commit()
-
     # Источник
     src = PriceSource(
         name="seed",
@@ -158,4 +189,57 @@ def db_session(setup_test_db):
         yield db
     finally:
         db.close()
+
+
+# --- Герметизация эндпоинт-тестов от сети (#174) ---
+# /api/estimates/calculate берёт цены материалов через парсер. Чтобы тесты не
+# тащили живой Мегастрой (флак на VPN/офлайн/смене вёрстки), парсер инжектится
+# через зависимость get_material_parser и подменяется этой заглушкой.
+
+class _StubMaterialParser(BaseParser):
+    """Заглушка парсера материалов: НЕ ходит в сеть.
+
+    По умолчанию падает → агрегатор откатывается на seed. Можно задать callable
+    fetch(material_name) -> ParsedPrice, чтобы проверить ветку «цена от парсера»."""
+
+    source_name = "Мегастрой"
+
+    def __init__(self, fetch=None):
+        self._fetch = fetch
+
+    def fetch_price(self, material_name: str) -> ParsedPrice:
+        if self._fetch is None:
+            raise RuntimeError("парсер материалов отключён в тестах (#174)")
+        return self._fetch(material_name)
+
+
+def _clear_parser_material_prices() -> None:
+    """Чистит осевшие в общей тест-БД parser-цены материалов (всё, что не seed).
+
+    TTL-кэш иначе оставил бы свежую parser-цену между тестами и она перекрыла бы
+    seed — выбор источника стал бы зависеть от порядка прогона."""
+    db = TestingSessionLocal()
+    try:
+        seed = db.query(PriceSource).filter(PriceSource.name == "seed").first()
+        db.query(MaterialPrice).filter(MaterialPrice.source_id != seed.id).delete()
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def stub_material_parser():
+    """Общая заглушка парсера материалов для эндпоинт-тестов.
+
+    По умолчанию парсер падает → цены материалов берутся из seed, сети нет.
+    Возвращает настройщик: вызови stub_material_parser(fetch) с функцией
+    fetch(material_name) -> ParsedPrice, чтобы протестировать ветку парсера."""
+
+    def _install(fetch=None):
+        _clear_parser_material_prices()
+        app.dependency_overrides[get_material_parser] = lambda: _StubMaterialParser(fetch)
+
+    _install()  # дефолт — падающий парсер, гарантированный seed
+    yield _install
+    app.dependency_overrides.pop(get_material_parser, None)
 

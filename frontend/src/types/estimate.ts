@@ -7,6 +7,7 @@ export interface MaterialItem {
   source: string;
   region?: string | null;
   updated_at?: string;
+  source_url?: string | null;
 }
 
 export interface LaborItem {
@@ -18,4 +19,5 @@ export interface LaborItem {
   total_avg: number;
   source: string;
   region?: string | null;
+  source_url?: string | null;
 }

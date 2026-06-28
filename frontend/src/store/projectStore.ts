@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { RoomTypeKey } from "../types/roomTypes";
 import { demoRoomData } from "../data/demoRoom";
+import { uid } from "../utils/uid";
 
 export type RepairType = "cosmetic" | "base" | "extended";
 
@@ -22,7 +23,6 @@ export interface RepairOptions {
   floor?: string | null;
   walls?: string | null;
   ceiling?: string | null;
-  tile?: boolean;
   electric?: string | null;
   plumbing?: boolean;
 }
@@ -70,13 +70,12 @@ const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
   floor: null,
   walls: null,
   ceiling: null,
-  tile: false,
   electric: null,
   plumbing: false,
 };
 
 const createDefaultRoom = (name: string): Room => ({
-  id: crypto.randomUUID(),
+  id: uid(),
   name,
   height: 2.7,
   room_type: "living",
@@ -186,7 +185,7 @@ export const useProjectStore = create<ProjectState>()(
           const newRooms = [...state.rooms];
           const activeRoom = newRooms[state.activeRoomIndex];
           const newOpening: Opening = {
-            id: crypto.randomUUID(),
+            id: uid(),
             type: "door",
             width: 0.8,
             height: 2.0,
@@ -247,7 +246,7 @@ export const useProjectStore = create<ProjectState>()(
             points: [...demoRoomData.points],
             openings: demoRoomData.openings.map((op) => ({
               ...op,
-              id: crypto.randomUUID(),
+              id: uid(),
             })),
           };
           return { rooms: newRooms };

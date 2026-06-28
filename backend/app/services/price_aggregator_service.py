@@ -84,45 +84,51 @@ def get_price(
                 logger.info(f"Цена для '{material_name}': источник=cache ({parser.source_name})")
                 return price_entry
 
-            try:
-                parsed = parser.fetch_price(material_name)
+            # Живой сетевой запрос делаем только когда это явно разрешено: при
+            # force_refresh (CLI update_prices) или PARSER_LIVE_FETCH=true (локалка).
+            # На сервере (PARSER_LIVE_FETCH=false) в сеть не ходим: выше отдали бы
+            # свежий кэш, иначе — seed-fallback ниже. Кэш на сервере наполняет
+            # update_prices с российского IP.
+            if force_refresh or settings.PARSER_LIVE_FETCH:
+                try:
+                    parsed = parser.fetch_price(material_name)
 
-                # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —
-                # это закрепило бы 0 в кэше на весь TTL. Уходим в seed, как при исключении.
-                if not _is_valid_parsed(parsed):
-                    logger.warning(
-                        f"Парсер {parser.source_name} вернул пустую/нулевую цену для "
-                        f"'{material_name}' — fallback на seed (parser=0/empty)"
-                    )
-                elif source:
-                    if price_entry:
-                        # Обновляем
-                        price_entry.price_min = parsed.price_min
-                        price_entry.price_avg = parsed.price_avg
-                        price_entry.price_max = parsed.price_max
-                        price_entry.source_url = parsed.source_url
-                        price_entry.updated_at = datetime.now(timezone.utc)
-                    else:
-                        # Создаем новую
-                        price_entry = MaterialPrice(
-                            material_id=material.id,
-                            source_id=source.id,
-                            price_min=parsed.price_min,
-                            price_avg=parsed.price_avg,
-                            price_max=parsed.price_max,
-                            source_url=parsed.source_url,
-                            updated_at=datetime.now(timezone.utc)
+                    # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —
+                    # это закрепило бы 0 в кэше на весь TTL. Уходим в seed, как при исключении.
+                    if not _is_valid_parsed(parsed):
+                        logger.warning(
+                            f"Парсер {parser.source_name} вернул пустую/нулевую цену для "
+                            f"'{material_name}' — fallback на seed (parser=0/empty)"
                         )
-                        session.add(price_entry)
+                    elif source:
+                        if price_entry:
+                            # Обновляем
+                            price_entry.price_min = parsed.price_min
+                            price_entry.price_avg = parsed.price_avg
+                            price_entry.price_max = parsed.price_max
+                            price_entry.source_url = parsed.source_url
+                            price_entry.updated_at = datetime.now(timezone.utc)
+                        else:
+                            # Создаем новую
+                            price_entry = MaterialPrice(
+                                material_id=material.id,
+                                source_id=source.id,
+                                price_min=parsed.price_min,
+                                price_avg=parsed.price_avg,
+                                price_max=parsed.price_max,
+                                source_url=parsed.source_url,
+                                updated_at=datetime.now(timezone.utc)
+                            )
+                            session.add(price_entry)
 
-                    session.commit()
-                    session.refresh(price_entry)
-                    logger.info(f"Цена для '{material_name}': источник=parser ({parser.source_name})")
-                    return price_entry
+                        session.commit()
+                        session.refresh(price_entry)
+                        logger.info(f"Цена для '{material_name}': источник=parser ({parser.source_name})")
+                        return price_entry
 
-            except Exception as e:
-                # Парсер упал - логируем и идем в fallback
-                logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{material_name}': {e}")
+                except Exception as e:
+                    # Парсер упал - логируем и идем в fallback
+                    logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{material_name}': {e}")
 
         # Fallback: берем seed-цену из БД
         seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
@@ -202,17 +208,22 @@ def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice 
     Сетевого запроса здесь нет: спарсенные цены работ пишет в БД команда
     `python -m app.manage update_prices`, а расчёт сметы их только читает.
 
-    ВНИМАНИЕ: в отличие от кэша материалов (get_price), свежесть parser-цены здесь
-    НЕ проверяется — берём любые валидные не-seed цены независимо от возраста.
-    Добавление TTL-проверки — отдельная issue.
+    Свежесть parser-цены проверяется так же, как в кэше материалов (get_price):
+    учитываются только цены моложе settings.PRICE_TTL_HOURS (по updated_at).
+    Устаревшая parser-цена игнорируется — расчёт уходит на seed-fallback, чтобы
+    в смете не висела цена, которую давно не обновляли (#167).
 
     Порядок выбора:
       1. parser-цены региона → 2. базовые parser-цены (region IS NULL),
       3. seed региона        → 4. базовая seed-цена (region IS NULL).
     Если на шаге 1/2 цену дали несколько сайтов — объединяем их вилки в одну
-    (#166), иначе берём единственную. Нулевые/пустые parser-цены игнорируются
-    (как и в get_price). Исключение наверх не пробрасываем.
+    (#166), иначе берём единственную. Строки parser-запроса сортируются по
+    updated_at DESC: при нескольких источниках выбор детерминирован (самая свежая
+    цена выигрывает тай-брейк представителя), что важно при региональных парсерах
+    (#166). Нулевые/пустые и несвежие parser-цены игнорируются. Исключение наверх
+    не пробрасываем.
     '''
+    ttl_hours = settings.PRICE_TTL_HOURS
     session = SessionLocal()
     try:
         service = session.query(LaborService).filter(LaborService.name == service_name).first()
@@ -225,25 +236,30 @@ def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice 
             logger.error("Источник 'seed' не найден в БД")
             return None
 
-        def _valid(p: LaborPrice | None) -> bool:
-            return p is not None and all(
-                v is not None and v > 0 for v in (p.price_min, p.price_avg, p.price_max)
+        def _usable(p: LaborPrice | None) -> bool:
+            # Цену из парсера берём, только если она валидна (все > 0) И свежа
+            # (моложе ttl_hours): устаревшую parser-цену игнорируем, как get_price.
+            return (
+                p is not None
+                and all(v is not None and v > 0 for v in (p.price_min, p.price_avg, p.price_max))
+                and _is_fresh(p.updated_at, ttl_hours)
             )
 
         # 1-2. Цены из парсеров (любой не-seed источник): сначала региональные,
         # при их отсутствии — базовые (region IS NULL). Несколько сайтов одного
-        # уровня объединяем в одну вилку.
+        # уровня объединяем в одну вилку. Сортировка по updated_at DESC делает
+        # выбор представителя детерминированным (самая свежая цена выигрывает).
         parser_q = session.query(LaborPrice).filter(
             LaborPrice.labor_service_id == service.id,
             LaborPrice.source_id != seed_source.id,
-        )
+        ).order_by(LaborPrice.updated_at.desc())
         pool, scope_region = [], None
         if region is not None:
-            region_rows = [p for p in parser_q.filter(LaborPrice.region == region).all() if _valid(p)]
+            region_rows = [p for p in parser_q.filter(LaborPrice.region == region).all() if _usable(p)]
             if region_rows:
                 pool, scope_region = region_rows, region
         if not pool:
-            base_rows = [p for p in parser_q.filter(LaborPrice.region.is_(None)).all() if _valid(p)]
+            base_rows = [p for p in parser_q.filter(LaborPrice.region.is_(None)).all() if _usable(p)]
             if base_rows:
                 pool, scope_region = base_rows, None
 

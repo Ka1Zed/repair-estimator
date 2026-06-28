@@ -84,45 +84,51 @@ def get_price(
                 logger.info(f"Цена для '{material_name}': источник=cache ({parser.source_name})")
                 return price_entry
 
-            try:
-                parsed = parser.fetch_price(material_name)
+            # Живой сетевой запрос делаем только когда это явно разрешено: при
+            # force_refresh (CLI update_prices) или PARSER_LIVE_FETCH=true (локалка).
+            # На сервере (PARSER_LIVE_FETCH=false) в сеть не ходим: выше отдали бы
+            # свежий кэш, иначе — seed-fallback ниже. Кэш на сервере наполняет
+            # update_prices с российского IP.
+            if force_refresh or settings.PARSER_LIVE_FETCH:
+                try:
+                    parsed = parser.fetch_price(material_name)
 
-                # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —
-                # это закрепило бы 0 в кэше на весь TTL. Уходим в seed, как при исключении.
-                if not _is_valid_parsed(parsed):
-                    logger.warning(
-                        f"Парсер {parser.source_name} вернул пустую/нулевую цену для "
-                        f"'{material_name}' — fallback на seed (parser=0/empty)"
-                    )
-                elif source:
-                    if price_entry:
-                        # Обновляем
-                        price_entry.price_min = parsed.price_min
-                        price_entry.price_avg = parsed.price_avg
-                        price_entry.price_max = parsed.price_max
-                        price_entry.source_url = parsed.source_url
-                        price_entry.updated_at = datetime.now(timezone.utc)
-                    else:
-                        # Создаем новую
-                        price_entry = MaterialPrice(
-                            material_id=material.id,
-                            source_id=source.id,
-                            price_min=parsed.price_min,
-                            price_avg=parsed.price_avg,
-                            price_max=parsed.price_max,
-                            source_url=parsed.source_url,
-                            updated_at=datetime.now(timezone.utc)
+                    # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —
+                    # это закрепило бы 0 в кэше на весь TTL. Уходим в seed, как при исключении.
+                    if not _is_valid_parsed(parsed):
+                        logger.warning(
+                            f"Парсер {parser.source_name} вернул пустую/нулевую цену для "
+                            f"'{material_name}' — fallback на seed (parser=0/empty)"
                         )
-                        session.add(price_entry)
+                    elif source:
+                        if price_entry:
+                            # Обновляем
+                            price_entry.price_min = parsed.price_min
+                            price_entry.price_avg = parsed.price_avg
+                            price_entry.price_max = parsed.price_max
+                            price_entry.source_url = parsed.source_url
+                            price_entry.updated_at = datetime.now(timezone.utc)
+                        else:
+                            # Создаем новую
+                            price_entry = MaterialPrice(
+                                material_id=material.id,
+                                source_id=source.id,
+                                price_min=parsed.price_min,
+                                price_avg=parsed.price_avg,
+                                price_max=parsed.price_max,
+                                source_url=parsed.source_url,
+                                updated_at=datetime.now(timezone.utc)
+                            )
+                            session.add(price_entry)
 
-                    session.commit()
-                    session.refresh(price_entry)
-                    logger.info(f"Цена для '{material_name}': источник=parser ({parser.source_name})")
-                    return price_entry
+                        session.commit()
+                        session.refresh(price_entry)
+                        logger.info(f"Цена для '{material_name}': источник=parser ({parser.source_name})")
+                        return price_entry
 
-            except Exception as e:
-                # Парсер упал - логируем и идем в fallback
-                logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{material_name}': {e}")
+                except Exception as e:
+                    # Парсер упал - логируем и идем в fallback
+                    logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{material_name}': {e}")
 
         # Fallback: берем seed-цену из БД
         seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()

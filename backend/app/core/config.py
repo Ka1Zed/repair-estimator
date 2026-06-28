@@ -14,6 +14,14 @@ class DBSettings(BaseSettings):
     # Запрос сметы не ходит в интернет, если в БД есть свежая цена парсера.
     PRICE_TTL_HOURS: int = 24
 
+    # Ходить ли в живой парсер материалов при расчёте сметы. На сервере в
+    # дата-центре российские сайты отдают 403, а живой парсинг в request-path
+    # тормозит расчёт. Поэтому в проде ставим false: расчёт берёт только кэш
+    # (его наполняет `python -m app.manage update_prices` с российского IP) и
+    # seed-fallback. true — для локалки и самого обновлятора, где парсер работает.
+    # Цены работ сеть на расчёте не трогают в любом случае (только чтение БД).
+    PARSER_LIVE_FETCH: bool = True
+
     model_config = SettingsConfigDict(env_file=ENV_PATH, env_file_encoding="utf8", extra="ignore")
 
     @property

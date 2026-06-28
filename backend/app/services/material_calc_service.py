@@ -54,7 +54,7 @@ def packs_to_buy(pack_quantity: Decimal) -> int:
 
 def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tuple]:
     """
-    Разворачивает repair_options ({floor, walls, ceiling, tile, ...}) в список
+    Разворачивает repair_options ({floor, walls, ceiling, ...}) в список
     позиций (material_name, area) — какую площадь использовать для материала.
     Плинтус и плитка/клей/затирка добавляются как зависимые автоматически.
 
@@ -144,7 +144,7 @@ def calculate_materials(
     Считает материалы для одной комнаты по геометрии и выбранной отделке.
 
     geometry: floor_area, ceiling_area, wall_area, perimeter, door_width_sum
-    repair_options: {floor, walls, ceiling, tile, electric, plumbing} (контракт api.md)
+    repair_options: {floor, walls, ceiling, electric, plumbing} (контракт api.md)
 
     Возвращает позиции с ДРОБНЫМ pack_quantity (округление — в B1-5):
         material_id, name, quantity (Decimal), unit, package_size, pack_quantity

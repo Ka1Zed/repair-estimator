@@ -4,40 +4,15 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db.models import MaterialPrice, PriceSource
-from app.db.session import SessionLocal
 from app.main import app
 from app.services.price_aggregator_service import get_price, get_labor_price
 
 client = TestClient(app)
 
 
-@pytest.fixture
-def seed_only_materials(monkeypatch):
-    """Изолирует эндпоинт-тест от живого парсера материалов.
-
-    /calculate берёт цены материалов через MegastroyParser. Успешный парсинг
-    отдаёт цену с region IS NULL и перекрывает региональную seed-цену, а сама
-    доступность Мегастроя зависит от сети/VPN — из-за этого проверка фактического
-    региона недетерминирована. Глушим парсер (всегда исключение → fallback на seed)
-    и чистим осевшие в общей тест-БД парсер-цены, которые по свежести перекрыли бы
-    seed. Так материалы гарантированно идут из seed, как и проверяет тест."""
-
-    class _FailingParser:
-        source_name = "Мегастрой"
-
-        def fetch_price(self, material_name):
-            raise RuntimeError("megastroy disabled in test")
-
-    monkeypatch.setattr("app.api.estimates.MegastroyParser", _FailingParser)
-
-    db = SessionLocal()
-    try:
-        seed = db.query(PriceSource).filter(PriceSource.name == "seed").first()
-        db.query(MaterialPrice).filter(MaterialPrice.source_id != seed.id).delete()
-        db.commit()
-    finally:
-        db.close()
+# Изоляция эндпоинт-тестов от живого парсера материалов — через общую фикстуру
+# stub_material_parser из conftest (#174): парсер глушится (→ seed), что делает
+# проверку фактического региона детерминированной без зависимости от сети/VPN.
 
 
 # --- lookup материалов ---
@@ -113,12 +88,12 @@ def _payload(city: str) -> dict:
         "repair_type": "cosmetic",
         "repair_options": {
             "floor": "laminate", "walls": "paint", "ceiling": "paint",
-            "tile": False, "electric": "basic", "plumbing": False,
+            "electric": "basic", "plumbing": False,
         },
     }
 
 
-@pytest.mark.usefixtures("override_get_db")
+@pytest.mark.usefixtures("override_get_db", "stub_material_parser")
 def test_estimate_labor_differs_by_city():
     """Покраска стен в Москве дороже базовой → labor_avg для Москвы выше, чем для города без цен."""
     moscow = client.post("/api/estimates/calculate", json=_payload("Москва")).json()
@@ -126,11 +101,11 @@ def test_estimate_labor_differs_by_city():
     assert moscow["summary"]["labor_avg"] != other["summary"]["labor_avg"]
 
 
-@pytest.mark.usefixtures("override_get_db", "seed_only_materials")
+@pytest.mark.usefixtures("override_get_db", "stub_material_parser")
 def test_estimate_item_reports_actual_region():
     """Строка ответа несёт фактический регион цены: город при региональной seed,
     null при fallback на базовую — а не просто эхо запрошенного city.
-    Парсер материалов заглушён (seed_only_materials), цены берутся из seed."""
+    Парсер материалов заглушён (stub_material_parser), цены берутся из seed."""
     moscow = client.post("/api/estimates/calculate", json=_payload("Москва")).json()
     other = client.post("/api/estimates/calculate", json=_payload("Тверь")).json()
 

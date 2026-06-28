@@ -124,6 +124,11 @@
   text-align: right;
 }
 
+.sourceLink {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .empty {
   padding: 24px 0;
   color: #b0b0b0;

@@ -19,7 +19,6 @@ export interface RoomTypeRule {
   walls: WallFinish[];
   ceiling: CeilingFinish[];
   electric: ElectricOption[];
-  tile: boolean;
   plumbing: PlumbingRule;
 }
 
@@ -51,7 +50,6 @@ export const roomTypes: Record<RoomTypeKey, RoomTypeRule> = {
     walls: ["paint", "wallpaper"],
     ceiling: ["paint", "stretch"],
     electric: ["basic", "extended"],
-    tile: false,
     plumbing: { available: false, required: false },
   },
   kitchen: {
@@ -60,7 +58,6 @@ export const roomTypes: Record<RoomTypeKey, RoomTypeRule> = {
     walls: ["paint", "tile"],
     ceiling: ["paint", "stretch"],
     electric: ["basic", "extended"],
-    tile: true,
     plumbing: { available: true, required: false },
   },
   bathroom: {
@@ -69,7 +66,6 @@ export const roomTypes: Record<RoomTypeKey, RoomTypeRule> = {
     walls: ["tile", "moisture_paint"],
     ceiling: ["moisture_paint", "stretch"],
     electric: ["basic", "extended"],
-    tile: true,
     plumbing: { available: true, required: true },
   },
   hallway: {
@@ -78,7 +74,6 @@ export const roomTypes: Record<RoomTypeKey, RoomTypeRule> = {
     walls: ["paint", "wallpaper"],
     ceiling: ["paint", "stretch"],
     electric: ["basic", "extended"],
-    tile: false,
     plumbing: { available: false, required: false },
   },
 };
@@ -105,13 +100,11 @@ export function allowedWorks(rt: RoomTypeKey) {
       key: k,
       label: finishOptions.electric[k],
     })),
-    tile: rule.tile,
     plumbing: rule.plumbing,
   };
 }
 
 // Точечные проверки
-export const isTileAvailable = (rt: RoomTypeKey) => roomTypes[rt].tile;
 export const isPlumbingAvailable = (rt: RoomTypeKey) =>
   roomTypes[rt].plumbing.available;
 export const isPlumbingRequired = (rt: RoomTypeKey) =>

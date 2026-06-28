@@ -124,7 +124,6 @@
     "floor": "laminate",
     "walls": "paint",
     "ceiling": "paint",
-    "tile": false,
     "electric": "basic",
     "plumbing": false
   }

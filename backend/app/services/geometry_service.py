@@ -1,11 +1,17 @@
-from fastapi import HTTPException, status
+
 from typing import List, Union, Dict, Any, Optional
-import math
 from decimal import Decimal, getcontext
 
 getcontext().prec = 28
 
+OPENING_TYPE_RU = {
+    'door': 'двери',
+    'window': 'окна',
+    'unknown': 'проёма'
+}
+
 def to_decimal(value: Union[int, float, str, Decimal]) -> Decimal:
+    """Преобразует значение в Decimal, избегая ошибок float."""
     if isinstance(value, Decimal):
         return value
     if isinstance(value, float):
@@ -13,6 +19,15 @@ def to_decimal(value: Union[int, float, str, Decimal]) -> Decimal:
     return Decimal(value)
 
 def floor_area(points: List[Union[tuple, list, dict]]) -> Decimal:
+    """
+    Площадь многоугольника по формуле шнурования (Decimal).
+    
+    Аргументы:
+        points: список точек в формате (x,y), [x,y] или {'x':x,'y':y}
+    
+    Возвращает:
+        площадь (неотрицательная).
+    """
     n = len(points)
     def get_xy(p):
         if isinstance(p, dict):
@@ -27,6 +42,9 @@ def floor_area(points: List[Union[tuple, list, dict]]) -> Decimal:
     return abs(area) / Decimal('2.0')
 
 def perimeter(points: List[Union[tuple, list, dict]]) -> Decimal:
+    """
+    Периметр многоугольника (сумма длин сторон) с использованием Decimal.
+    """
     n = len(points)
     def get_xy(p):
         if isinstance(p, dict):
@@ -50,27 +68,27 @@ def _validate_openings(
     wall_area_before: Decimal,
     total_opening_area: Decimal,
 ) -> None:
+    """
+    Валидация проёмов. Кидает ValueError с описанием ошибки.
+    """
     for op in openings:
         width = to_decimal(op.get('width', 0))
         op_height = to_decimal(op.get('height', 0))
         op_type = op.get('type', 'unknown')
+        type_ru = OPENING_TYPE_RU.get(op_type, 'проёма')
 
         if op_height > height:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Высота {op_type}а ({op_height:.2f} м) не может превышать высоту помещения ({height:.2f} м)."
+            raise ValueError(
+                f"Высота {type_ru} ({op_height:.2f} м) не может превышать высоту помещения ({height:.2f} м)."
             )
         if width > max_side_length:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Ширина {op_type}а ({width:.2f} м) не может превышать длину самой длинной стены ({max_side_length:.2f} м)."
+            raise ValueError(
+                f"Ширина {type_ru} ({width:.2f} м) не может превышать длину самой длинной стены ({max_side_length:.2f} м)."
             )
 
-    # Проверяем только если площадь стен положительная
     if wall_area_before > 0 and total_opening_area >= wall_area_before:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Суммарная площадь проёмов ({total_opening_area:.2f} м²) не может быть больше или равна площади стен ({wall_area_before:.2f} м²)."
+        raise ValueError(
+            f"Суммарная площадь проёмов ({total_opening_area:.2f} м²) не может быть больше или равна площади стен ({wall_area_before:.2f} м²)."
         )
 
 def calculate_room_geometry(
@@ -78,21 +96,31 @@ def calculate_room_geometry(
     height: Union[int, float, str, Decimal],
     openings: Optional[List[Union[dict, tuple]]] = None
 ) -> Dict[str, Decimal]:
+    """
+    Рассчитывает геометрию комнаты с валидацией проёмов.
+
+    Возвращает:
+        floor_area, ceiling_area, wall_area, perimeter, door_width_sum
+    """
+    # Приводим точки к единому формату (список кортежей (float, float))
     if points and isinstance(points[0], dict):
         pts = [(p['x'], p['y']) for p in points]
     else:
         pts = [(float(p[0]), float(p[1])) for p in points]
 
+    # Вычисляем длины сторон в Decimal
     side_lengths = []
     n = len(pts)
     for i in range(n):
-        x1, y1 = pts[i]
-        x2, y2 = pts[(i + 1) % n]
+        x1, y1 = Decimal(str(pts[i][0])), Decimal(str(pts[i][1]))
+        x2, y2 = Decimal(str(pts[(i + 1) % n][0])), Decimal(str(pts[(i + 1) % n][1]))
         dx = x2 - x1
         dy = y2 - y1
-        side_lengths.append(math.hypot(dx, dy))
-    max_side = Decimal(str(max(side_lengths)))
-    perim = Decimal(str(sum(side_lengths)))
+        length = (dx * dx + dy * dy).sqrt()
+        side_lengths.append(length)
+    max_side = max(side_lengths) if side_lengths else Decimal('0.0')
+    perim = sum(side_lengths, Decimal('0.0'))
+
     floor = floor_area(pts)
 
     if openings is None:
@@ -113,6 +141,7 @@ def calculate_room_geometry(
 
     wall_area_before = perim * to_decimal(height)
 
+    # Валидация проёмов (кидает ValueError)
     _validate_openings(
         height=to_decimal(height),
         openings=openings_dict,
@@ -123,6 +152,8 @@ def calculate_room_geometry(
 
     wall = wall_area_before - total_opening_area
 
+    # Сумма ширин дверных проёмов — для плинтуса (периметр за вычетом дверей).
+    # Окна не вычитаем: плинтус ими не прерывается (estimation-rules.md).
     door_width_sum = Decimal('0.0')
     for op in openings_dict:
         if op.get('type') == 'door':
@@ -141,5 +172,9 @@ def wall_area(
     height: Union[int, float, str, Decimal],
     openings: Optional[List[Dict[str, Any]]] = None
 ) -> Decimal:
+    """
+    Площадь стен с вычетом проёмов.
+    Обёртка над calculate_room_geometry для обратной совместимости.
+    """
     result = calculate_room_geometry(points, height, openings)
     return result['wall_area']

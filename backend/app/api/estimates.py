@@ -4,7 +4,7 @@ from typing import Dict, List, Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-
+from fastapi import HTTPException, status
 from app.db.session import get_db
 from app.db.models import PriceSource
 from app.schemas.estimate import (
@@ -63,11 +63,14 @@ def calculate_estimate(
     }
 
     for room in request.rooms:
-        geometry = calculate_room_geometry(
-            points=[(p.x, p.y) for p in room.points],
-            height=room.height,
-            openings=[(o.type, o.width, o.height) for o in room.openings]
-        )
+        try:
+            geometry = calculate_room_geometry(
+                points=[(p.x, p.y) for p in room.points],
+                height=room.height,
+                openings=[(o.type, o.width, o.height) for o in room.openings]
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
 
         # Точки электрики/сантехники по типу комнаты (см. ELECTRICAL_POINTS/PLUMBING_POINTS).
         # Объём работ гейтится в calculate_labor по repair_options.electric/plumbing.

@@ -6,7 +6,8 @@ export interface LedgerRow {
   subtitle?: string;
   volume: string;
   price: string;
-details: { label: string; value: string | React.ReactNode; url?: string | null }[];}
+  details: { label: string; value: string; url?: string | null }[];
+}
 
 interface EstimateLedgerProps {
   rows: LedgerRow[];
@@ -61,11 +62,11 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
                     <span className={styles.detailLabel}>{d.label}</span>
                     <span className={styles.detailValue}>
                       {d.url ? (
-                        <a 
-                          href={d.url} 
-                          target="_blank" 
+                        <a
+                          className={styles.sourceLink}
+                          href={d.url}
+                          target="_blank"
                           rel="noopener noreferrer"
-                          style={{ textDecoration: 'underline', color: 'inherit' }}
                         >
                           {d.value} ↗
                         </a>

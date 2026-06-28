@@ -29,6 +29,20 @@ class _RaisingParser(BaseParser):
         raise RuntimeError("сеть недоступна")
 
 
+class _RecordingParser(BaseParser):
+    """Отдаёт валидную цену и фиксирует, дёргали ли сеть (fetch_price)."""
+    source_name = "Мегастрой"
+
+    def __init__(self):
+        self.called = False
+
+    def fetch_price(self, material_name: str) -> ParsedPrice:
+        self.called = True
+        return ParsedPrice(
+            price_min=Decimal("200"), price_avg=Decimal("250"), price_max=Decimal("300")
+        )
+
+
 def _megastroy_price_row(db, material_name: str):
     material = db.query(Material).filter(Material.name == material_name).first()
     src = db.query(PriceSource).filter(PriceSource.name == "Мегастрой").first()
@@ -63,6 +77,36 @@ def test_raising_parser_falls_back_to_seed(db_session):
     assert price is not None
     assert price.price_avg == Decimal("120")
     assert _megastroy_price_row(db_session, "Краска для стен") is None
+
+
+@pytest.mark.usefixtures("setup_test_db")
+def test_live_fetch_disabled_skips_network_and_uses_seed(db_session, monkeypatch):
+    """PARSER_LIVE_FETCH=false: расчёт НЕ ходит в сеть, отдаёт seed (вариант B —
+    сервер читает только кэш/seed, живой парсинг — у CLI update_prices)."""
+    monkeypatch.setattr(settings, "PARSER_LIVE_FETCH", False)
+    parser = _RecordingParser()
+
+    price = get_price("Краска для стен", parser=parser)
+
+    assert parser.called is False                  # сеть не трогали
+    assert price is not None
+    assert price.price_avg == Decimal("120")       # базовая seed-цена из conftest
+    assert _megastroy_price_row(db_session, "Краска для стен") is None  # кэш не писали
+
+
+@pytest.mark.usefixtures("setup_test_db")
+def test_force_refresh_fetches_even_when_live_fetch_disabled(db_session, monkeypatch):
+    """force_refresh=True (CLI update_prices) дёргает парсер и пишет кэш даже при
+    PARSER_LIVE_FETCH=false — обновлятор работает независимо от прод-флага."""
+    monkeypatch.setattr(settings, "PARSER_LIVE_FETCH", False)
+    parser = _RecordingParser()
+
+    price = get_price("Краска для стен", parser=parser, force_refresh=True)
+
+    assert parser.called is True                    # сеть дёрнули
+    assert price is not None
+    assert price.price_avg == Decimal("250")        # цена парсера, не seed
+    assert _megastroy_price_row(db_session, "Краска для стен") is not None  # кэш записан
 
 
 @pytest.mark.usefixtures("setup_test_db")

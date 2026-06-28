@@ -150,7 +150,7 @@ export function Workspace() {
         details: [
           { label: "Цена за единицу", value: rub(m.price_avg) },
           { label: "Итог по позиции", value: rub(m.total_avg) },
-          { label: "Источник цены", value: m.source },
+          { label: "Источник цены", value: m.source, url: m.source_url },
           { label: "Регион", value: regionLabel(m.region) },
           ...(m.updated_at ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }] : []),
         ],
@@ -169,7 +169,7 @@ export function Workspace() {
           { label: "Специалист", value: l.specialist },
           { label: "Цена за единицу", value: rub(l.price_avg) },
           { label: "Итог по позиции", value: rub(l.total_avg) },
-          { label: "Источник цены", value: l.source },
+          { label: "Источник цены", value: l.source, url: l.source_url },
           { label: "Регион", value: regionLabel(l.region) },
         ],
       })),

@@ -1,0 +1,102 @@
+.section {
+  margin-top: 30px;
+  border-top: 1px solid #444;
+  padding-top: 20px;
+}
+
+.title {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.table {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+  margin-bottom: 15px;
+}
+
+.table th {
+  padding-bottom: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.table td {
+  padding: 4px 8px 4px 0;
+  vertical-align: top;
+}
+
+.table td:last-child {
+  padding-right: 0;
+}
+
+.fieldWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.input {
+  width: 80px;
+  padding: 5px 7px;
+  background: #fff;
+  color: var(--text-h);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.inputError {
+  border-color: #c0392b;
+}
+
+.inputError:focus {
+  border-color: #c0392b;
+}
+
+.errorText {
+  font-size: 11px;
+  color: #c0392b;
+  line-height: 1.2;
+  max-width: 80px;
+}
+
+.deleteBtn {
+  padding: 5px 10px;
+  cursor: pointer;
+  background: #fff;
+  color: #b5524a;
+  border: 1px solid #e3c9c4;
+  border-radius: 3px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.deleteBtn:hover {
+  background: #fdf0ef;
+}
+
+.addBtn {
+  padding: 8px 15px;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
+.addBtn:hover {
+  opacity: 0.9;
+}

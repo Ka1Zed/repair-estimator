@@ -15,6 +15,7 @@ import type { SummaryData } from "../../components/EstimateSummary";
 import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/EstimateLedger";
 
 import { useProjectStore } from "../../store/projectStore";
+import { roomHasInvalidOpenings } from "../../utils/openingValidation";
 import { calculateEstimate } from "../../api/estimates";
 import { apiClient } from "../../api/client";
 import { Select } from "../../components/ui/Select";
@@ -75,12 +76,22 @@ export function Workspace() {
   // не пугаем пользователя ошибкой, пока он редактирует.
   const runCalculate = useCallback(
     async (silent: boolean) => {
-      const allValid = rooms.every(
+      const geometryValid = rooms.every(
         (r) => r.points.length >= 3 && r.height !== "" && Number(r.height) > 0,
       );
-      if (!allValid) {
+      if (!geometryValid) {
         if (!silent) {
           setError("У каждой комнаты нужны минимум 3 точки и высота потолка больше нуля.");
+        }
+        return;
+      }
+
+      // Невалидные проёмы не отправляем: иначе кривая ширина/высота уедет в wall_area.
+      if (rooms.some(roomHasInvalidOpenings)) {
+        if (!silent) {
+          setError(
+            "Проверьте размеры проёмов: ширина и высота должны быть больше нуля и не превышать допустимых пределов.",
+          );
         }
         return;
       }
@@ -126,6 +137,12 @@ export function Workspace() {
   }, [runCalculate]);
 
   const handleCalculate = () => runCalculate(false);
+
+  // Кнопка расчёта недоступна, пока есть проёмы с некорректными размерами.
+  const hasInvalidOpenings = useMemo(
+    () => rooms.some(roomHasInvalidOpenings),
+    [rooms],
+  );
 
   // Слайдер вилки: позиция средней между min и max
   const avgPos = useMemo(() => {
@@ -247,9 +264,18 @@ export function Workspace() {
           <BlueprintUpload />
         </div>
 
-        <button className={styles.calcBtn} onClick={handleCalculate} disabled={isLoading}>
+        <button
+          className={styles.calcBtn}
+          onClick={handleCalculate}
+          disabled={isLoading || hasInvalidOpenings}
+        >
           {isLoading ? "Считаем…" : "Рассчитать смету"}
         </button>
+        {hasInvalidOpenings && (
+          <div className={styles.error}>
+            Исправьте размеры проёмов — расчёт недоступен.
+          </div>
+        )}
         {error && <div className={styles.error}>{error}</div>}
       </section>
 

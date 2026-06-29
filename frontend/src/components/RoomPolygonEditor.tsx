@@ -20,6 +20,13 @@ export default function RoomPolygonEditor() {
   const [edgeInputValue, setEdgeInputValue] = useState("");
 
   const svgRef = useRef<SVGSVGElement>(null);
+  const [dragSnapshot, setDragSnapshot] = useState<{
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+    svgWidth: number;
+    svgHeight: number;
+  } | null>(null);
 
   const controlButtonsJSX = (
     <div
@@ -34,13 +41,14 @@ export default function RoomPolygonEditor() {
       <button
         onClick={resetProject}
         style={{
-          padding: "8px 12px",
-          background: "#c0392b",
-          color: "#fff",
-          border: "none",
-          borderRadius: "4px",
+          padding: "8px 14px",
+          background: "#fff",
+          color: "#B5524A",
+          border: "1px solid #E3C9C4",
+          borderRadius: "3px",
           cursor: "pointer",
-          fontSize: "14px",
+          fontSize: "13px",
+          letterSpacing: ".01em",
           marginRight: "auto",
         }}
       >
@@ -49,13 +57,14 @@ export default function RoomPolygonEditor() {
       <button
         onClick={clearActiveRoom}
         style={{
-          padding: "8px 12px",
-          background: "transparent",
-          color: "#e74c3c",
-          border: "1px solid #e74c3c",
-          borderRadius: "4px",
+          padding: "8px 14px",
+          background: "#fff",
+          color: "#8A8A8A",
+          border: "1px solid var(--border)",
+          borderRadius: "3px",
           cursor: "pointer",
-          fontSize: "14px",
+          fontSize: "13px",
+          letterSpacing: ".01em",
         }}
       >
         Очистить комнату
@@ -63,13 +72,14 @@ export default function RoomPolygonEditor() {
       <button
         onClick={loadDemoRoom}
         style={{
-          padding: "8px 12px",
-          background: "#3498db",
-          color: "#fff",
-          border: "none",
-          borderRadius: "4px",
+          padding: "8px 14px",
+          background: "var(--accent-bg)",
+          color: "var(--accent)",
+          border: "1px solid var(--accent-border)",
+          borderRadius: "3px",
           cursor: "pointer",
-          fontSize: "14px",
+          fontSize: "13px",
+          letterSpacing: ".01em",
         }}
       >
         Загрузить пример
@@ -130,24 +140,35 @@ export default function RoomPolygonEditor() {
   const offsetX = minX - paddingX;
   const offsetY = minY - paddingY;
 
-  const GRID_STEP = 0.5;
-  const gridPixelSize = GRID_STEP * scale;
+  // Freeze coordinate system during drag to prevent feedback loop:
+  // updatePoint → bbox change → scale/offset change → wrong cursor coord → updatePoint → ...
+  const snap = dragSnapshot;
+  const activeScale = snap ? snap.scale : scale;
+  const activeOffsetX = snap ? snap.offsetX : offsetX;
+  const activeOffsetY = snap ? snap.offsetY : offsetY;
+  const activeSvgWidth = snap ? snap.svgWidth : svgWidth;
+  const activeSvgHeight = snap ? snap.svgHeight : svgHeight;
 
-  const gridOffsetX = (-offsetX * scale) % gridPixelSize;
-  const gridOffsetY = (-offsetY * scale) % gridPixelSize;
+  const GRID_STEP = 0.5;
+  const gridPixelSize = GRID_STEP * activeScale;
+
+  const gridOffsetX = (-activeOffsetX * activeScale) % gridPixelSize;
+  const gridOffsetY = (-activeOffsetY * activeScale) % gridPixelSize;
 
   const pointsString = safePoints
-    .map((p) => `${(p.x - offsetX) * scale},${(p.y - offsetY) * scale}`)
+    .map((p) => `${(p.x - activeOffsetX) * activeScale},${(p.y - activeOffsetY) * activeScale}`)
     .join(" ");
 
   const handlePointerDown = (index: number) => {
+    setDragSnapshot({ scale, offsetX, offsetY, svgWidth, svgHeight });
     setDraggingIdx(index);
     setEditingEdge(null);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (draggingIdx === null || !svgRef.current) return;
+    if (draggingIdx === null || !svgRef.current || !dragSnapshot) return;
 
+    const { scale: s, offsetX: ox, offsetY: oy } = dragSnapshot;
     const svg = svgRef.current;
     const ctm = svg.getScreenCTM();
     if (!ctm) return;
@@ -157,8 +178,8 @@ export default function RoomPolygonEditor() {
     pt.y = e.clientY;
     const cursorPt = pt.matrixTransform(ctm.inverse());
 
-    let newRealX = cursorPt.x / scale + offsetX;
-    let newRealY = cursorPt.y / scale + offsetY;
+    let newRealX = cursorPt.x / s + ox;
+    let newRealY = cursorPt.y / s + oy;
 
     if (snapToGrid) {
       newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
@@ -172,6 +193,7 @@ export default function RoomPolygonEditor() {
   };
 
   const handlePointerUp = () => {
+    setDragSnapshot(null);
     setDraggingIdx(null);
   };
 
@@ -266,13 +288,22 @@ export default function RoomPolygonEditor() {
         }}
       >
         <div>
-          <h3>Редактор помещения:</h3>
+          <div
+            style={{
+              fontSize: "11px",
+              letterSpacing: ".16em",
+              textTransform: "uppercase",
+              color: "#B0B0B0",
+              marginBottom: "8px",
+            }}
+          >
+            Проект · план помещения
+          </div>
           <p
             style={{
               fontSize: "13px",
-              color: "#888",
+              color: "#8A8A8A",
               margin: 0,
-              marginTop: "5px",
             }}
           >
             💡 Клик по границе — добавить точку.
@@ -295,19 +326,19 @@ export default function RoomPolygonEditor() {
               display: "flex",
               alignItems: "center",
               cursor: "pointer",
-              fontSize: "14px",
-              color: "#ddd",
+              fontSize: "12px",
+              color: "#8A8A8A",
             }}
           >
             <input
               type="checkbox"
               checked={snapToGrid}
               onChange={(e) => setSnapToGrid(e.target.checked)}
-              style={{ marginRight: "6px" }}
+              style={{ marginRight: "6px", accentColor: "var(--accent)" }}
             />
             Привязка к узлам
           </label>
-          <span style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
+          <span style={{ fontSize: "11px", color: "#B8B8B8", marginTop: "4px" }}>
             1 клетка = 0.5 м
           </span>
         </div>
@@ -315,9 +346,10 @@ export default function RoomPolygonEditor() {
 
       <div
         style={{
-          background: "#222",
+          background: "var(--bg-canvas)",
+          border: "1px solid var(--border)",
           padding: "20px",
-          borderRadius: "8px",
+          borderRadius: "4px",
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
@@ -328,7 +360,7 @@ export default function RoomPolygonEditor() {
       >
         <svg
           ref={svgRef}
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          viewBox={`0 0 ${activeSvgWidth} ${activeSvgHeight}`}
           style={{
             display: "block",
             touchAction: "none",
@@ -349,21 +381,22 @@ export default function RoomPolygonEditor() {
               patternUnits="userSpaceOnUse"
               patternTransform={`translate(${gridOffsetX}, ${gridOffsetY})`}
             >
-              <path
-                d={`M ${gridPixelSize} 0 L 0 0 0 ${gridPixelSize}`}
-                fill="none"
-                stroke="#333"
-                strokeWidth="1"
+              <circle
+                cx={gridPixelSize / 2}
+                cy={gridPixelSize / 2}
+                r="1"
+                fill="#DDDDDD"
               />
             </pattern>
           </defs>
+          <rect width="100%" height="100%" fill="#FFFFFF" />
           <rect width="100%" height="100%" fill="url(#grid)" />
 
           <polygon
             points={pointsString}
-            fill="rgba(100, 200, 100, 0.3)"
-            stroke="#5cba5c"
-            strokeWidth="3"
+            fill="rgba(176,123,94,0.06)"
+            stroke="var(--accent)"
+            strokeWidth="1.5"
           />
 
           {safePoints.map((p, i) => {
@@ -372,10 +405,10 @@ export default function RoomPolygonEditor() {
             return (
               <line
                 key={`edge-${i}`}
-                x1={(p.x - offsetX) * scale}
-                y1={(p.y - offsetY) * scale}
-                x2={(nextP.x - offsetX) * scale}
-                y2={(nextP.y - offsetY) * scale}
+                x1={(p.x - activeOffsetX) * activeScale}
+                y1={(p.y - activeOffsetY) * activeScale}
+                x2={(nextP.x - activeOffsetX) * activeScale}
+                y2={(nextP.y - activeOffsetY) * activeScale}
                 stroke="transparent"
                 strokeWidth="15"
                 style={{ cursor: "crosshair" }}
@@ -391,8 +424,8 @@ export default function RoomPolygonEditor() {
             const midX = (p.x + nextP.x) / 2;
             const midY = (p.y + nextP.y) / 2;
 
-            const screenMidX = (midX - offsetX) * scale;
-            const screenMidY = (midY - offsetY) * scale;
+            const screenMidX = (midX - activeOffsetX) * activeScale;
+            const screenMidY = (midY - activeOffsetY) * activeScale;
 
             const currentLen = calculateDistance(p, nextP);
             const displayLen = Number.isInteger(currentLen)
@@ -427,11 +460,11 @@ export default function RoomPolygonEditor() {
                       width: "100%",
                       height: "100%",
                       textAlign: "center",
-                      fontSize: "13px",
-                      border: "2px solid #5cba5c",
-                      borderRadius: "4px",
-                      background: "#111",
-                      color: "#fff",
+                      fontSize: "12px",
+                      border: "1px solid var(--accent)",
+                      borderRadius: "3px",
+                      background: "#fff",
+                      color: "var(--text-h)",
                       outline: "none",
                       boxSizing: "border-box",
                     }}
@@ -455,17 +488,16 @@ export default function RoomPolygonEditor() {
                   y={screenMidY - 11}
                   width="50"
                   height="22"
-                  rx="4"
-                  fill="#1a1a1a"
-                  stroke="#444"
+                  rx="3"
+                  fill="#FFFFFF"
+                  stroke="var(--border)"
                   strokeWidth="1"
                 />
                 <text
                   x={screenMidX}
                   y={screenMidY}
-                  fill="#fff"
-                  fontSize="12"
-                  fontWeight="bold"
+                  fill="#6B6B6B"
+                  fontSize="11"
                   textAnchor="middle"
                   dominantBaseline="central"
                 >
@@ -478,12 +510,12 @@ export default function RoomPolygonEditor() {
           {safePoints.map((p, i) => (
             <circle
               key={i}
-              cx={(p.x - offsetX) * scale}
-              cy={(p.y - offsetY) * scale}
-              r={draggingIdx === i ? "8" : "6"}
-              fill={draggingIdx === i ? "#5cba5c" : "#fff"}
-              stroke="#5cba5c"
-              strokeWidth="2"
+              cx={(p.x - activeOffsetX) * activeScale}
+              cy={(p.y - activeOffsetY) * activeScale}
+              r={draggingIdx === i ? "6.5" : "5"}
+              fill={draggingIdx === i ? "var(--accent)" : "#FFFFFF"}
+              stroke="var(--accent)"
+              strokeWidth="1.4"
               onPointerDown={(e) => handleDeletePoint(i, e)}
               style={{ cursor: "grab" }}
             />

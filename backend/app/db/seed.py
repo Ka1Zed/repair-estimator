@@ -107,5 +107,23 @@ def seed():
     session.commit()
     session.close()
 
+
+def _already_seeded() -> bool:
+    """Есть ли уже справочные данные (значит, БД не пустая)."""
+    session = SessionLocal()
+    try:
+        return session.query(Material.id).first() is not None
+    finally:
+        session.close()
+
+
 if __name__ == "__main__":
-    seed()
+    import sys
+
+    # --if-empty: режим деплоя — засеять только пустую БД и не перетирать
+    # данные (в т.ч. правки цен) при каждом рестарте контейнера.
+    # Без флага (тесты/dev) seed всегда делает полный сброс, как и раньше.
+    if "--if-empty" in sys.argv and _already_seeded():
+        print("Seed: данные уже есть, пропускаю (--if-empty).")
+    else:
+        seed()

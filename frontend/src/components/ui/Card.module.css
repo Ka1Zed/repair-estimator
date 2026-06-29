@@ -1,25 +1,21 @@
 .card {
-  background: white;
-  border: 1px solid #eaeaea;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
-  transition: box-shadow 0.2s ease;
-}
-
-.card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 24px 26px;
 }
 
 .title {
-  margin-top: 0;
-  margin-bottom: 12px;
-  font-size: 18px;
-  font-weight: 600;
-  color: #111;
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: #A0A0A0;
+  font-family: var(--sans);
+  font-weight: 400;
 }
 
 .content {
   font-size: 14px;
-  color: #444;
+  color: var(--text-h);
 }

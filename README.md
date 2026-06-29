@@ -8,7 +8,7 @@
 
 1. задаёт помещение как 2D-многоугольник (вручную через редактор или таблицу точек);
 2. указывает высоту потолка, двери и окна;
-3. выбирает тип ремонта (косметический / базовый / расширенный) и набор работ (пол, стены, потолок, плитка, электрика, сантехника).
+3. выбирает класс ремонта (косметический / капитальный / дизайнерский) и набор работ (пол, стены, потолок, плитка, электрика, сантехника).
 
 Система считает:
 
@@ -91,6 +91,14 @@ pip install -r requirements.txt
 # применить миграции БД
 alembic upgrade head
 
+# > macOS на Apple Silicon (M1/M2/...): если pytest/uvicorn падают с
+# > `incompatible architecture (have 'arm64', need 'x86_64')`, значит venv
+# > создан x86_64-питоном под Rosetta, а колёса поставились arm64. Лечится
+# > пересозданием venv нативным питоном:
+# >   rm -rf .venv && arch -arm64 python3 -m venv .venv && source .venv/bin/activate
+# >   pip install -r requirements.txt
+# > Проверить разрядность активного питона: `python -c "import platform; print(platform.machine())"`
+
 # заполнить базу стартовыми данными (материалы, услуги, цены)
 python -m app.db.seed
 
@@ -115,6 +123,41 @@ Backend будет доступен на `http://localhost:8000`.
 | `POSTGRES_DB` | Имя базы | `repair_estimator` |
 | `POSTGRES_HOST` | Хост БД | `localhost` |
 | `POSTGRES_PORT` | Порт БД | `5432` |
+| `GEMINI_API_KEY` | Ключ Google Gemini Vision для beta-загрузки чертежа (опц.) | — |
+| `GEMINI_MODEL` | Модель Gemini для распознавания (опц.) | `gemini-2.5-flash` |
+| `GEMINI_ENABLED` | Включить Gemini; `false` — использовать Claude (опц.) | `true` |
+| `ANTHROPIC_API_KEY` | Ключ Claude Vision для beta-загрузки чертежа (опц.) | — |
+| `ANTHROPIC_MODEL` | Модель Claude для распознавания (опц.) | `claude-sonnet-4-6` |
+| `OLLAMA_BASE_URL` | URL локального Ollama для beta-загрузки чертежа (опц.) | `http://localhost:11434` |
+| `BLUEPRINT_MAX_SIDE` | До скольких px ужимать чертёж перед распознаванием (опц.) | `2048` |
+| `BLUEPRINT_TIMEOUT` | Таймаут ответа Gemini в секундах (опц.) | `90` |
+| `MEGASTROY_COOKIE` | Cookie из браузера для обхода JS-проверки Мегастроя при `update_prices` (опц.) | `__ddg1_=...; PHPSESSID=...` |
+| `MEGASTROY_UA` | User-Agent под эту cookie (опц., должен совпадать с браузером) | `Mozilla/5.0 ... YaBrowser/...` |
+
+Ключи для распознавания чертежа необязательны: без них работает весь основной
+сценарий (ручной 2D-ввод), beta-загрузка просто вернёт понятную ошибку.
+
+`MEGASTROY_COOKIE`/`MEGASTROY_UA` нужны только для ручного прогона
+`python -m app.manage update_prices`: сайт Мегастроя закрыт JS-проверкой
+(DDoS-Guard) и отдаёт 403 на голый запрос. Обход — cookie hand-off: пройти проверку
+в браузере, скопировать строку `Cookie` и `User-Agent` (DevTools → Network →
+запрос документа → Request Headers) в эти переменные. Cookie живёт недолго
+(привязана к IP+UA), при 403 — обновить. Если переменные пустые, расчёт сметы не
+ломается: цена краски уходит на seed-fallback. Полный раннбук обновления и проверки
+цен — `docs/price-refresh.md`.
+
+### Beta: загрузка чертежа (системные зависимости)
+
+Распознавание PDF-чертежей использует `pdf2image`, которому нужен системный
+бинарь **poppler** (для PNG/JPG он не требуется):
+
+- **macOS:** `brew install poppler`
+- **Windows:** скачать [poppler для Windows](https://github.com/oschwartz10612/poppler-windows/releases),
+  распаковать и добавить папку `bin` в `PATH`
+- **Linux:** `sudo apt install poppler-utils`
+
+Если poppler не установлен — PNG/JPG распознаются как обычно, а на PDF придёт
+понятная ошибка вместо падения сервера.
 
 ### Тесты backend
 
@@ -122,6 +165,13 @@ Backend будет доступен на `http://localhost:8000`.
 cd backend
 pytest
 ```
+
+Тесты изолированы от dev-базы: они работают на отдельной БД
+`repair_estimator_test` (имя можно переопределить переменной `POSTGRES_TEST_DB`).
+`conftest.py` сам создаёт её при первом запуске, если её ещё нет — отдельная
+ручная подготовка не нужна, достаточно поднятого PostgreSQL и прав на
+`CREATE DATABASE`. Прогон `pytest` больше **не затирает** боевой seed в
+`repair_estimator`, поэтому повторные запуски подряд не требуют пере-seed.
 
 ## Запуск frontend
 
@@ -148,6 +198,62 @@ npm run dev        # сервер разработки с hot reload
 npm run build      # production-сборка в папку dist/
 npm run preview    # локальный просмотр production-сборки
 npm run lint       # проверка кода линтером
+```
+
+## Развёртывание на удалённом сервере
+
+Весь стек (PostgreSQL + backend + frontend) поднимается **одной командой** через Docker Compose — без ручной установки Python, Node и зависимостей на сервере. Backend при старте сам применяет миграции и заливает seed-данные.
+
+### Что нужно на сервере
+
+- Любой Linux-VPS (например Ubuntu 22.04+, от 1 ГБ RAM). Подойдёт бесплатный Oracle Cloud Always Free или недорогой VPS (VDSina/Timeweb/Hetzner).
+- Установленные Docker и Docker Compose plugin.
+- Открытые порты `80` (сайт) и `8000` (API).
+
+### Шаги
+
+```bash
+# 1. Установить Docker (Ubuntu)
+curl -fsSL https://get.docker.com | sh
+
+# 2. Забрать код
+git clone <url-репозитория>
+cd repair-estimator
+
+# 3. Настроить окружение
+cp .env.example .env
+# В .env обязательно поправить под адрес сервера (IP или домен) и сменить пароль БД:
+#   FRONTEND_URL=http://<адрес-сервера>
+#   VITE_API_URL=http://<адрес-сервера>:8000
+#   POSTGRES_PASSWORD=<свой-пароль>
+
+# 4. Собрать и поднять весь стек в фоне
+docker compose up -d --build
+```
+
+Отдельные шаги «по памяти» (venv, `pip install`, `alembic upgrade`, `python -m app.db.seed`) на сервере не нужны — всё внутри контейнеров.
+
+### Проверка
+
+```bash
+curl http://<адрес-сервера>:8000/health     # -> {"status":"ok"}
+```
+
+Сайт открывается на `http://<адрес-сервера>/`.
+
+### Зачем две переменные адреса
+
+Frontend — это статика, собранная заранее, поэтому адрес backend (`VITE_API_URL`) **зашивается в бандл** на этапе `docker compose build`. `FRONTEND_URL` нужен backend для CORS — он разрешает запросы только с адреса сайта. Обе должны указывать на реальный адрес сервера, иначе браузер упрётся в CORS или будет стучаться в `localhost`. После смены адреса пересобрать фронт: `docker compose up -d --build`.
+
+> Seed выполняется только при пустой БД (`--if-empty`): первый запуск заливает стартовые данные, а при рестартах и обновлениях контейнера ранее накопленные данные (в т.ч. правки цен) не перетираются. Контейнеры подняты с `restart: unless-stopped` — стек сам поднимется после перезагрузки сервера.
+
+### Обновление и обслуживание
+
+```bash
+git pull && docker compose up -d --build   # выкатить новую версию
+docker compose logs -f backend             # логи backend
+docker compose ps                          # статус контейнеров
+docker compose down                        # остановить (данные БД в volume сохранятся)
 ```
 
 ## Работа с базой данных

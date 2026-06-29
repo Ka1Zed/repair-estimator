@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 import statistics
 from decimal import Decimal
@@ -29,6 +30,23 @@ HEADERS = {
 REQUEST_TIMEOUT = 10      # таймаут запроса, сек
 REQUEST_DELAY = 1.0       # пауза между страницами, чтобы не долбить сайт
 MAX_PAGES = 20            # защита от бесконечного цикла
+
+
+def _build_headers() -> dict[str, str]:
+    # На megastroy стоит JS-challenge WAF (DDoS-Guard): голый requests ловит 403.
+    # Обход без headless — cookie hand-off: пользователь проходит проверку в браузере
+    # и кладёт строку Cookie в MEGASTROY_COOKIE (целиком из DevTools → Network →
+    # Request Headers → Cookie). Кука привязана к User-Agent, поэтому при
+    # необходимости UA тоже можно переопределить (MEGASTROY_UA) под свой браузер.
+    # Обе переменные пустые → прежнее поведение (свой UA, без cookie) → 403 → seed.
+    headers = dict(HEADERS)
+    ua = os.environ.get("MEGASTROY_UA", "").strip()
+    if ua:
+        headers["User-Agent"] = ua
+    cookie = os.environ.get("MEGASTROY_COOKIE", "").strip()
+    if cookie:
+        headers["Cookie"] = cookie
+    return headers
 
 
 def _encode_url(url: str) -> str:
@@ -70,6 +88,7 @@ class MegastroyParser(BaseParser):
         base_url = _encode_url(CATEGORY_MAP[material_name])
         sep = "&" if "?" in base_url else "?"
 
+        headers = _build_headers()
         all_prices: list[Decimal] = []
 
         for page in range(1, MAX_PAGES + 1):
@@ -81,7 +100,7 @@ class MegastroyParser(BaseParser):
                 url = f"{base_url}{sep}page={page}"
 
             time.sleep(REQUEST_DELAY)
-            response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+            response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
 
             if response.status_code == 404:
                 break
@@ -106,4 +125,11 @@ class MegastroyParser(BaseParser):
             f"min={price_min}, avg={price_avg}, max={price_max}"
         )
 
-        return ParsedPrice(price_min=price_min, price_avg=price_avg, price_max=price_max)
+        # Ссылку отдаём на исходную (человекочитаемую) страницу категории, а не на
+        # ASCII-кодированный URL — её видит пользователь в смете.
+        return ParsedPrice(
+            price_min=price_min,
+            price_avg=price_avg,
+            price_max=price_max,
+            source_url=CATEGORY_MAP[material_name],
+        )

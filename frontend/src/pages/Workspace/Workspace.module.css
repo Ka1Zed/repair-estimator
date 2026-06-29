@@ -1,0 +1,423 @@
+/* Двухколоночная рабочая страница: слева редактор, справа аналитика */
+
+.page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0;
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 0 24px 80px;
+  box-sizing: border-box;
+}
+
+.left {
+  padding: 36px 56px 36px 8px;
+  min-width: 0;
+}
+
+.right {
+  padding: 36px 8px 36px 56px;
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+
+/* Правая колонка липкая и со СВОИМ скроллом: пристёгнута к экрану, а если её
+   высота больше окна — прокручивается внутри себя (max-height: экран). Поэтому
+   верх редактора (слева) и низ сметы (справа) видно одновременно — без рассинхрона
+   исходной вёрстки, где низ сметы был недостижим. Бегунок тонкий (index.css) и
+   у правого края колонки, не в центре. */
+.rightSticky {
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  /* немного места под тонкий бегунок, чтобы он не прилипал к цифрам */
+  padding-right: 6px;
+}
+
+/* ---- типографика блоков ---- */
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #b0b0b0;
+  margin-bottom: 14px;
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: 30px;
+  line-height: 1.15;
+  color: var(--text-h);
+  margin: 0 0 16px;
+}
+
+.lead {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  max-width: 440px;
+  margin: 0 0 28px;
+}
+
+.block {
+  margin-top: 28px;
+}
+
+.blockLabel {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b0b0b0;
+  margin-bottom: 12px;
+}
+
+/* высота + класс ремонта в один ряд */
+.paramsRow {
+  display: flex;
+  gap: 48px;
+  align-items: flex-start;
+  margin-top: 28px;
+  flex-wrap: wrap;
+}
+
+.heightField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.heightInput {
+  width: 96px;
+  padding: 6px 4px;
+  font-size: 22px;
+  font-family: var(--serif);
+  color: var(--text-h);
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid var(--border);
+  outline: none;
+}
+
+.heightInput:focus {
+  border-bottom-color: var(--accent);
+}
+
+.heightUnit {
+  font-size: 13px;
+  color: #9a9a9a;
+}
+
+.cityField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* координаты углов — раскрывающийся тогл */
+.pointsDetails {
+  margin-top: 28px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.pointsSummary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+  user-select: none;
+}
+
+.pointsSummary::-webkit-details-marker {
+  display: none;
+}
+
+.pointsSummary::before {
+  content: "+ ";
+  color: var(--accent);
+}
+
+.pointsDetails[open] .pointsSummary::before {
+  content: "− ";
+}
+
+.pointsSummary:hover {
+  color: var(--text-h);
+}
+
+.pointsBody {
+  margin-top: 16px;
+}
+
+/* ---- кнопка расчёта ---- */
+.calcBtn {
+  margin-top: 36px;
+  padding: 13px 28px;
+  background: var(--text-h);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.calcBtn:hover {
+  opacity: 0.88;
+}
+
+.calcBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ===== ПРАВАЯ КОЛОНКА — аналитика ===== */
+
+.rightHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 28px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.rightHeaderSub {
+  font-size: 13px;
+  color: #9a9a9a;
+  margin-top: 4px;
+}
+
+.exportRow {
+  display: flex;
+  gap: 12px;
+}
+
+.exportBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.exportBtn:hover:not(:disabled) {
+  border-color: var(--accent-border);
+}
+
+.exportBtn:disabled {
+  color: #c0c0c0;
+  cursor: default;
+}
+
+/* плитки геометрии 2×2 */
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 40px;
+}
+
+.tile {
+  padding: 28px 32px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.tile:nth-child(2n) {
+  border-right: none;
+}
+
+.tile:nth-child(n + 3) {
+  border-bottom: none;
+}
+
+.tileValue {
+  font-family: var(--serif);
+  font-size: 38px;
+  line-height: 1;
+  color: var(--text-h);
+}
+
+.tileUnit {
+  font-size: 14px;
+  color: #b0b0b0;
+  margin-left: 4px;
+}
+
+.tileLabel {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b0b0b0;
+  margin-top: 12px;
+}
+
+/* вилка стоимости */
+.rangeRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.rangeCol {
+  display: flex;
+  flex-direction: column;
+}
+
+.rangeColCenter {
+  align-items: center;
+}
+
+.rangeColRight {
+  align-items: flex-end;
+}
+
+.rangeCap {
+  font-size: 12px;
+  color: #9a9a9a;
+  margin-bottom: 6px;
+}
+
+.rangeCapAccent {
+  color: var(--accent);
+}
+
+.rangeValue {
+  font-size: 18px;
+  color: var(--text-h);
+}
+
+.rangeValueMain {
+  font-family: var(--serif);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.rangeTrack {
+  position: relative;
+  height: 2px;
+  background: var(--border);
+  margin: 10px 0 44px;
+}
+
+.rangeDot {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translate(-50%, -50%);
+}
+
+.rangeEnd {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid #cfcfcf;
+  background: #fff;
+  transform: translate(-50%, -50%);
+}
+
+/* вкладки */
+.tabs {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.tab {
+  background: none;
+  border: none;
+  padding: 10px 0;
+  font-size: 14px;
+  color: #9a9a9a;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tabActive {
+  color: var(--text-h);
+  border-bottom-color: var(--accent);
+}
+
+/* состояния */
+.empty {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 64px 32px;
+  text-align: center;
+  color: #b0b0b0;
+  font-size: 14px;
+}
+
+.error {
+  color: #b04a4a;
+  font-size: 14px;
+  margin-top: 16px;
+}
+
+.sectionTotal {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  padding-top: 20px;
+}
+
+.sectionTotalLabel {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.sectionTotalValue {
+  font-family: var(--serif);
+  font-size: 26px;
+  color: var(--text-h);
+}
+
+@media (max-width: 1080px) {
+  .page {
+    grid-template-columns: 1fr;
+  }
+  .left {
+    padding: 24px 8px;
+  }
+  .right {
+    padding: 24px 8px;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+  .rightSticky {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+/* Печать («Скачать PDF» → window.print()): снимаем внутренний скролл сметы,
+   чтобы она печаталась целиком, а не обрезалась по высоте экрана. */
+@media print {
+  .rightSticky {
+    max-height: none;
+    overflow: visible;
+  }
+}

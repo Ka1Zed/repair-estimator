@@ -22,7 +22,6 @@ class RepairOptions(BaseModel):
     floor: Optional[str] = None
     walls: Optional[str] = None
     ceiling: Optional[str] = None
-    tile: Optional[bool] = False
     electric: Optional[str] = None
     plumbing: Optional[bool] = False
 
@@ -46,7 +45,13 @@ class MaterialItem(BaseModel):
     price_avg: float
     total_avg: float
     source: str
+    # Ссылка на карточку/категорию товара у источника цены: задана для парсерных
+    # цен, null для seed и для позиций без цены. Фронт (F2-8) делает из неё ссылку.
+    source_url: Optional[str] = None
     updated_at: str
+    # Регион, по которому реально взялась цена: город при региональной seed-цене
+    # или null, если цена базовая (region IS NULL) / парсерная. См. city в запросе.
+    region: Optional[str] = None
 
 class LaborItem(BaseModel):
     service: str
@@ -56,6 +61,13 @@ class LaborItem(BaseModel):
     price_avg: float
     total_avg: float
     source: str
+    # Ссылка на страницу услуги у источника цены: задана для парсерных цен, null для seed.
+    source_url: Optional[str] = None
+    region: Optional[str] = None
+    # Все сайты, чьи цены объединены в эту вилку (#166). Для одного источника —
+    # один элемент; для seed-цены — null. В строке сметы source — представительный
+    # сайт (его средняя ближе к итоговой), а sources — полный список через запятую.
+    sources: Optional[List[str]] = None
 
 class Summary(BaseModel):
     materials_min: float

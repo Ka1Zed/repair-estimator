@@ -5,18 +5,7 @@
 .label {
   display: block;
   margin-bottom: 5px;
-  color: #fff;
-}
-
-.select {
-  width: 100%;
-  padding: 6px;
-  margin-top: 5px;
-  background: #333;
-  color: #fff;
-  border: 1px solid #555;
-  border-radius: 4px;
-  outline: none;
-  cursor: pointer;
+  font-size: 13px;
+  color: #6B6B6B;
 }
 

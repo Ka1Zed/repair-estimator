@@ -2,53 +2,61 @@
 import React from 'react';
 import { useProjectStore, type RepairType } from '../../store/projectStore';
 
+const OPTIONS: { value: RepairType; label: string }[] = [
+  { value: 'cosmetic', label: 'Косметический' },
+  { value: 'base', label: 'Капитальный' },
+  { value: 'extended', label: 'Дизайнерский' },
+];
+
+const REPAIR_CLASS_INFO: Record<RepairType, string> = {
+  cosmetic: 'Покраска, обои, замена пола. Черновые поверхности не затрагиваются.',
+  base: 'Полный цикл: штукатурка, стяжка, чистовая отделка всех поверхностей.',
+  extended: 'Авторский ремонт с дизайн-проектом, нестандартными материалами и повышенными нормами.',
+};
+
 export const RepairOptionsForm: React.FC = () => {
-  // Достаем текущее значение и функцию обновления из стора
   const repairType = useProjectStore((state) => state.repair_type);
   const setRepairType = useProjectStore((state) => state.setRepairType);
 
-  // Обработчик изменения выбора
-  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setRepairType(event.target.value as RepairType);
-  };
-
   return (
-    <div className="repair-options-form">
-      <h3>Класс ремонта</h3>
-      <div className="options-container">
-        <label>
-          <input
-            type="radio"
-            name="repair_type"
-            value="cosmetic"
-            checked={repairType === 'cosmetic'}
-            onChange={handleChange}
-          />
-          Косметический
-        </label>
-
-        <label>
-          <input
-            type="radio"
-            name="repair_type"
-            value="base"
-            checked={repairType === 'base'}
-            onChange={handleChange}
-          />
-          Базовый
-        </label>
-
-        <label>
-          <input
-            type="radio"
-            name="repair_type"
-            value="extended"
-            checked={repairType === 'extended'}
-            onChange={handleChange}
-          />
-          Расширенный
-        </label>
+    <div style={{ marginBottom: '24px' }}>
+      <div
+        style={{
+          fontSize: '11px',
+          letterSpacing: '.14em',
+          textTransform: 'uppercase',
+          color: '#B0B0B0',
+          marginBottom: '10px',
+        }}
+      >
+        Класс ремонта
       </div>
+      <div style={{ display: 'flex', gap: '20px' }}>
+        {OPTIONS.map((opt) => {
+          const active = repairType === opt.value;
+          return (
+            <button
+              key={opt.value}
+              onClick={() => setRepairType(opt.value)}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: '4px 0',
+                cursor: 'pointer',
+                fontSize: '14px',
+                letterSpacing: '.01em',
+                color: active ? 'var(--text-h)' : '#9A9A9A',
+                borderBottom: active ? '1.5px solid var(--accent)' : '1.5px solid transparent',
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+      <p style={{ margin: '8px 0 0', fontSize: '13px', color: '#6B6B6B' }}>
+        {REPAIR_CLASS_INFO[repairType]}
+      </p>
     </div>
   );
 };

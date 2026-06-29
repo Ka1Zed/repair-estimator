@@ -18,26 +18,39 @@ def to_decimal(value: Union[int, float, str, Decimal]) -> Decimal:
         return Decimal(str(value))
     return Decimal(value)
 
+def _get_xy(p: Union[tuple, list, dict]) -> tuple:
+    """Достаёт координаты точки в формате (x, y), [x, y] или {'x': x, 'y': y}."""
+    if isinstance(p, dict):
+        return to_decimal(p['x']), to_decimal(p['y'])
+    return to_decimal(p[0]), to_decimal(p[1])
+
+def side_lengths(points: List[Union[tuple, list, dict]]) -> List[Decimal]:
+    """Длины сторон многоугольника (Decimal), в порядке обхода точек."""
+    n = len(points)
+    lengths = []
+    for i in range(n):
+        x1, y1 = _get_xy(points[i])
+        x2, y2 = _get_xy(points[(i + 1) % n])
+        dx = x2 - x1
+        dy = y2 - y1
+        lengths.append((dx * dx + dy * dy).sqrt())
+    return lengths
+
 def floor_area(points: List[Union[tuple, list, dict]]) -> Decimal:
     """
     Площадь многоугольника по формуле шнурования (Decimal).
-    
+
     Аргументы:
         points: список точек в формате (x,y), [x,y] или {'x':x,'y':y}
-    
+
     Возвращает:
         площадь (неотрицательная).
     """
     n = len(points)
-    def get_xy(p):
-        if isinstance(p, dict):
-            return to_decimal(p['x']), to_decimal(p['y'])
-        else:
-            return to_decimal(p[0]), to_decimal(p[1])
     area = Decimal('0.0')
     for i in range(n):
-        x1, y1 = get_xy(points[i])
-        x2, y2 = get_xy(points[(i + 1) % n])
+        x1, y1 = _get_xy(points[i])
+        x2, y2 = _get_xy(points[(i + 1) % n])
         area += x1 * y2 - x2 * y1
     return abs(area) / Decimal('2.0')
 
@@ -45,21 +58,7 @@ def perimeter(points: List[Union[tuple, list, dict]]) -> Decimal:
     """
     Периметр многоугольника (сумма длин сторон) с использованием Decimal.
     """
-    n = len(points)
-    def get_xy(p):
-        if isinstance(p, dict):
-            return to_decimal(p['x']), to_decimal(p['y'])
-        else:
-            return to_decimal(p[0]), to_decimal(p[1])
-    perim = Decimal('0.0')
-    for i in range(n):
-        x1, y1 = get_xy(points[i])
-        x2, y2 = get_xy(points[(i + 1) % n])
-        dx = x2 - x1
-        dy = y2 - y1
-        distance = (dx * dx + dy * dy).sqrt()
-        perim += distance
-    return perim
+    return sum(side_lengths(points), Decimal('0.0'))
 
 def _validate_openings(
     height: Decimal,
@@ -108,18 +107,10 @@ def calculate_room_geometry(
     else:
         pts = [(float(p[0]), float(p[1])) for p in points]
 
-    # Вычисляем длины сторон в Decimal
-    side_lengths = []
-    n = len(pts)
-    for i in range(n):
-        x1, y1 = Decimal(str(pts[i][0])), Decimal(str(pts[i][1]))
-        x2, y2 = Decimal(str(pts[(i + 1) % n][0])), Decimal(str(pts[(i + 1) % n][1]))
-        dx = x2 - x1
-        dy = y2 - y1
-        length = (dx * dx + dy * dy).sqrt()
-        side_lengths.append(length)
-    max_side = max(side_lengths) if side_lengths else Decimal('0.0')
-    perim = sum(side_lengths, Decimal('0.0'))
+    # Длины сторон считаем один раз: нужны и для периметра, и для проверки ширины проёмов.
+    sides = side_lengths(pts)
+    max_side = max(sides) if sides else Decimal('0.0')
+    perim = sum(sides, Decimal('0.0'))
 
     floor = floor_area(pts)
 

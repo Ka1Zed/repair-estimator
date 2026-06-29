@@ -438,3 +438,90 @@ def test_plinth_subtracts_door_width():
     # (14 − 0.8) × 1.05 = 13.86 → ceil = 14 пог.м (с дверью).
     # Без вычета двери было бы 14 × 1.05 = 14.7 → ceil = 15.
     assert plinth["quantity"] == pytest.approx(14.0)
+
+# app/tests/test_estimate_endpoint.py (дополнение)
+
+def test_invalid_door_height():
+    """Дверь выше комнаты → 422."""
+    payload = {
+        "city": "Казань",
+        "rooms": [{
+            "name": "Комната",
+            "height": 2.7,
+            "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+            "room_type": "living",
+            "openings": [{"type": "door", "width": 0.8, "height": 3.0}]
+        }],
+        "repair_type": "cosmetic",
+        "repair_options": {"floor": "laminate", "walls": "paint", "ceiling": "paint"}
+    }
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "высота двери" in detail.lower() or "превышать высоту" in detail
+
+def test_window_wider_than_wall():
+    """Окно шире самой длинной стены → 422."""
+    payload = {
+        "city": "Казань",
+        "rooms": [{
+            "name": "Комната",
+            "height": 2.7,
+            "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+            "room_type": "living",
+            "openings": [{"type": "window", "width": 5.0, "height": 1.5}]
+        }],
+        "repair_type": "cosmetic",
+        "repair_options": {"floor": "laminate", "walls": "paint", "ceiling": "paint"}
+    }
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "длину самой длинной стены" in detail.lower()
+
+def test_total_openings_exceed_wall_area():
+    """Суммарная площадь проёмов >= площади стен → 422."""
+    payload = {
+        "city": "Казань",
+        "rooms": [{
+            "name": "Комната",
+            "height": 2.7,
+            "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 2}, {"x": 0, "y": 2}],
+            "room_type": "living",
+            "openings": [
+                {"type": "window", "width": 3.0, "height": 2.7},
+                {"type": "window", "width": 3.0, "height": 2.7},
+                {"type": "window", "width": 3.0, "height": 2.7},
+                {"type": "window", "width": 3.0, "height": 2.7}
+            ]
+        }],
+        "repair_type": "cosmetic",
+        "repair_options": {"floor": "laminate", "walls": "paint", "ceiling": "paint"}
+    }
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "суммарная площадь проёмов" in detail.lower()
+
+def test_door_full_wall():
+    """Дверь во всю стену – wall_area корректно уменьшается, но не становится отрицательной."""
+    # Комната 4×3, h=2.7. Одна стена длиной 4 м, дверь шириной 4 м, высотой 2.7 м
+    payload = {
+        "city": "Казань",
+        "rooms": [{
+            "name": "Комната",
+            "height": 2.7,
+            "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+            "room_type": "living",
+            "openings": [{"type": "door", "width": 4.0, "height": 2.7}]
+        }],
+        "repair_type": "cosmetic",
+        "repair_options": {"floor": "laminate", "walls": "paint", "ceiling": "paint"}
+    }
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    # Периметр = 14, стены до вычета = 14*2.7=37.8, дверь = 4*2.7=10.8, остаётся 27.0
+    assert data["geometry"]["wall_area"] == pytest.approx(27.0, 0.01)
+    # wall_area положительная, расчёт не ушёл в минус.
+

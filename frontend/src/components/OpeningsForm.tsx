@@ -1,31 +1,12 @@
 import { useProjectStore } from "../store/projectStore";
 import { Select } from "./ui/Select";
+import { validateWidth, validateHeight } from "../utils/openingValidation";
 import styles from "./OpeningsForm.module.css";
 
 const OPENING_TYPE_OPTIONS = [
   { value: "door", label: "Дверь" },
   { value: "window", label: "Окно" },
 ];
-
-function validateWidth(width: number | string): string | null {
-  const v = Number(width);
-  if (!width && width !== 0) return null;
-  if (isNaN(v) || v <= 0) return "Должна быть > 0";
-  if (v > 10) return "Не более 10 м";
-  return null;
-}
-
-function validateHeight(
-  height: number | string,
-  ceilingHeight: number | string,
-): string | null {
-  const v = Number(height);
-  const ceiling = Number(ceilingHeight);
-  if (!height && height !== 0) return null;
-  if (isNaN(v) || v <= 0) return "Должна быть > 0";
-  if (ceiling > 0 && v > ceiling) return `Не более ${ceiling} м (потолок)`;
-  return null;
-}
 
 export default function OpeningsForm() {
   const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
@@ -75,10 +56,9 @@ export default function OpeningsForm() {
                         step="0.1"
                         min="0"
                         value={opening.width}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          if (v >= 0) updateOpening(index, "width", v);
-                        }}
+                        onChange={(e) =>
+                          updateOpening(index, "width", Number(e.target.value))
+                        }
                       />
                       {widthError && (
                         <span className={styles.errorText}>{widthError}</span>
@@ -93,10 +73,9 @@ export default function OpeningsForm() {
                         step="0.1"
                         min="0"
                         value={opening.height}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          if (v >= 0) updateOpening(index, "height", v);
-                        }}
+                        onChange={(e) =>
+                          updateOpening(index, "height", Number(e.target.value))
+                        }
                       />
                       {heightError && (
                         <span className={styles.errorText}>{heightError}</span>

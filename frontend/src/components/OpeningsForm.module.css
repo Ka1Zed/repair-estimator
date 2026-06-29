@@ -57,16 +57,16 @@
 }
 
 .inputError {
-  border-color: #c0392b;
+  border-color: var(--error);
 }
 
 .inputError:focus {
-  border-color: #c0392b;
+  border-color: var(--error);
 }
 
 .errorText {
   font-size: 11px;
-  color: #c0392b;
+  color: var(--error);
   line-height: 1.2;
   max-width: 80px;
 }

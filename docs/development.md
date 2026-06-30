@@ -67,9 +67,9 @@ uvicorn app.main:app --reload # сервер разработки
 | `POSTGRES_PORT` | Порт БД | `5432` |
 | `GEMINI_API_KEY` | Ключ Google Gemini Vision для beta-загрузки чертежа (опц.) | — |
 | `GEMINI_MODEL` | Модель Gemini для распознавания (опц.) | `gemini-2.5-flash` |
-| `GEMINI_ENABLED` | Включить Gemini; `false` — использовать Claude (опц.) | `true` |
-| `ANTHROPIC_API_KEY` | Ключ Claude Vision для beta-загрузки чертежа (опц.) | — |
-| `ANTHROPIC_MODEL` | Модель Claude для распознавания (опц.) | `claude-sonnet-4-6` |
+| `GEMINI_ENABLED` | Включить Gemini как fallback, если Claude недоступен; `false` — отключить совсем (опц.) | `true` |
+| `ANTHROPIC_API_KEY` | Ключ Claude Vision — основной путь распознавания (опц.) | — |
+| `ANTHROPIC_MODEL` | Модель Claude для распознавания (опц.) | `claude-sonnet-5` |
 | `OLLAMA_BASE_URL` | URL локального Ollama для beta-загрузки чертежа (опц.) | `http://localhost:11434` |
 | `BLUEPRINT_MAX_SIDE` | До скольких px ужимать чертёж перед распознаванием (опц.) | `2048` |
 | `BLUEPRINT_TIMEOUT` | Таймаут ответа Gemini в секундах (опц.) | `90` |

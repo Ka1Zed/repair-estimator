@@ -26,7 +26,8 @@ def _vision_prompt(width: int, height: int) -> str:
 
 Поля:
 - corners_px: углы внутреннего контура стен комнаты по порядку обхода ПО ЧАСОВОЙ стрелке,
-  координаты в пикселях относительно изображения {width}x{height}. Минимум 3, обычно 4.
+  каждый угол — объект {{"x": <px>, "y": <px>}} в пикселях относительно изображения
+  {width}x{height}. Минимум 3, обычно 4.
 - edge_dimensions: размеры, которые ты ТОЧНО прочитал на чертеже, привязанные к рёбрам.
   Ребро соединяет corners_px[from_index] и corners_px[to_index] (это соседние углы).
   length_m — длина ребра в МЕТРАХ (переведи: 3200мм → 3.2; 320см → 3.2; «3,2 м» → 3.2).
@@ -91,9 +92,10 @@ class BlueprintService:
         # gemini-2.5-flash по умолчанию: gemini-2.5-pro недоступен на бесплатном
         # тарифе (free-tier quota = 0), нужен платный проект. Переопределяется env.
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        # Модель Claude (fallback/альтернатива). Дефолт — sonnet (баланс цена/качество);
-        # claude-haiku-4-5 дешевле, claude-opus-4-8 точнее и дороже.
-        self.claude_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+        # Модель Claude (основной путь распознавания). Дефолт — claude-sonnet-5
+        # (vision + дёшево для агентных задач); claude-haiku-4-5 дешевле,
+        # claude-opus-4-8 точнее и дороже.
+        self.claude_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 
     def process_blueprint(self, file_bytes: bytes, filename: str) -> Dict[str, Any]:
         logger.debug(f"START process_blueprint: {filename}")
@@ -111,21 +113,29 @@ class BlueprintService:
             logger.warning(f"image error: {e}")
             return self._error_response(f"Ошибка обработки файла: {str(e)}")
 
-        method = self._choose_method()
-        logger.debug(f"method: {method}")
+        methods = self._method_priority()
+        logger.debug(f"methods: {methods}")
 
-        try:
-            if method == "gemini":
-                return self._process_with_gemini(image)
-            if method == "claude":
-                return self._process_with_claude(image)
-            if method == "ollama":
-                return self._process_with_ollama(image)
-        except Exception as e:
-            logger.warning(f"{method} error: {e}")
-            return self._error_response(f"Ошибка {method}: {str(e)}")
+        if not methods:
+            return self._error_response("Нет доступного метода распознавания. Проверь .env и доступность Ollama/API.")
 
-        return self._error_response("Нет доступного метода распознавания. Проверь .env и доступность Ollama/API.")
+        last_error = None
+        for method in methods:
+            try:
+                if method == "gemini":
+                    return self._process_with_gemini(image)
+                if method == "claude":
+                    return self._process_with_claude(image)
+                if method == "ollama":
+                    return self._process_with_ollama(image)
+            except Exception as e:
+                # Claude не проходит pre-flight проверку (в отличие от Gemini/Ollama) —
+                # битый ключ/нет кредита/нет сети вылезает только на реальном вызове.
+                # Откатываемся на следующий метод вместо немедленной ошибки.
+                logger.warning(f"{method} error: {e}, пробую следующий метод")
+                last_error = e
+
+        return self._error_response(f"Все методы распознавания недоступны. Последняя ошибка: {last_error}")
 
     def _prepare_image(self, file_bytes: bytes, filename: str) -> Image.Image:
         if filename.lower().endswith(".pdf"):
@@ -140,14 +150,26 @@ class BlueprintService:
         return Image.open(io.BytesIO(file_bytes)).convert("RGB")
 
     def _choose_method(self) -> str:
+        """Метод, который будет использован первым (см. _method_priority)."""
+        methods = self._method_priority()
+        return methods[0] if methods else "none"
+
+    def _method_priority(self) -> List[str]:
+        # Claude — основной путь; Gemini понижен до fallback (датацентровые/
+        # региональные 403 и квоты free-tier). Локалка (Ollama/CubiCasa) — по roadmap.
+        # Возвращаем именно цепочку приоритетов: process_blueprint пробует методы по
+        # порядку и откатывается на следующий, если вызов реально упал (например,
+        # ANTHROPIC_API_KEY задан, но невалиден/нет кредита — это не ловится здесь,
+        # только на вызове API).
+        methods = []
+        if self.anthropic_key:
+            methods.append("claude")
         gemini_enabled = os.getenv("GEMINI_ENABLED", "true").lower() != "false"
         if gemini_enabled and self.gemini_key and self._is_gemini_reachable():
-            return "gemini"
-        if self.anthropic_key:
-            return "claude"
+            methods.append("gemini")
         if self._is_ollama_available():
-            return "ollama"
-        return "none"
+            methods.append("ollama")
+        return methods
 
     def _is_gemini_reachable(self) -> bool:
         try:
@@ -424,11 +446,18 @@ class BlueprintService:
             return []
         result = []
         for p in raw:
+            # Vision-модель без JSON-схемы (Claude/Ollama) возвращает угол то как
+            # {"x":..,"y":..}, то как [x, y] — принимаем оба, иначе контур теряется.
             if isinstance(p, dict) and "x" in p and "y" in p:
-                try:
-                    result.append({"x": float(p["x"]), "y": float(p["y"])})
-                except (TypeError, ValueError):
-                    pass
+                x, y = p["x"], p["y"]
+            elif isinstance(p, (list, tuple)) and len(p) == 2:
+                x, y = p[0], p[1]
+            else:
+                continue
+            try:
+                result.append({"x": float(x), "y": float(y)})
+            except (TypeError, ValueError):
+                pass
         return result
 
     def _scale_from_edges(self, raw: Any, corners_px: List[Dict[str, float]]) -> Optional[float]:

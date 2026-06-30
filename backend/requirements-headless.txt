@@ -1,0 +1,7 @@
+# Опциональная зависимость beta-эксперимента headless-парсера
+# (plans/2026-06-30-beta-headless-parser.md, MEGASTROY_HEADLESS=1).
+# Не входит в requirements.txt, чтобы не тащить Chromium в обязательный
+# прод-образ. Установка:
+#   pip install -r requirements-headless.txt
+#   playwright install chromium
+playwright==1.49.1

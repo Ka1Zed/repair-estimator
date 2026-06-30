@@ -8,6 +8,8 @@ from urllib.parse import quote, urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from app.core.config import settings
+from app.parsers import headless_session
 from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
@@ -32,18 +34,26 @@ REQUEST_DELAY = 1.0       # пауза между страницами, чтоб
 MAX_PAGES = 20            # защита от бесконечного цикла
 
 
-def _build_headers() -> dict[str, str]:
+def _build_headers(url: str | None = None) -> dict[str, str]:
     # На megastroy стоит JS-challenge WAF (DDoS-Guard): голый requests ловит 403.
-    # Обход без headless — cookie hand-off: пользователь проходит проверку в браузере
+    # Способ 1 (ручной) — cookie hand-off: пользователь проходит проверку в браузере
     # и кладёт строку Cookie в MEGASTROY_COOKIE (целиком из DevTools → Network →
-    # Request Headers → Cookie). Кука привязана к User-Agent, поэтому при
-    # необходимости UA тоже можно переопределить (MEGASTROY_UA) под свой браузер.
-    # Обе переменные пустые → прежнее поведение (свой UA, без cookie) → 403 → seed.
+    # Request Headers → Cookie). При необходимости UA тоже можно переопределить
+    # (MEGASTROY_UA) под свой браузер.
+    # Способ 2 (beta) — MEGASTROY_HEADLESS=1: headless Playwright сам проходит
+    # challenge и кэширует cookie на диске (см.
+    # plans/2026-06-30-beta-headless-parser.md). Используется только если
+    # MEGASTROY_COOKIE не задан руками явно.
+    # Всё выключено по умолчанию → прежнее поведение (свой UA, без cookie) → 403 → seed.
     headers = dict(HEADERS)
     ua = os.environ.get("MEGASTROY_UA", "").strip()
     if ua:
         headers["User-Agent"] = ua
     cookie = os.environ.get("MEGASTROY_COOKIE", "").strip()
+    if not cookie and settings.MEGASTROY_HEADLESS:
+        cookie = headless_session.get_megastroy_cookie(
+            url or "https://kazan.megastroy.com/", headers["User-Agent"]
+        )
     if cookie:
         headers["Cookie"] = cookie
     return headers
@@ -139,7 +149,7 @@ class MegastroyParser(BaseParser):
         base_url = _encode_url(CATEGORY_MAP[material_name])
         sep = "&" if "?" in base_url else "?"
 
-        headers = _build_headers()
+        headers = _build_headers(base_url)
         # Пары (цена, ссылка на карточку) — ссылка нужна, чтобы в смете показать
         # источником конкретный товар, а не общую категорию (#197).
         items: list[tuple[Decimal, str | None]] = []

@@ -22,6 +22,13 @@ class DBSettings(BaseSettings):
     # Цены работ сеть на расчёте не трогают в любом случае (только чтение БД).
     PARSER_LIVE_FETCH: bool = True
 
+    # Beta: headless-харвестер clearance-cookie DDoS-Guard для Мегастроя
+    # (plans/2026-06-30-beta-headless-parser.md). По умолчанию выключен — без
+    # него поведение прежнее (MEGASTROY_COOKIE вручную или 403 -> seed).
+    # Требует playwright + chromium (requirements-headless.txt), поэтому не
+    # включается по умолчанию, чтобы не раздувать обязательные зависимости/образ.
+    MEGASTROY_HEADLESS: bool = False
+
     model_config = SettingsConfigDict(env_file=ENV_PATH, env_file_encoding="utf8", extra="ignore")
 
     @property

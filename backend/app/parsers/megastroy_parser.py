@@ -1,7 +1,7 @@
 import logging
 import os
-import time
 import statistics
+import time
 from decimal import Decimal
 from urllib.parse import quote, urljoin
 

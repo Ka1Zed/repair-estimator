@@ -11,6 +11,7 @@ from app.parsers import megastroy_parser
 from app.parsers.megastroy_parser import (
     CATEGORY_MAP,
     MegastroyParser,
+    _build_headers,
     _filter_outliers,
     _parse_page,
 )
@@ -146,3 +147,71 @@ def test_fetch_price_excludes_outliers_from_spread_and_source(monkeypatch):
 def test_unknown_material_raises():
     with pytest.raises(ValueError):
         MegastroyParser().fetch_price("Нет такого материала")
+
+
+# _build_headers: приоритет MEGASTROY_COOKIE (ручной hand-off) над
+# MEGASTROY_HEADLESS (beta-харвестер), см. plans/2026-06-30-beta-headless-parser.md.
+
+
+def test_build_headers_no_cookie_by_default(monkeypatch):
+    monkeypatch.delenv("MEGASTROY_COOKIE", raising=False)
+    monkeypatch.setattr(megastroy_parser.settings, "MEGASTROY_HEADLESS", False)
+
+    headers = _build_headers()
+
+    assert "Cookie" not in headers
+
+
+def test_build_headers_uses_manual_cookie(monkeypatch):
+    monkeypatch.setenv("MEGASTROY_COOKIE", "foo=bar")
+    monkeypatch.setattr(megastroy_parser.settings, "MEGASTROY_HEADLESS", False)
+
+    headers = _build_headers()
+
+    assert headers["Cookie"] == "foo=bar"
+
+
+def test_build_headers_uses_headless_harvester_when_no_manual_cookie(monkeypatch):
+    monkeypatch.delenv("MEGASTROY_COOKIE", raising=False)
+    monkeypatch.setattr(megastroy_parser.settings, "MEGASTROY_HEADLESS", True)
+    calls = []
+
+    def fake_get_cookie(url, user_agent):
+        calls.append((url, user_agent))
+        return "__ddg1_=harvested"
+
+    monkeypatch.setattr(megastroy_parser.headless_session, "get_megastroy_cookie", fake_get_cookie)
+
+    headers = _build_headers("https://kazan.megastroy.com/catalog/x")
+
+    assert headers["Cookie"] == "__ddg1_=harvested"
+    assert calls == [("https://kazan.megastroy.com/catalog/x", headers["User-Agent"])]
+
+
+def test_build_headers_manual_cookie_takes_priority_over_headless(monkeypatch):
+    # Ручной MEGASTROY_COOKIE не должен запускать headless-харвестер вообще.
+    monkeypatch.setenv("MEGASTROY_COOKIE", "manual=cookie")
+    monkeypatch.setattr(megastroy_parser.settings, "MEGASTROY_HEADLESS", True)
+
+    def fail_get_cookie(url, user_agent):
+        raise AssertionError("headless-харвестер не должен вызываться при ручном cookie")
+
+    monkeypatch.setattr(megastroy_parser.headless_session, "get_megastroy_cookie", fail_get_cookie)
+
+    headers = _build_headers()
+
+    assert headers["Cookie"] == "manual=cookie"
+
+
+def test_build_headers_headless_disabled_ignores_harvester(monkeypatch):
+    monkeypatch.delenv("MEGASTROY_COOKIE", raising=False)
+    monkeypatch.setattr(megastroy_parser.settings, "MEGASTROY_HEADLESS", False)
+
+    def fail_get_cookie(url, user_agent):
+        raise AssertionError("headless-харвестер не должен вызываться при MEGASTROY_HEADLESS=False")
+
+    monkeypatch.setattr(megastroy_parser.headless_session, "get_megastroy_cookie", fail_get_cookie)
+
+    headers = _build_headers()
+
+    assert "Cookie" not in headers

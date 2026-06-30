@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -41,8 +42,14 @@ def _read_cache() -> str | None:
 
 
 def _write_cache(cookie: str) -> None:
+    # Пишем через temp-файл с уникальным суффиксом (pid) + rename: rename атомарен
+    # на одной ФС, поэтому параллельный update_prices не увидит "разорванный"
+    # частично записанный JSON. Права 0600 — cookie не должна быть читаема всем.
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_PATH.write_text(json.dumps({"cookie": cookie, "harvested_at": time.time()}))
+    tmp_path = CACHE_PATH.with_name(f"{CACHE_PATH.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(json.dumps({"cookie": cookie, "harvested_at": time.time()}))
+    tmp_path.chmod(0o600)
+    tmp_path.replace(CACHE_PATH)
 
 
 def _harvest(url: str, user_agent: str) -> str | None:

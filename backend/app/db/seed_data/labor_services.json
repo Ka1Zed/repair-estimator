@@ -5,5 +5,6 @@
   {"name": "Укладка ламината", "specialist_type": "Укладчик", "unit": "м²"},
   {"name": "Укладка плитки", "specialist_type": "Плиточник", "unit": "м²"},
   {"name": "Электромонтаж", "specialist_type": "Электрик", "unit": "точка"},
+  {"name": "Штробление", "specialist_type": "Электрик", "unit": "м"},
   {"name": "Сантехнические работы", "specialist_type": "Сантехник", "unit": "точка"}
 ]

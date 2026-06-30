@@ -24,6 +24,8 @@ class RepairOptions(BaseModel):
     ceiling: Optional[str] = None
     electric: Optional[str] = None
     plumbing: Optional[bool] = False
+    # Обои под рисунок (раппорт): +30% к расходу рулонов на подгонку. См. estimation-rules.md.
+    wallpaper_pattern: Optional[bool] = False
 
 class EstimateRequest(BaseModel):
     city: str

@@ -21,7 +21,8 @@ from app.db.models import Material
 M_PAINT_WALLS   = "Краска для стен"
 M_PAINT_CEILING = "Краска потолочная"
 M_PRIMER        = "Грунтовка"
-M_PUTTY         = "Шпаклевка"
+M_PUTTY_START   = "Шпаклевка стартовая"
+M_PUTTY         = "Шпаклевка финишная"
 M_LAMINATE      = "Ламинат"
 M_LINOLEUM      = "Линолеум"
 M_PLINTH        = "Плинтус"
@@ -85,9 +86,10 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
 
     # --- стены ---
     if walls == "paint":
-        sel.append((M_PRIMER, wall_area))       # грунтовка, 1 слой
-        sel.append((M_PUTTY, wall_area))        # шпаклёвка
-        sel.append((M_PAINT_WALLS, wall_area))  # краска, 2 слоя
+        sel.append((M_PRIMER, wall_area))        # грунтовка, 1 слой
+        sel.append((M_PUTTY_START, wall_area))   # стартовая шпаклёвка (выравнивание)
+        sel.append((M_PUTTY, wall_area))         # финишная шпаклёвка
+        sel.append((M_PAINT_WALLS, wall_area))   # краска, 2 слоя
     elif walls == "wallpaper":
         sel.append((M_WALLPAPER, wall_area))
     elif walls == "moisture_paint":
@@ -113,8 +115,18 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
     return sel
 
 
-def quantity_of(material: Material, area: Decimal, geom: Dict[str, Any]) -> Decimal:
+# Надбавка на подгонку рисунка (раппорт) у обоев под рисунок — см. estimation-rules.md.
+WALLPAPER_PATTERN_FACTOR = Decimal("1.3")
+
+
+def quantity_of(
+    material: Material,
+    area: Decimal,
+    geom: Dict[str, Any],
+    repair_options: Dict[str, Any] | None = None,
+) -> Decimal:
     """Количество в базовых единицах по формуле из estimation-rules.md (по unit)."""
+    repair_options = repair_options or {}
     unit = material.unit
     c = D(material.consumption_per_m2)
     w = D(material.waste_factor) or Decimal(1)
@@ -130,7 +142,9 @@ def quantity_of(material: Material, area: Decimal, geom: Dict[str, Any]) -> Deci
             length = Decimal(0)
         return length * w
     if unit == "рулон":  # обои: площадь_стен × (рулонов/м²) × запас
-        return area * c * w
+        # Обои под рисунок требуют подгонки по раппорту → дополнительный расход ×1.3.
+        pattern = WALLPAPER_PATTERN_FACTOR if repair_options.get("wallpaper_pattern") else Decimal(1)
+        return area * c * w * pattern
     # неизвестная единица — безопасный дефолт
     return area * (c if c > 0 else Decimal(1)) * w
 
@@ -157,7 +171,7 @@ def calculate_materials(
             # материала нет в БД (например, не засидован) — пропускаем
             continue
 
-        quantity = quantity_of(material, area, geometry)
+        quantity = quantity_of(material, area, geometry, repair_options)
         if quantity <= 0:
             continue
 

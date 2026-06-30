@@ -125,10 +125,14 @@
     "walls": "paint",
     "ceiling": "paint",
     "electric": "basic",
-    "plumbing": false
+    "plumbing": false,
+    "wallpaper_pattern": false
   }
 }
 ```
+
+`repair_options.wallpaper_pattern` (опционально, по умолчанию `false`) — обои под рисунок:
+при `true` расход рулонов увеличивается на 30% на подгонку раппорта (см. estimation-rules.md).
 
 ### Response `200 OK`
 

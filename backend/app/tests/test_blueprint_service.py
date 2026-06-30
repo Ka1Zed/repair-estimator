@@ -165,3 +165,24 @@ def test_claude_path_with_mocked_sdk(monkeypatch):
     assert abs(r["points"][1]["x"] - 4.0) < 0.01
     assert abs(r["points"][2]["y"] - 3.0) < 0.01
     assert r["height"] == 2.7
+
+
+def test_process_blueprint_falls_back_when_claude_call_fails(monkeypatch):
+    """ANTHROPIC_API_KEY задан, но реальный вызов падает (битый ключ/нет кредита/нет сети) —
+    _choose_method не ловит это заранее (в отличие от Gemini), поэтому process_blueprint
+    должен откатиться на следующий метод, а не сразу вернуть ошибку."""
+    svc = _svc()
+    svc.anthropic_key = "bad-key"
+
+    monkeypatch.setattr(svc, "_prepare_image", lambda file_bytes, filename: Image.new("RGB", (800, 600)))
+    monkeypatch.setattr(svc, "_process_with_claude", MagicMock(side_effect=RuntimeError("invalid x-api-key")))
+    monkeypatch.setattr(svc, "_is_ollama_available", lambda: True)
+    monkeypatch.setattr(
+        svc, "_process_with_ollama",
+        lambda image: {"success": True, "method": "ollama", "points": RECT, "warnings": []},
+    )
+
+    r = svc.process_blueprint(b"", "test.png")
+
+    assert r["method"] == "ollama"
+    assert r["success"] is True

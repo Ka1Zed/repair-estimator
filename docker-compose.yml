@@ -48,13 +48,35 @@ services:
       context: ./frontend
       args:
         # Адрес backend зашивается в бандл при сборке.
+        # С Caddy+HTTPS задать в .env same-origin https-адрес, напр.
+        # https://<ip>.sslip.io — тогда фронт ходит на /api того же домена.
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     container_name: repair-estimator-frontend
     restart: unless-stopped
     depends_on:
       - backend
+    # Порты наружу не публикуем — трафик идёт через caddy (80/443).
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: repair-estimator-caddy
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    environment:
+      # Публичный домен для автоматического TLS (см. .env и Caddyfile).
+      PUBLIC_HOST: ${PUBLIC_HOST:-:80}
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:

@@ -125,10 +125,18 @@
     "walls": "paint",
     "ceiling": "paint",
     "electric": "basic",
-    "plumbing": false
+    "plumbing": false,
+    "wallpaper_pattern": false,
+    "primer_two_coats": false
   }
 }
 ```
+
+`repair_options.wallpaper_pattern` (опционально, по умолчанию `false`) — обои под рисунок:
+при `true` расход рулонов увеличивается на 30% на подгонку раппорта (см. estimation-rules.md).
+
+`repair_options.primer_two_coats` (опционально, по умолчанию `false`) — пористое/сильно
+впитывающее основание: при `true` грунтовка считается в 2 слоя вместо 1 (см. estimation-rules.md).
 
 ### Response `200 OK`
 

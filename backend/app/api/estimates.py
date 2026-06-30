@@ -36,10 +36,10 @@ def get_material_parser() -> BaseParser:
 # Нормы и обоснование — в docs/estimation-rules.md (источник правды).
 # electric: (basic, extended); plumbing: число точек (0, если недоступно для типа).
 ELECTRICAL_POINTS = {
-    "living":   (4, 8),
-    "kitchen":  (6, 10),
-    "bathroom": (3, 5),
-    "hallway":  (2, 4),
+    "living":   (10, 15),
+    "kitchen":  (15, 25),
+    "bathroom": (5, 8),
+    "hallway":  (4, 6),
 }
 PLUMBING_POINTS = {
     "kitchen":  1,

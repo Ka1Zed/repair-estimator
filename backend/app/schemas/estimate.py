@@ -24,6 +24,11 @@ class RepairOptions(BaseModel):
     ceiling: Optional[str] = None
     electric: Optional[str] = None
     plumbing: Optional[bool] = False
+    # Обои под рисунок (раппорт): +30% к расходу рулонов на подгонку. См. estimation-rules.md.
+    wallpaper_pattern: Optional[bool] = False
+    # Пористое/сильно впитывающее основание (газобетон, старая штукатурка, перед наливным полом):
+    # грунтовка в 2 слоя вместо 1. См. estimation-rules.md.
+    primer_two_coats: Optional[bool] = False
 
 class EstimateRequest(BaseModel):
     city: str

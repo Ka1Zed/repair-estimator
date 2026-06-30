@@ -105,10 +105,11 @@ def seed_test_data(session):
         {"name": "Краска для стен", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9},
         {"name": "Краска потолочная", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9},
         {"name": "Грунтовка", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10},
-        {"name": "Шпаклевка", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
-        {"name": "Ламинат", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.08, "package_size": 2.0},
+        {"name": "Шпаклевка стартовая", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30},
+        {"name": "Шпаклевка финишная", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
+        {"name": "Ламинат", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
         {"name": "Плинтус", "category": "floor", "unit": "м", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
-        {"name": "Плитка", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 1.2},
+        {"name": "Плитка", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 1.2},
         {"name": "Плиточный клей", "category": "tile", "unit": "кг", "consumption_per_m2": 4.5, "waste_factor": 1.1, "package_size": 25},
         {"name": "Затирка", "category": "tile", "unit": "кг", "consumption_per_m2": 0.4, "waste_factor": 1.1, "package_size": 2},
         {"name": "Обои", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1},
@@ -139,6 +140,7 @@ def seed_test_data(session):
         {"name": "Укладка ламината", "specialist_type": "Укладчик", "unit": "м²"},
         {"name": "Укладка плитки", "specialist_type": "Плиточник", "unit": "м²"},
         {"name": "Электромонтаж", "specialist_type": "Электрик", "unit": "точка"},
+        {"name": "Штробление", "specialist_type": "Электрик", "unit": "м"},
         {"name": "Сантехнические работы", "specialist_type": "Сантехник", "unit": "точка"},
     ]
     for s in services_data:

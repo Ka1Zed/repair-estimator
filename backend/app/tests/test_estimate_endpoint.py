@@ -153,7 +153,7 @@ def test_single_room_exact_values():
 
     # Материалы: проверяем ламинат (округление до упаковок)
     laminate = next(m for m in data["materials"] if m["name"] == "Ламинат")
-    # Площадь пола 12, запас 8% -> 12.96, package_size=2.0 -> 6.48 -> ceil -> 7 упаковок
+    # Площадь пола 12, запас 15% -> 13.8, package_size=2.0 -> 6.9 -> ceil -> 7 упаковок
     # Итоговое количество = 7 * 2.0 = 14.0 (в базовых единицах)
     assert laminate["quantity"] == pytest.approx(14.0, 0.01)
     # Проверим, что цена за единицу и итоговая сумма не нулевые
@@ -216,10 +216,10 @@ def test_two_rooms_grouping_and_rounding():
     assert response.status_code == 200
     data = response.json()
 
-    # Ламинат: на одну комнату 6.48 упаковок (ceil -> 7), на две комнаты 12.96 упаковок (ceil -> 13)
-    # Итоговое количество = 13 * 2.0 = 26.0
+    # Ламинат: на одну комнату 6.9 упаковок (ceil -> 7), на две комнаты 13.8 упаковок (ceil -> 14)
+    # Итоговое количество = 14 * 2.0 = 28.0
     laminate = next(m for m in data["materials"] if m["name"] == "Ламинат")
-    assert laminate["quantity"] == pytest.approx(26.0, 0.01)
+    assert laminate["quantity"] == pytest.approx(28.0, 0.01)
 
     # Проверка, что материалы сгруппированы (должна быть одна строка ламината)
     assert len([m for m in data["materials"] if m["name"] == "Ламинат"]) == 1
@@ -390,11 +390,16 @@ def test_full_workset_has_electric_and_plumbing():
     electric = next((x for x in labor if x["service"] == "Электромонтаж"), None)
     plumbing = next((x for x in labor if x["service"] == "Сантехнические работы"), None)
 
-    # Объём по дефолтам room_type=bathroom: электрика extended = 5, сантехника = 3.
-    assert electric is not None and electric["volume"] == pytest.approx(5.0)
+    # Объём по дефолтам room_type=bathroom: электрика extended = 8, сантехника = 3.
+    assert electric is not None and electric["volume"] == pytest.approx(8.0)
     assert plumbing is not None and plumbing["volume"] == pytest.approx(3.0)
     assert electric["total_avg"] > 0 and plumbing["total_avg"] > 0
     assert electric["unit"] == "точка" and plumbing["unit"] == "точка"
+
+    # Штроба — отдельная строка от точки: 8 точек × 2 м/точка = 16 м.
+    grooving = next((x for x in labor if x["service"] == "Штробление"), None)
+    assert grooving is not None and grooving["volume"] == pytest.approx(16.0)
+    assert grooving["unit"] == "м" and grooving["total_avg"] > 0
 
     # Ни материалы, ни работы не остаются без цены на боевом наборе.
     for row in data["materials"] + data["labor"]:

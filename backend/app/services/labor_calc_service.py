@@ -33,7 +33,12 @@ S_PUTTY_WALLS   = "Шпаклевка стен"
 S_LAY_LAMINATE  = "Укладка ламината"
 S_LAY_TILE      = "Укладка плитки"
 S_ELECTRIC      = "Электромонтаж"
+S_GROOVING      = "Штробление"
 S_PLUMBING      = "Сантехнические работы"
+
+# Норма погонажа штробы на одну точку электрики (м/точка) — см. estimation-rules.md.
+# Штробу считаем ОТДЕЛЬНОЙ строкой от точки, объём масштабируется от числа точек.
+GROOVE_M_PER_POINT = Decimal("2.0")
 
 
 def _labor_selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tuple]:
@@ -81,6 +86,8 @@ def _labor_selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> L
         pts = D(geom.get("electrical_points"))
         if pts > 0:
             sel.append((S_ELECTRIC, pts))
+            # Штроба — отдельная строка от точки: погонаж = точки × норма (м/точка).
+            sel.append((S_GROOVING, pts * GROOVE_M_PER_POINT))
 
     # --- сантехника ---
     if repair_options.get("plumbing"):

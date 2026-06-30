@@ -133,6 +133,9 @@ def quantity_of(
 
     if unit == "л":
         layers = D(LAYERS.get(material.name, 1))
+        # Пористое основание → грунт в 2 слоя (см. estimation-rules.md).
+        if material.name == M_PRIMER and repair_options.get("primer_two_coats"):
+            layers = Decimal(2)
         return area * layers * c * w
     if unit in ("кг", "м²"):
         return area * (c if c > 0 else Decimal(1)) * w

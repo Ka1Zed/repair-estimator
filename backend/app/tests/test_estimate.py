@@ -97,6 +97,30 @@ class TestMaterialCalc:
         assert patterned_wp['quantity'] == Decimal('13.8996')
         assert patterned_wp['quantity'] == plain_wp['quantity'] * Decimal('1.3')
 
+    def test_primer_two_coats_doubles_primer(self, db_session):
+        """primer_two_coats=True кладёт грунт в 2 слоя — ровно ×2 к расходу грунтовки."""
+        geometry = {
+            'floor_area': Decimal('20.0'),
+            'ceiling_area': Decimal('20.0'),
+            'wall_area': Decimal('48.6'),
+            'perimeter': Decimal('18.0'),
+            'door_width_sum': Decimal('1.2'),
+        }
+        base_opts = {'floor': None, 'walls': 'paint', 'ceiling': None}
+
+        one_coat = calculate_materials(geometry, base_opts, db_session)
+        two_coats = calculate_materials(
+            geometry, {**base_opts, 'primer_two_coats': True}, db_session
+        )
+
+        primer_1 = next(m for m in one_coat if m['name'] == 'Грунтовка')
+        primer_2 = next(m for m in two_coats if m['name'] == 'Грунтовка')
+
+        # 1 слой: 48.6 * 0.12 * 1.1 = 6.4152; 2 слоя: ×2 = 12.8304
+        assert primer_1['quantity'] == Decimal('6.4152')
+        assert primer_2['quantity'] == Decimal('12.8304')
+        assert primer_2['quantity'] == primer_1['quantity'] * Decimal('2')
+
 
 
 class TestLaborCalc:

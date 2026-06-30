@@ -8,7 +8,12 @@ from decimal import Decimal
 import pytest
 
 from app.parsers import megastroy_parser
-from app.parsers.megastroy_parser import CATEGORY_MAP, MegastroyParser, _parse_page
+from app.parsers.megastroy_parser import (
+    CATEGORY_MAP,
+    MegastroyParser,
+    _filter_outliers,
+    _parse_page,
+)
 
 PAGE_URL = "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"
 
@@ -91,6 +96,51 @@ def test_source_url_falls_back_to_category_when_no_link(monkeypatch):
     parsed = MegastroyParser().fetch_price("Краска для стен")
 
     assert parsed.source_url == CATEGORY_MAP["Краска для стен"]
+
+
+def _items(*prices: str) -> list[tuple[Decimal, str | None]]:
+    return [(Decimal(p), f"/catalog/x/{p}") for p in prices]
+
+
+def test_filter_outliers_drops_high_designer_paint():
+    # Бытовые интерьерные краски в узкой полосе + один дизайнерский выброс 14999.
+    items = _items("175", "200", "210", "220", "230", "250", "14999")
+    filtered = _filter_outliers(items)
+    prices = [p for p, _ in filtered]
+    assert Decimal("14999") not in prices
+    assert max(prices) / min(prices) < 4  # вилка сузилась с ~85× до разумной
+
+
+def test_filter_outliers_keeps_small_sample():
+    # На выборке < 4 квартили бессмысленны — ничего не отсекаем.
+    items = _items("100", "9000", "14999")
+    assert _filter_outliers(items) == items
+
+
+def test_filter_outliers_keeps_equal_prices():
+    # Все цены равны → IQR=0 → отсекать нечего, выборка не должна опустеть.
+    items = _items("250", "250", "250", "250")
+    assert _filter_outliers(items) == items
+
+
+def test_fetch_price_excludes_outliers_from_spread_and_source(monkeypatch):
+    # Выброс 14999 не должен попасть ни в max, ни в товар-представитель (#197).
+    html = _page(
+        _item("175", "/catalog/x/grunt"),
+        _item("200", "/catalog/x/kraska-a"),
+        _item("210", "/catalog/x/kraska-b"),
+        _item("220", "/catalog/x/kraska-c"),
+        _item("230", "/catalog/x/kraska-d"),
+        _item("250", "/catalog/x/kraska-e"),
+        _item("14999", "/catalog/x/designer"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Краска для стен")
+
+    assert parsed.price_max == Decimal("250")
+    assert parsed.price_max / parsed.price_min < 4
+    assert "designer" not in (parsed.source_url or "")
 
 
 def test_unknown_material_raises():

@@ -26,7 +26,8 @@ def _vision_prompt(width: int, height: int) -> str:
 
 Поля:
 - corners_px: углы внутреннего контура стен комнаты по порядку обхода ПО ЧАСОВОЙ стрелке,
-  координаты в пикселях относительно изображения {width}x{height}. Минимум 3, обычно 4.
+  каждый угол — объект {{"x": <px>, "y": <px>}} в пикселях относительно изображения
+  {width}x{height}. Минимум 3, обычно 4.
 - edge_dimensions: размеры, которые ты ТОЧНО прочитал на чертеже, привязанные к рёбрам.
   Ребро соединяет corners_px[from_index] и corners_px[to_index] (это соседние углы).
   length_m — длина ребра в МЕТРАХ (переведи: 3200мм → 3.2; 320см → 3.2; «3,2 м» → 3.2).
@@ -427,11 +428,18 @@ class BlueprintService:
             return []
         result = []
         for p in raw:
+            # Vision-модель без JSON-схемы (Claude/Ollama) возвращает угол то как
+            # {"x":..,"y":..}, то как [x, y] — принимаем оба, иначе контур теряется.
             if isinstance(p, dict) and "x" in p and "y" in p:
-                try:
-                    result.append({"x": float(p["x"]), "y": float(p["y"])})
-                except (TypeError, ValueError):
-                    pass
+                x, y = p["x"], p["y"]
+            elif isinstance(p, (list, tuple)) and len(p) == 2:
+                x, y = p[0], p[1]
+            else:
+                continue
+            try:
+                result.append({"x": float(x), "y": float(y)})
+            except (TypeError, ValueError):
+                pass
         return result
 
     def _scale_from_edges(self, raw: Any, corners_px: List[Dict[str, float]]) -> Optional[float]:

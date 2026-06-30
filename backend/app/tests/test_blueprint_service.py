@@ -78,6 +78,17 @@ def test_fewer_than_three_corners_not_success():
     assert any("контур" in w.lower() for w in r["warnings"])
 
 
+def test_corners_accept_xy_array_format():
+    """Vision-модель без схемы (Claude/Ollama) может вернуть углы как [x, y],
+    а не {"x","y"} — оба формата дают контур, иначе он молча теряется."""
+    arr = [[100, 100], [500, 100], [500, 400], [100, 400]]
+    r = _svc()._normalize_extract({"corners_px": arr}, (800, 600))
+    assert r["success"] is True
+    assert len(r["points"]) == 4
+    assert r["points"][0]["nx"] == 0.125  # 100/800
+    assert r["points"][1]["nx"] == 0.625  # 500/800
+
+
 def test_garbage_input_does_not_crash():
     r = _svc()._normalize_extract({}, (800, 600))
     assert r["success"] is False

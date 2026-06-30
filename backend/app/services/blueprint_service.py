@@ -91,9 +91,10 @@ class BlueprintService:
         # gemini-2.5-flash по умолчанию: gemini-2.5-pro недоступен на бесплатном
         # тарифе (free-tier quota = 0), нужен платный проект. Переопределяется env.
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        # Модель Claude (fallback/альтернатива). Дефолт — sonnet (баланс цена/качество);
-        # claude-haiku-4-5 дешевле, claude-opus-4-8 точнее и дороже.
-        self.claude_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+        # Модель Claude (основной путь распознавания). Дефолт — claude-sonnet-5
+        # (vision + дёшево для агентных задач); claude-haiku-4-5 дешевле,
+        # claude-opus-4-8 точнее и дороже.
+        self.claude_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 
     def process_blueprint(self, file_bytes: bytes, filename: str) -> Dict[str, Any]:
         logger.debug(f"START process_blueprint: {filename}")
@@ -140,11 +141,13 @@ class BlueprintService:
         return Image.open(io.BytesIO(file_bytes)).convert("RGB")
 
     def _choose_method(self) -> str:
+        # Claude — основной путь; Gemini понижен до fallback (датацентровые/
+        # региональные 403 и квоты free-tier). Локалка (Ollama/CubiCasa) — по roadmap.
+        if self.anthropic_key:
+            return "claude"
         gemini_enabled = os.getenv("GEMINI_ENABLED", "true").lower() != "false"
         if gemini_enabled and self.gemini_key and self._is_gemini_reachable():
             return "gemini"
-        if self.anthropic_key:
-            return "claude"
         if self._is_ollama_available():
             return "ollama"
         return "none"

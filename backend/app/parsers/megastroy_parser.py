@@ -57,21 +57,32 @@ def _encode_url(url: str) -> str:
     return base + "?" + quote(query, safe="=&[]")
 
 
+def _is_real_href(href: str | None) -> bool:
+    # Внутри карточки есть якоря-кнопки (сравнить/избранное/наличие) с href
+    # "javascript:" или "#" — это не ссылка на товар. Берём только настоящие адреса.
+    if not href:
+        return False
+    h = href.strip().lower()
+    return not (h.startswith(("javascript:", "#", "mailto:", "tel:")) or h == "")
+
+
 def _item_url(item, page_url: str) -> str | None:
     # Ссылка на карточку товара внутри одного .products-list__item.
-    # Микроразметка schema.org даёт itemprop="url" (на <a>/<link> в href или на
-    # <meta> в content). Если её нет — берём первую ссылку на товар внутри карточки.
-    # Относительный путь приводим к абсолютному по адресу страницы каталога.
-    el = item.select_one('[itemprop="url"]')
-    href = None
-    if el:
-        href = el.get("href") or el.get("content")
-    if not href:
-        link = item.select_one("a[href]")
-        href = link.get("href") if link else None
-    if not href:
+    # В вёрстке Мегастроя карточка ведёт на /products/<id> якорем
+    # .js-search-product-link; первыми же в DOM идут кнопки-заглушки с
+    # href="javascript:" (сравнение, избранное) — их брать нельзя.
+    link = item.select_one("a.js-search-product-link[href]")
+    href = link.get("href") if link else None
+    if not _is_real_href(href):
+        # Класс мог измениться — берём первый якорь с настоящим адресом.
+        href = next(
+            (a.get("href") for a in item.select("a[href]") if _is_real_href(a.get("href"))),
+            None,
+        )
+    if not _is_real_href(href):
         return None
-    return urljoin(page_url, href.strip())
+    abs_url = urljoin(page_url, href.strip())
+    return abs_url if abs_url.startswith(("http://", "https://")) else None
 
 
 def _parse_page(html: str, page_url: str) -> list[tuple[Decimal, str | None]]:

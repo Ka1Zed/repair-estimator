@@ -14,9 +14,13 @@ PAGE_URL = "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"
 
 
 def _item(price: str, href: str | None) -> str:
-    link = f'<a itemprop="url" href="{href}">товар</a>' if href else ""
+    # Карточка Мегастроя: первыми идут кнопки-заглушки с href="javascript:"
+    # (сравнить/избранное), реальная ссылка на товар — .js-search-product-link.
+    link = f'<a class="js-search-product-link" href="{href}">товар</a>' if href else ""
     return (
         '<div class="products-list__item">'
+        '<a class="js-compare-product" href="javascript:"></a>'
+        '<a class="js-favorite" href="javascript:"></a>'
         f"{link}"
         f'<meta itemprop="price" content="{price}">'
         "</div>"

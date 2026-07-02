@@ -7,6 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.parsers.base import BaseParser, ParsedPrice
+from app.parsers.labor_table_parser import LABOR_SERVICE_MAP, _matches
 
 logger = logging.getLogger(__name__)
 
@@ -21,50 +22,8 @@ HEADERS = {
 }
 REQUEST_TIMEOUT = 10
 
-# Карта: наша услуга -> правила отбора строк прайса
-#   include_all  — все эти слова должны встретиться в названии
-#   include_any  — хотя бы одно из этих (если список не пуст)
-#   exclude      — ни одного из этих не должно быть
-SERVICE_MAP = {
-    "Покраска стен": {
-        "include_all": ["стен"],
-        "include_any": ["окраск", "покраск"],
-        "exclude": ["демонтаж", "очистк", "багет", "откос", "короб", "распылител",
-                    "колонн", "металлоконструк", "шпатлевка", "шпаклевка",
-                    "ошкуривание", "шлифовк", "грунтовк"],
-    },
-    "Покраска потолка": {
-        "include_all": ["потолк"],
-        "include_any": ["окраск", "покраск"],
-        "exclude": ["демонтаж", "очистк", "багет", "плинтус", "распылител",
-                    "шпатлевка", "шпаклевка", "ошкуривание", "шлифовк", "грунтовк"],
-    },
-    "Шпаклевка стен": {
-        "include_all": ["стен"],
-        "include_any": ["шпатлевка", "шпаклевка"],
-        "exclude": ["демонтаж", "очистк", "откос", "короб", "потолк"],
-    },
-    "Укладка ламината": {
-        "include_all": ["ламинат"],
-        "include_any": ["укладк"],
-        "exclude": ["разборк", "демонтаж"],
-    },
-    "Укладка плитки": {
-        "include_all": ["плитк"],
-        "include_any": ["облицовк", "укладк"],
-        "exclude": ["демонтаж", "расчистк", "затирк", "рез", "уголк", "очистк"],
-    },
-    "Электромонтаж": {
-        "include_all": [],
-        "include_any": ["розетк", "выключател", "электр"],
-        "exclude": ["демонтаж", "домофон", "звонок", "теплого пола", "сверление"],
-    },
-    "Сантехнические работы": {
-        "include_all": [],
-        "include_any": ["смесител", "унитаз", "установка бачк"],
-        "exclude": ["демонтаж", "демонтах"],
-    },
-}
+# Правила отбора строк прайса общие для всех парсеров работ — единый источник
+# LABOR_SERVICE_MAP в labor_table_parser (чтобы карты не расходились).
 
 
 def _parse_price(text: str) -> Decimal | None:
@@ -75,18 +34,11 @@ def _parse_price(text: str) -> Decimal | None:
     return Decimal(digits)
 
 
-def _matches(name: str, rule: dict) -> bool:
-    if any(w in name for w in rule["exclude"]):
-        return False
-    if rule["include_all"] and not all(w in name for w in rule["include_all"]):
-        return False
-    if rule["include_any"] and not any(w in name for w in rule["include_any"]):
-        return False
-    return True
-
-
 class RembrigadaParser(BaseParser):
     source_name = "company_price"
+    # rembrigada116.ru — казанская компания: помимо базового (безрегионального)
+    # прогона парсер участвует в региональном как второй источник по Казани.
+    region = "Казань"
 
     def __init__(self):
         self._rows_cache = None  # таблицу качаем один раз на все услуги
@@ -109,10 +61,10 @@ class RembrigadaParser(BaseParser):
         return rows
 
     def fetch_price(self, material_name: str) -> ParsedPrice:
-        if material_name not in SERVICE_MAP:
+        if material_name not in LABOR_SERVICE_MAP:
             raise ValueError(f"Нет правил для услуги '{material_name}'")
 
-        rule = SERVICE_MAP[material_name]
+        rule = LABOR_SERVICE_MAP[material_name]
         rows = self._load_rows()
 
         prices = [price for (name, price) in rows if _matches(name, rule)]

@@ -4,12 +4,13 @@ import logging
 from app.parsers.megastroy_parser import MegastroyParser, CATEGORY_MAP
 from app.services.price_aggregator_service import get_price, update_labor_price
 
-from app.parsers.rembrigada_parser import RembrigadaParser, SERVICE_MAP
+from app.parsers.rembrigada_parser import RembrigadaParser
 from app.parsers.labor_table_parser import LABOR_SERVICE_MAP
 from app.parsers.garantstroikompleks_parser import GarantStroiParser
 from app.parsers.remont_uroven_parser import RemontUrovenParser
 from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
 from app.parsers.prorabneva_parser import ProrabnevaParser
+from app.parsers.kaz_stroyka_parser import KazStroykaParser
 
 # Настройка логирования — чтобы видеть прогресс в консоли
 logging.basicConfig(
@@ -53,8 +54,8 @@ def update_prices():
     # услуги по прайсам ремонтных компаний
 
     labor_parser = RembrigadaParser()
-    logger.info(f"Обновление цен услуг: {len(SERVICE_MAP)} позиций")
-    for service in SERVICE_MAP:
+    logger.info(f"Обновление цен услуг: {len(LABOR_SERVICE_MAP)} позиций")
+    for service in LABOR_SERVICE_MAP:
         try:
             price = update_labor_price(service, parser=labor_parser)
             if price:
@@ -72,6 +73,7 @@ def update_prices():
     regional_labor_parsers = [
         GarantStroiParser(), RemontUrovenParser(),   # Москва
         OtdelkaSpbParser(), ProrabnevaParser(),       # Санкт-Петербург
+        KazStroykaParser(), RembrigadaParser(),       # Казань
     ]
     for labor_parser in regional_labor_parsers:
         logger.info(

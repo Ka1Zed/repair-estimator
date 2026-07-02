@@ -27,8 +27,9 @@ MIN_PRICE = Decimal(10)
 #   include_all — все эти слова должны встретиться в названии
 #   include_any — хотя бы одно из этих (если список не пуст)
 #   exclude     — ни одного из этих не должно быть
-# Подход переиспользован из RembrigadaParser; словарь расширен под верстку
-# московского и питерского прайсов (напр. «Настил ламината», «шпатлёвка» с ё).
+# Единый словарь правил для всех парсеров работ (в т.ч. RembrigadaParser) —
+# чтобы карты не расходились. Расширен под вёрстку московского, питерского и
+# казанского прайсов (напр. «Настил ламината», «шпатлёвка» с ё, «шпаклевание»).
 LABOR_SERVICE_MAP = {
     "Покраска стен": {
         "include_all": ["стен"],
@@ -47,8 +48,10 @@ LABOR_SERVICE_MAP = {
     },
     "Шпаклевка стен": {
         "include_all": ["стен"],
-        "include_any": ["шпатлевка", "шпаклевка", "шпатлёвка"],
-        "exclude": ["демонтаж", "очистк", "откос", "короб", "потолк", "галтел"],
+        # «шпаклеван»/«шпатлеван» — казанский прайс пишет «базовое шпаклевание стен»
+        "include_any": ["шпатлевка", "шпаклевка", "шпатлёвка", "шпаклеван", "шпатлеван"],
+        "exclude": ["демонтаж", "очистк", "откос", "короб", "потолк", "галтел",
+                    "армирован"],
     },
     "Укладка ламината": {
         "include_all": ["ламинат"],
@@ -64,8 +67,13 @@ LABOR_SERVICE_MAP = {
     "Электромонтаж": {
         "include_all": [],
         "include_any": ["розетк", "выключател", "электр"],
+        # Услуга считается «за точку» (docs/estimation-rules.md) — исключаем
+        # крупные работы не про точки: щиты, котлы, зарядные станции и т.п.
         "exclude": ["демонтаж", "домофон", "звонок", "теплого пола", "сверление",
-                    "водогре"],
+                    "водогре", "водонагрева", "конвектор", "электрощит", "котл",
+                    "электромобил",
+                    "генератор", "расходомер", "гидромассаж", "кондиционер",
+                    "сплит"],
     },
     "Сантехнические работы": {
         "include_all": [],
@@ -113,36 +121,58 @@ class LaborTableParser(BaseParser):
     # Регион, к которому относятся цены сайта (пишется в LaborPrice.region).
     region: str
 
-    def __init__(self):
-        self._rows_cache = None  # таблицу качаем один раз на все услуги
+    # Таймаут запроса; подкласс может увеличить для тяжёлых страниц.
+    request_timeout = REQUEST_TIMEOUT
 
-    def _get_html(self) -> str:
-        resp = requests.get(self.PRICE_URL, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+    def __init__(self):
+        self._rows_cache = None  # таблицы качаем один раз на все услуги
+
+    def _page_urls(self) -> list[str]:
+        # По умолчанию прайс на одной странице; подкласс может вернуть несколько
+        # (у части сайтов электрика/сантехника опубликованы отдельными страницами).
+        return [self.PRICE_URL]
+
+    def _clean_name(self, name: str) -> str:
+        # Хук для подкласса: убрать из названия работы мусор конкретной вёрстки
+        # (например, раскрытое описание состава работ), чтобы include/exclude
+        # слова матчились по названию, а не по описанию.
+        return name
+
+    def _get_html(self, url: str) -> str:
+        resp = requests.get(url, headers=HEADERS, timeout=self.request_timeout)
         resp.raise_for_status()
         return resp.text
 
-    def _load_rows(self) -> list[tuple[str, Decimal]]:
+    def _load_rows(self) -> list[tuple[str, Decimal, str]]:
         if self._rows_cache is not None:
             return self._rows_cache
-        soup = BeautifulSoup(self._get_html(), "html.parser")
         rows = []
-        for tr in soup.select("tr"):
-            cells = [td.get_text(" ", strip=True) for td in tr.select("td")]
-            if len(cells) < 2:
+        for url in self._page_urls():
+            try:
+                html = self._get_html(url)
+            except requests.RequestException:
+                # Одна недоступная страница не должна ронять остальные: услуги
+                # без строк уйдут в RuntimeError -> fallback на seed (#159).
+                logger.warning(f"{self.source_name}: страница {url} недоступна")
                 continue
-            name = next((c for c in cells if re.search(r"[А-Яа-яA-Za-z]", c)), None)
-            if not name:
-                continue
-            # Цена — последняя ячейка с числом >= MIN_PRICE (последней может быть
-            # единица измерения «м2» -> 2, её пропускаем).
-            price = None
-            for cell in reversed(cells):
-                value = _parse_price(cell)
-                if value is not None and value >= MIN_PRICE:
-                    price = value
-                    break
-            if price:
-                rows.append((name.lower(), price))
+            soup = BeautifulSoup(html, "html.parser")
+            for tr in soup.select("tr"):
+                cells = [td.get_text(" ", strip=True) for td in tr.select("td")]
+                if len(cells) < 2:
+                    continue
+                name = next((c for c in cells if re.search(r"[А-Яа-яA-Za-z]", c)), None)
+                if not name:
+                    continue
+                # Цена — последняя ячейка с числом >= MIN_PRICE (последней может
+                # быть единица измерения «м2» -> 2, её пропускаем).
+                price = None
+                for cell in reversed(cells):
+                    value = _parse_price(cell)
+                    if value is not None and value >= MIN_PRICE:
+                        price = value
+                        break
+                if price:
+                    rows.append((self._clean_name(name.lower()), price, url))
         self._rows_cache = rows
         return rows
 
@@ -153,11 +183,12 @@ class LaborTableParser(BaseParser):
         rule = LABOR_SERVICE_MAP[material_name]
         rows = self._load_rows()
 
-        prices = [price for (name, price) in rows if _matches(name, rule)]
+        matched = [(price, url) for (name, price, url) in rows if _matches(name, rule)]
 
-        if not prices:
+        if not matched:
             raise RuntimeError(f"Не найдено строк прайса для '{material_name}'")
 
+        prices = [price for (price, _) in matched]
         price_min = min(prices)
         price_max = max(prices)
         price_avg = Decimal(round(statistics.mean(prices)))
@@ -166,10 +197,10 @@ class LaborTableParser(BaseParser):
             f"{self.source_name}: '{material_name}' — {len(prices)} строк, "
             f"min={price_min}, avg={price_avg}, max={price_max}"
         )
-        # Все услуги берём из одного прайс-листа — ссылка на него общая.
+        # Ссылка — страница прайса, на которой нашлась услуга.
         return ParsedPrice(
             price_min=price_min,
             price_avg=price_avg,
             price_max=price_max,
-            source_url=self.PRICE_URL,
+            source_url=matched[0][1],
         )

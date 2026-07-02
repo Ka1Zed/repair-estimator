@@ -11,6 +11,7 @@ import pytest
 from app.db.models import LaborPrice, LaborService, PriceSource
 from app.parsers.base import BaseParser, ParsedPrice
 from app.parsers.garantstroikompleks_parser import GarantStroiParser
+from app.parsers.kaz_stroyka_parser import KazStroykaParser
 from app.parsers.labor_table_parser import _parse_price
 from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
 from app.parsers.prorabneva_parser import ProrabnevaParser
@@ -33,6 +34,17 @@ SERVICES_BY_PARSER = {
                        "Сантехнические работы"],
     "prorabneva.ru": ["Покраска стен", "Покраска потолка", "Укладка ламината",
                       "Укладка плитки", "Электромонтаж", "Сантехнические работы"],
+    "kaz-stroyka.ru": ["Покраска стен", "Покраска потолка", "Шпаклевка стен",
+                       "Укладка ламината", "Укладка плитки", "Электромонтаж",
+                       "Сантехнические работы"],
+}
+
+# Фикстура — имя файла (прайс на одной странице) либо словарь url -> файл
+# (kaz-stroyka.ru публикует отделку, электрику и сантехнику отдельными страницами).
+KAZ_STROYKA_FIXTURES = {
+    KazStroykaParser.PRICE_URL: "kaz-stroyka-otdelka.html",
+    KazStroykaParser.EXTRA_PAGE_URLS[0]: "kaz-stroyka-elektrika.html",
+    KazStroykaParser.EXTRA_PAGE_URLS[1]: "kaz-stroyka-santekhnika.html",
 }
 
 CASES = [
@@ -40,14 +52,17 @@ CASES = [
     (RemontUrovenParser, "remont-uroven.html", "Москва", "remont-uroven.ru"),
     (OtdelkaSpbParser, "otdelka-spb.html", "Санкт-Петербург", "otdelka-spb.ru"),
     (ProrabnevaParser, "prorabneva.html", "Санкт-Петербург", "prorabneva.ru"),
+    (KazStroykaParser, KAZ_STROYKA_FIXTURES, "Казань", "kaz-stroyka.ru"),
 ]
 
 
-def _parser_on_fixture(parser_cls, fixture_name):
+def _parser_on_fixture(parser_cls, fixture):
     '''Парсер, читающий HTML из фикстуры вместо сети.'''
     parser = parser_cls()
-    html = (FIXTURES / fixture_name).read_text(encoding="utf-8")
-    parser._get_html = lambda: html
+    if isinstance(fixture, str):
+        fixture = {parser.PRICE_URL: fixture}
+    files = {url: FIXTURES / name for url, name in fixture.items()}
+    parser._get_html = lambda url: files[url].read_text(encoding="utf-8")
     return parser
 
 
@@ -69,14 +84,15 @@ def test_parser_extracts_positive_prices(parser_cls, fixture, region, source):
         assert isinstance(parsed, ParsedPrice), service
         assert parsed.price_min > 0, service
         assert parsed.price_min <= parsed.price_avg <= parsed.price_max, service
-        # Ссылка на прайс проставлена (для источника в смете).
-        assert parsed.source_url == parser.PRICE_URL, service
+        # Ссылка на прайс проставлена (для источника в смете) и ведёт на одну
+        # из страниц прайса этого сайта.
+        assert parsed.source_url in parser._page_urls(), service
 
 
 def test_unit_cell_not_parsed_as_price():
     '''Ячейка-единица «м2» (цифра 2) не должна стать ценой: берём цену >= MIN_PRICE.'''
     parser = ProrabnevaParser()
-    parser._get_html = lambda: (
+    parser._get_html = lambda url: (
         "<html><body><table>"
         "<tr><td>Настил ламината</td><td>600 руб. 534 руб. м2</td>"
         "<td>600 руб. 534 руб.</td><td>м2</td></tr>"
@@ -95,7 +111,39 @@ def test_parser_unknown_service_raises():
 def test_parser_no_matching_rows_raises():
     '''Пустой прайс → RuntimeError; агрегатор поймает и уйдёт на seed (#159).'''
     parser = GarantStroiParser()
-    parser._get_html = lambda: "<html><body><table></table></body></html>"
+    parser._get_html = lambda url: "<html><body><table></table></body></html>"
+    with pytest.raises(RuntimeError):
+        parser.fetch_price("Покраска стен")
+
+
+# --- многостраничный прайс (kaz-stroyka.ru: отделка/электрика/сантехника) ---
+
+def test_multipage_source_url_points_to_service_page():
+    '''source_url ведёт на страницу, где услуга опубликована, а не на общий прайс.'''
+    parser = _parser_on_fixture(KazStroykaParser, KAZ_STROYKA_FIXTURES)
+    assert parser.fetch_price("Покраска стен").source_url == KazStroykaParser.PRICE_URL
+    assert (parser.fetch_price("Электромонтаж").source_url
+            == KazStroykaParser.EXTRA_PAGE_URLS[0])
+    assert (parser.fetch_price("Сантехнические работы").source_url
+            == KazStroykaParser.EXTRA_PAGE_URLS[1])
+
+
+def test_multipage_unavailable_page_does_not_break_others():
+    '''Недоступная страница отделки не роняет услуги с других страниц (#159):
+    электрика/сантехника парсятся, отделочные услуги — RuntimeError -> seed.'''
+    import requests
+
+    files = {url: FIXTURES / name for url, name in KAZ_STROYKA_FIXTURES.items()}
+
+    def get_html(url):
+        if url == KazStroykaParser.PRICE_URL:
+            raise requests.ConnectionError("страница недоступна")
+        return files[url].read_text(encoding="utf-8")
+
+    parser = KazStroykaParser()
+    parser._get_html = get_html
+    assert parser.fetch_price("Электромонтаж").price_min > 0
+    assert parser.fetch_price("Сантехнические работы").price_min > 0
     with pytest.raises(RuntimeError):
         parser.fetch_price("Покраска стен")
 

@@ -114,6 +114,11 @@ def seed_test_data(session):
         {"name": "Затирка", "category": "tile", "unit": "кг", "consumption_per_m2": 0.4, "waste_factor": 1.1, "package_size": 2},
         {"name": "Обои", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1},
         {"name": "Линолеум", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
+        # Инженерка (works.electric / works.plumbing) — количество из запроса, не по норме.
+        {"name": "Кабель электрический", "category": "electric", "unit": "м", "waste_factor": 1.1, "package_size": 1.0},
+        {"name": "Розетка", "category": "electric", "unit": "шт", "package_size": 1},
+        {"name": "Светильник", "category": "electric", "unit": "шт", "package_size": 1},
+        {"name": "Труба водопроводная", "category": "plumbing", "unit": "м", "waste_factor": 1.1, "package_size": 2.0},
     ]
     for m in materials_data:
         mat = Material(**m)
@@ -142,6 +147,11 @@ def seed_test_data(session):
         {"name": "Электромонтаж", "specialist_type": "Электрик", "unit": "точка"},
         {"name": "Штробление", "specialist_type": "Электрик", "unit": "м"},
         {"name": "Сантехнические работы", "specialist_type": "Сантехник", "unit": "точка"},
+        # Гранулярная инженерка works (#222).
+        {"name": "Прокладка кабеля", "specialist_type": "Электрик", "unit": "м"},
+        {"name": "Монтаж розетки", "specialist_type": "Электрик", "unit": "шт"},
+        {"name": "Монтаж светильника", "specialist_type": "Электрик", "unit": "шт"},
+        {"name": "Монтаж труб", "specialist_type": "Сантехник", "unit": "м"},
     ]
     for s in services_data:
         svc = LaborService(**s)

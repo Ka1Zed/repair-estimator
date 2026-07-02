@@ -30,6 +30,12 @@ M_TILE          = "Плитка"
 M_ADHESIVE      = "Плиточный клей"
 M_GROUT         = "Затирка"
 M_WALLPAPER     = "Обои"
+# Инженерка (works.electric / works.plumbing) — количество берётся из запроса,
+# НЕ через quantity_of (там unit «м» захардкожен под плинтус, заметка ревью #230).
+M_SOCKET        = "Розетка"
+M_LIGHT         = "Светильник"
+M_CABLE         = "Кабель электрический"
+M_PIPE          = "Труба водопроводная"
 
 # Сколько слоёв класть у материалов с unit='л' (для остальных не используется)
 LAYERS = {
@@ -150,6 +156,56 @@ def quantity_of(
         return area * c * w * pattern
     # неизвестная единица — безопасный дефолт
     return area * (c if c > 0 else Decimal(1)) * w
+
+
+def _material_row(material: Material, quantity: Decimal) -> Dict[str, Any]:
+    """Строка материала с готовым (уже посчитанным) количеством в базовых единицах."""
+    package_size = D(material.package_size)
+    pack_quantity = (quantity / package_size) if package_size > 0 else None
+    return {
+        "material_id": material.id,
+        "name": material.name,
+        "quantity": quantity,
+        "unit": material.unit,
+        "package_size": material.package_size,
+        "pack_quantity": pack_quantity,
+    }
+
+
+def calculate_engineering_materials(
+    sockets: Any,
+    lights: Any,
+    cable_m: Any,
+    pipe_m: Any,
+    db: Session,
+) -> List[Dict[str, Any]]:
+    """Материалы электрики/сантехники по явным числам из works (не через quantity_of).
+
+    Штучные позиции (розетка, светильник) — количество равно числу из запроса,
+    без норм расхода и без запаса. Погонаж (кабель, труба) — метраж × waste_factor;
+    труба округляется вверх до хлыста 2 м на общей агрегации (package_size = 2).
+    Мелочёвка (подрозетники, фитинги) отдельными строками не заводится — она в стоимости
+    работ. См. docs/estimation-rules.md.
+    """
+    result: List[Dict[str, Any]] = []
+    # (имя, количество, применять ли waste_factor) — штучные без запаса, погонаж с запасом.
+    specs = [
+        (M_SOCKET, sockets, False),
+        (M_LIGHT, lights, False),
+        (M_CABLE, cable_m, True),
+        (M_PIPE, pipe_m, True),
+    ]
+    for name, count, with_waste in specs:
+        qty = D(count)
+        if qty <= 0:
+            continue
+        material = db.query(Material).filter(Material.name == name).first()
+        if material is None:
+            continue
+        if with_waste:
+            qty = qty * (D(material.waste_factor) or Decimal(1))
+        result.append(_material_row(material, qty))
+    return result
 
 
 def calculate_materials(

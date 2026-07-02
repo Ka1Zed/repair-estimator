@@ -11,16 +11,32 @@
   {"material": "Краска потолочная", "source": "seed", "price_min": "250.00", "price_avg": "400.00", "price_max": "700.00", "region": null},
   {"material": "Линолеум", "source": "seed", "price_min": "300.00", "price_avg": "600.00", "price_max": "1500.00", "region": null},
   {"material": "Затирка", "source": "seed", "price_min": "70.00", "price_avg": "130.00", "price_max": "300.00", "region": null},
+  {"material": "Кабель электрический", "source": "seed", "price_min": "60.00", "price_avg": "100.00", "price_max": "180.00", "region": null},
+  {"material": "Розетка", "source": "seed", "price_min": "150.00", "price_avg": "350.00", "price_max": "900.00", "region": null},
+  {"material": "Светильник", "source": "seed", "price_min": "500.00", "price_avg": "1500.00", "price_max": "4000.00", "region": null},
+  {"material": "Труба водопроводная", "source": "seed", "price_min": "70.00", "price_avg": "120.00", "price_max": "250.00", "region": null},
 
   {"material": "Краска для стен", "source": "seed", "price_min": "320.00", "price_avg": "560.00", "price_max": "1020.00", "region": "Москва"},
   {"material": "Ламинат", "source": "seed", "price_min": "750.00", "price_avg": "1500.00", "price_max": "3100.00", "region": "Москва"},
   {"material": "Плитка", "source": "seed", "price_min": "650.00", "price_avg": "1300.00", "price_max": "3200.00", "region": "Москва"},
+  {"material": "Кабель электрический", "source": "seed", "price_min": "70.00", "price_avg": "115.00", "price_max": "205.00", "region": "Москва"},
+  {"material": "Розетка", "source": "seed", "price_min": "170.00", "price_avg": "390.00", "price_max": "1000.00", "region": "Москва"},
+  {"material": "Светильник", "source": "seed", "price_min": "570.00", "price_avg": "1700.00", "price_max": "4500.00", "region": "Москва"},
+  {"material": "Труба водопроводная", "source": "seed", "price_min": "80.00", "price_avg": "135.00", "price_max": "280.00", "region": "Москва"},
 
   {"material": "Краска для стен", "source": "seed", "price_min": "300.00", "price_avg": "520.00", "price_max": "940.00", "region": "Санкт-Петербург"},
   {"material": "Ламинат", "source": "seed", "price_min": "680.00", "price_avg": "1350.00", "price_max": "2800.00", "region": "Санкт-Петербург"},
   {"material": "Плитка", "source": "seed", "price_min": "560.00", "price_avg": "1150.00", "price_max": "2800.00", "region": "Санкт-Петербург"},
+  {"material": "Кабель электрический", "source": "seed", "price_min": "65.00", "price_avg": "105.00", "price_max": "190.00", "region": "Санкт-Петербург"},
+  {"material": "Розетка", "source": "seed", "price_min": "160.00", "price_avg": "370.00", "price_max": "950.00", "region": "Санкт-Петербург"},
+  {"material": "Светильник", "source": "seed", "price_min": "530.00", "price_avg": "1600.00", "price_max": "4200.00", "region": "Санкт-Петербург"},
+  {"material": "Труба водопроводная", "source": "seed", "price_min": "75.00", "price_avg": "125.00", "price_max": "265.00", "region": "Санкт-Петербург"},
 
   {"material": "Краска для стен", "source": "seed", "price_min": "260.00", "price_avg": "450.00", "price_max": "810.00", "region": "Казань"},
   {"material": "Ламинат", "source": "seed", "price_min": "550.00", "price_avg": "1100.00", "price_max": "2300.00", "region": "Казань"},
-  {"material": "Плитка", "source": "seed", "price_min": "470.00", "price_avg": "950.00", "price_max": "2300.00", "region": "Казань"}
+  {"material": "Плитка", "source": "seed", "price_min": "470.00", "price_avg": "950.00", "price_max": "2300.00", "region": "Казань"},
+  {"material": "Кабель электрический", "source": "seed", "price_min": "55.00", "price_avg": "90.00", "price_max": "160.00", "region": "Казань"},
+  {"material": "Розетка", "source": "seed", "price_min": "135.00", "price_avg": "320.00", "price_max": "810.00", "region": "Казань"},
+  {"material": "Светильник", "source": "seed", "price_min": "450.00", "price_avg": "1350.00", "price_max": "3600.00", "region": "Казань"},
+  {"material": "Труба водопроводная", "source": "seed", "price_min": "65.00", "price_avg": "110.00", "price_max": "225.00", "region": "Казань"}
 ]

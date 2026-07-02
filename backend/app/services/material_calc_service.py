@@ -130,8 +130,13 @@ def quantity_of(
     area: Decimal,
     geom: Dict[str, Any],
     repair_options: Dict[str, Any] | None = None,
-) -> Decimal:
-    """Количество в базовых единицах по формуле из estimation-rules.md (по unit)."""
+) -> tuple[Decimal, Decimal]:
+    """Количество в базовых единицах по формуле из estimation-rules.md (по unit).
+
+    Возвращает (quantity, base_quantity): base_quantity — до применения запаса
+    (и, для обоев под рисунок, до подгонки по раппорту), quantity = base_quantity × waste_factor
+    (у обоев под рисунок в waste_factor дополнительно вшит раппорт — см. #176).
+    """
     repair_options = repair_options or {}
     unit = material.unit
     c = D(material.consumption_per_m2)
@@ -142,23 +147,29 @@ def quantity_of(
         # Пористое основание → грунт в 2 слоя (см. estimation-rules.md).
         if material.name == M_PRIMER and repair_options.get("primer_two_coats"):
             layers = Decimal(2)
-        return area * layers * c * w
+        base = area * layers * c
+        return base * w, base
     if unit in ("кг", "м²"):
-        return area * (c if c > 0 else Decimal(1)) * w
+        base = area * (c if c > 0 else Decimal(1))
+        return base * w, base
     if unit == "м":  # плинтус: периметр − ширина дверей
         length = D(geom.get("perimeter")) - D(geom.get("door_width_sum"))
         if length < 0:
             length = Decimal(0)
-        return length * w
+        return length * w, length
     if unit == "рулон":  # обои: площадь_стен × (рулонов/м²) × запас
         # Обои под рисунок требуют подгонки по раппорту → дополнительный расход ×1.3.
         pattern = WALLPAPER_PATTERN_FACTOR if repair_options.get("wallpaper_pattern") else Decimal(1)
-        return area * c * w * pattern
+        base = area * c
+        return base * w * pattern, base
     # неизвестная единица — безопасный дефолт
-    return area * (c if c > 0 else Decimal(1)) * w
+    base = area * (c if c > 0 else Decimal(1))
+    return base * w, base
 
 
-def _material_row(material: Material, quantity: Decimal) -> Dict[str, Any]:
+def _material_row(
+    material: Material, quantity: Decimal, base_quantity: Decimal, waste_factor: Decimal
+) -> Dict[str, Any]:
     """Строка материала с готовым (уже посчитанным) количеством в базовых единицах."""
     package_size = D(material.package_size)
     pack_quantity = (quantity / package_size) if package_size > 0 else None
@@ -166,6 +177,8 @@ def _material_row(material: Material, quantity: Decimal) -> Dict[str, Any]:
         "material_id": material.id,
         "name": material.name,
         "quantity": quantity,
+        "base_quantity": base_quantity,
+        "waste_factor": waste_factor,
         "unit": material.unit,
         "package_size": material.package_size,
         "pack_quantity": pack_quantity,
@@ -202,9 +215,12 @@ def calculate_engineering_materials(
         material = db.query(Material).filter(Material.name == name).first()
         if material is None:
             continue
+        base_qty = qty
+        waste_factor = Decimal(1)
         if with_waste:
-            qty = qty * (D(material.waste_factor) or Decimal(1))
-        result.append(_material_row(material, qty))
+            waste_factor = D(material.waste_factor) or Decimal(1)
+            qty = qty * waste_factor
+        result.append(_material_row(material, qty, base_qty, waste_factor))
     return result
 
 
@@ -220,7 +236,8 @@ def calculate_materials(
     repair_options: {floor, walls, ceiling, electric, plumbing} (контракт api.md)
 
     Возвращает позиции с ДРОБНЫМ pack_quantity (округление — в B1-5):
-        material_id, name, quantity (Decimal), unit, package_size, pack_quantity
+        material_id, name, quantity (Decimal), base_quantity, waste_factor,
+        unit, package_size, pack_quantity
     """
     result: List[Dict[str, Any]] = []
 
@@ -230,9 +247,14 @@ def calculate_materials(
             # материала нет в БД (например, не засидован) — пропускаем
             continue
 
-        quantity = quantity_of(material, area, geometry, repair_options)
+        quantity, base_quantity = quantity_of(material, area, geometry, repair_options)
         if quantity <= 0:
             continue
+
+        # Эффективный запас = quantity / base_quantity — тем же числом, каким
+        # реально накрутили итог (включает и waste_factor материала, и раппорт
+        # обоев, если он применялся), без риска разойтись с quantity (#176).
+        waste_factor = (quantity / base_quantity) if base_quantity > 0 else Decimal(1)
 
         package_size = D(material.package_size)
         pack_quantity = (quantity / package_size) if package_size > 0 else None
@@ -241,6 +263,8 @@ def calculate_materials(
             "material_id": material.id,        # ключ группировки в B1-5
             "name": material.name,
             "quantity": quantity,              # дробное, Decimal
+            "base_quantity": base_quantity,    # до запаса, дробное
+            "waste_factor": waste_factor,      # quantity / base_quantity
             "unit": material.unit,
             "package_size": material.package_size,
             "pack_quantity": pack_quantity,    # дробное; ceil — в агрегации

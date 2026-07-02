@@ -106,6 +106,13 @@ def test_response_schema():
     for field in required_geo_fields:
         assert field in data["geometry"]
 
+    # Детализация строки материала (#176): состав quantity должен быть виден фронту.
+    required_material_fields = ["base_quantity", "waste_factor", "package_size", "packs"]
+    assert len(data["materials"]) > 0
+    for material in data["materials"]:
+        for field in required_material_fields:
+            assert field in material
+
 
 def test_no_repair_type_required():
     """Класса ремонта в контракте больше нет: запрос без repair_type успешно считается (#222)."""
@@ -169,6 +176,13 @@ def test_single_room_exact_values():
     # Площадь пола 12, запас 15% -> 13.8, package_size=2.0 -> 6.9 -> ceil -> 7 упаковок
     # Итоговое количество = 7 * 2.0 = 14.0 (в базовых единицах)
     assert laminate["quantity"] == pytest.approx(14.0, 0.01)
+    # Детализация строки (#176): base_quantity (до запаса) * waste_factor округляется
+    # вверх до package_size и даёт итоговый quantity.
+    assert laminate["base_quantity"] == pytest.approx(12.0, 0.01)
+    assert laminate["waste_factor"] == pytest.approx(1.15, 0.01)
+    assert laminate["package_size"] == pytest.approx(2.0, 0.01)
+    assert laminate["packs"] == 7
+    assert laminate["quantity"] == pytest.approx(laminate["packs"] * laminate["package_size"], 0.001)
     # Проверим, что цена за единицу и итоговая сумма не нулевые
     assert laminate["price_avg"] > 0
     assert laminate["total_avg"] > 0

@@ -87,6 +87,9 @@ def _matches(name: str, rule: dict) -> bool:
 
 class RembrigadaParser(BaseParser):
     source_name = "company_price"
+    # rembrigada116.ru — казанская компания: помимо базового (безрегионального)
+    # прогона парсер участвует в региональном как второй источник по Казани.
+    region = "Казань"
 
     def __init__(self):
         self._rows_cache = None  # таблицу качаем один раз на все услуги

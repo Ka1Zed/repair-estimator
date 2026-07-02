@@ -73,7 +73,7 @@ def update_prices():
     regional_labor_parsers = [
         GarantStroiParser(), RemontUrovenParser(),   # Москва
         OtdelkaSpbParser(), ProrabnevaParser(),       # Санкт-Петербург
-        KazStroykaParser(),                           # Казань
+        KazStroykaParser(), RembrigadaParser(),       # Казань
     ]
     for labor_parser in regional_labor_parsers:
         logger.info(

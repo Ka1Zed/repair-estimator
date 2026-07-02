@@ -165,6 +165,10 @@ export function Workspace() {
         volume: `${formatQty(m.quantity)} ${m.unit}`,
         price: rub(m.price_avg),
         details: [
+          { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
+          { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
+          { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
+          { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
           { label: "Цена за единицу", value: rub(m.price_avg) },
           { label: "Итог по позиции", value: rub(m.total_avg) },
           { label: "Источник цены", value: m.source, url: m.source_url },

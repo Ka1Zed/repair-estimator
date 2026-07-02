@@ -1,0 +1,96 @@
+.section {
+  margin-bottom: 24px;
+}
+
+.label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b0b0b0;
+  margin-bottom: 10px;
+}
+
+.options {
+  display: flex;
+  gap: 20px;
+}
+
+.optBtn {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  color: #9a9a9a;
+  border-bottom: 1.5px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.optBtn:hover {
+  color: var(--text-h);
+}
+
+.optBtnActive {
+  color: var(--text-h);
+  border-bottom-color: var(--accent);
+}
+
+/* инфо-иконка с тултипом */
+.infoWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.infoIcon {
+  font-size: 11px;
+  color: #b0b0b0;
+  cursor: default;
+  line-height: 1;
+  user-select: none;
+}
+
+.optBtn:hover .infoIcon,
+.optBtnActive .infoIcon {
+  color: #888;
+}
+
+.tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  font-size: 11px;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 10;
+}
+
+.tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: #333;
+}
+
+.infoWrap:hover .tooltip {
+  opacity: 1;
+}
+
+.description {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #6b6b6b;
+}

@@ -1,6 +1,10 @@
 export interface MaterialItem {
   name: string;
   quantity: number;
+  base_quantity: number;
+  waste_factor: number;
+  package_size: number;
+  packs: number;
   unit: string;
   price_avg: number;
   total_avg: number;

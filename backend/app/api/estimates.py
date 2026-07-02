@@ -168,9 +168,11 @@ def calculate_estimate(
                 'unit': mat['unit'],
                 'package_size': Decimal(str(mat.get('package_size', 1))),
                 'quantity': Decimal(0),
+                'base_quantity': Decimal(0),
                 'pack_quantity': Decimal(0),
             }
         mat_groups[mid]['quantity'] += mat['quantity']
+        mat_groups[mid]['base_quantity'] += mat.get('base_quantity', mat['quantity'])
         if mat.get('pack_quantity') is not None:
             mat_groups[mid]['pack_quantity'] += mat['pack_quantity']
 
@@ -181,6 +183,10 @@ def calculate_estimate(
         name = group['name']
         packs = packs_to_buy(group['pack_quantity'])
         final_quantity = Decimal(packs) * group['package_size']
+        base_quantity = group['base_quantity']
+        # Эффективный запас группы: quantity/base_quantity — по построению совпадает
+        # с накрученным по факту коэффициентом даже после суммирования нескольких комнат.
+        waste_factor = (group['quantity'] / base_quantity) if base_quantity > 0 else Decimal(1)
 
         price_obj = get_price(name, parser=parser, region=request.city)
         if not price_obj:
@@ -189,6 +195,10 @@ def calculate_estimate(
             materials_response.append(MaterialItem(
                 name=name,
                 quantity=float(final_quantity),
+                base_quantity=float(base_quantity),
+                waste_factor=float(waste_factor),
+                package_size=float(group['package_size']),
+                packs=packs,
                 unit=group['unit'],
                 price_avg=0.0,
                 total_avg=0.0,
@@ -210,6 +220,10 @@ def calculate_estimate(
         materials_response.append(MaterialItem(
             name=name,
             quantity=float(final_quantity),
+            base_quantity=float(base_quantity),
+            waste_factor=float(waste_factor),
+            package_size=float(group['package_size']),
+            packs=packs,
             unit=group['unit'],
             price_avg=float(price_avg),
             total_avg=float(total_avg),

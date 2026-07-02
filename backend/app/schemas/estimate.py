@@ -69,6 +69,15 @@ class GeometrySummary(BaseModel):
 class MaterialItem(BaseModel):
     name: str
     quantity: float
+    # Из чего складывается quantity (#176): base_quantity — площадь/длина × норма
+    # расхода, ДО запаса; waste_factor — применённый коэффициент запаса
+    # (совмещает waste_factor материала и, для обоев под рисунок, раппорт);
+    # base_quantity × waste_factor == quantity ДО округления до упаковок.
+    base_quantity: float
+    waste_factor: float
+    package_size: float
+    # Число упаковок, до которого округлили: packs × package_size == quantity.
+    packs: int
     unit: str
     price_avg: float
     total_avg: float

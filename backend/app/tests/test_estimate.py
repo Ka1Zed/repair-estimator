@@ -44,6 +44,10 @@ class TestMaterialCalc:
         laminate = next(m for m in materials if m['name'] == 'Ламинат')
         # Площадь пола 12 * 1.15 = 13.8
         assert laminate['quantity'] == Decimal('13.8')
+        # Детализация (#176): base_quantity (до запаса) * waste_factor == quantity
+        assert laminate['base_quantity'] == Decimal('12.0')
+        assert laminate['waste_factor'] == Decimal('1.15')
+        assert laminate['base_quantity'] * laminate['waste_factor'] == laminate['quantity']
         # Проверяем дробное значение pack_quantity до агрегации — ceil делается в B1-5
         # package_size=2.0 -> 13.8 / 2.0 = 6.9
         assert laminate['pack_quantity'] == Decimal('6.9')
@@ -192,10 +196,15 @@ class TestEngineeringCalc:
 
         # Штучные — ровно число из запроса, без запаса.
         assert by_name['Розетка']['quantity'] == Decimal('6')
+        assert by_name['Розетка']['base_quantity'] == Decimal('6')
+        assert by_name['Розетка']['waste_factor'] == Decimal('1')
         assert by_name['Светильник']['quantity'] == Decimal('2')
         # Погонаж — метраж × waste_factor 1.1 (не через плинтусную ветку quantity_of).
         assert by_name['Кабель электрический']['quantity'] == Decimal('55.0')
+        assert by_name['Кабель электрический']['base_quantity'] == Decimal('50')
+        assert by_name['Кабель электрический']['waste_factor'] == Decimal('1.1')
         assert by_name['Труба водопроводная']['quantity'] == Decimal('11.0')
+        assert by_name['Труба водопроводная']['base_quantity'] == Decimal('10')
         # Труба: package_size 2 (хлыст) → округление до хлыстов на агрегации.
         assert packs_to_buy(by_name['Труба водопроводная']['pack_quantity']) == 6  # ceil(11/2)
 

@@ -10,6 +10,7 @@ from app.parsers.garantstroikompleks_parser import GarantStroiParser
 from app.parsers.remont_uroven_parser import RemontUrovenParser
 from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
 from app.parsers.prorabneva_parser import ProrabnevaParser
+from app.parsers.kaz_stroyka_parser import KazStroykaParser
 
 # Настройка логирования — чтобы видеть прогресс в консоли
 logging.basicConfig(
@@ -72,6 +73,7 @@ def update_prices():
     regional_labor_parsers = [
         GarantStroiParser(), RemontUrovenParser(),   # Москва
         OtdelkaSpbParser(), ProrabnevaParser(),       # Санкт-Петербург
+        KazStroykaParser(),                           # Казань
     ]
     for labor_parser in regional_labor_parsers:
         logger.info(

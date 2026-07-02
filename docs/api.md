@@ -214,7 +214,7 @@
       "packs": 2,
       "unit": "л",
       "price_avg": 3500,
-      "total_avg": 28000,
+      "total_avg": 63000,
       "source": "Мегастрой",
       "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot",
       "updated_at": "2026-06-10",

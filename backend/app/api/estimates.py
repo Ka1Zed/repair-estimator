@@ -172,7 +172,7 @@ def calculate_estimate(
                 'pack_quantity': Decimal(0),
             }
         mat_groups[mid]['quantity'] += mat['quantity']
-        mat_groups[mid]['base_quantity'] += mat.get('base_quantity', mat['quantity'])
+        mat_groups[mid]['base_quantity'] += mat['base_quantity']
         if mat.get('pack_quantity') is not None:
             mat_groups[mid]['pack_quantity'] += mat['pack_quantity']
 

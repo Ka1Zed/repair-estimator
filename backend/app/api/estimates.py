@@ -1,6 +1,7 @@
 import logging
 from decimal import Decimal
-from typing import Dict, List, Any
+from math import ceil
+from typing import Dict, List, Any, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -9,12 +10,14 @@ from app.db.session import get_db
 from app.db.models import PriceSource
 from app.schemas.estimate import (
     EstimateRequest, EstimateResponse, Summary, GeometrySummary,
-    MaterialItem, LaborItem
+    MaterialItem, LaborItem, RoomInput,
 )
 from app.services.geometry_service import calculate_room_geometry
-from app.services.material_calc_service import calculate_materials, packs_to_buy
-from app.services.labor_calc_service import calculate_labor
-from app.services.repair_coeffs_service import apply_repair_coeffs, REPAIR_COEFFS, CONTINGENCY
+from app.services.material_calc_service import (
+    calculate_materials, calculate_engineering_materials, packs_to_buy,
+)
+from app.services.labor_calc_service import calculate_labor, calculate_engineering_labor
+from app.services.repair_coeffs_service import CONTINGENCY
 from app.services.price_aggregator_service import get_price, get_labor_price
 from app.parsers.base import BaseParser
 from app.parsers.megastroy_parser import MegastroyParser
@@ -31,20 +34,76 @@ def get_material_parser() -> BaseParser:
     '''
     return MegastroyParser()
 
-# Дефолты точек электрики/сантехники по типу комнаты — MVP-допущение: UI пока не
-# даёт задавать точки вручную, поэтому объём этих работ выводим из room_type.
-# Нормы и обоснование — в docs/estimation-rules.md (источник правды).
-# electric: (basic, extended); plumbing: число точек (0, если недоступно для типа).
+# Дефолты инженерки, когда группа works включена, а число не задано (null).
+# Явный 0 остаётся 0 (осознанный ноль). База — пресеты по типу комнаты; для типа
+# без пресета число выводится от площади пола. Источник правды — docs/estimation-rules.md.
+# electric: (розетки, светильники) по типу комнаты; plumbing: число точек подключения.
 ELECTRICAL_POINTS = {
-    "living":   (10, 15),
-    "kitchen":  (15, 25),
-    "bathroom": (5, 8),
-    "hallway":  (4, 6),
+    "living":   (8, 3),
+    "kitchen":  (12, 4),
+    "bathroom": (4, 2),
+    "hallway":  (3, 2),
 }
 PLUMBING_POINTS = {
     "kitchen":  1,
     "bathroom": 3,
 }
+# Погонаж на точку для дефолтного метража, когда cable_m/pipe_m не заданы.
+CABLE_M_PER_POINT = Decimal("6")
+PIPE_M_PER_POINT = Decimal("3")
+
+
+def _default_electric(room_type: str, floor_area: Decimal) -> Tuple[int, int]:
+    """Дефолтное число розеток и светильников: пресет типа или оценка от площади."""
+    if room_type in ELECTRICAL_POINTS:
+        return ELECTRICAL_POINTS[room_type]
+    fa = float(floor_area)
+    return max(2, ceil(fa / 4)), max(1, ceil(fa / 6))
+
+
+def _resolve_electric(room: RoomInput, floor_area: Decimal) -> Tuple[int, int, Decimal]:
+    """Явные числа works.electric или дефолты (розетки, светильники, метраж кабеля)."""
+    e = room.works.electric
+    if not e.enabled:
+        return 0, 0, Decimal(0)
+    def_sockets, def_lights = _default_electric(room.room_type, floor_area)
+    sockets = e.sockets if e.sockets is not None else def_sockets
+    lights = e.lights if e.lights is not None else def_lights
+    if e.cable_m is not None:
+        cable_m = Decimal(str(e.cable_m))
+    else:
+        cable_m = (Decimal(sockets) + Decimal(lights)) * CABLE_M_PER_POINT
+    return sockets, lights, cable_m
+
+
+def _resolve_plumbing(room: RoomInput) -> Tuple[int, Decimal]:
+    """Явные числа works.plumbing или дефолты (точки, метраж труб)."""
+    p = room.works.plumbing
+    if not p.enabled:
+        return 0, Decimal(0)
+    def_points = PLUMBING_POINTS.get(room.room_type)
+    if def_points is None:
+        def_points = 1  # тип без пресета, но сантехника включена явно
+    points = p.points if p.points is not None else def_points
+    pipe_m = Decimal(str(p.pipe_m)) if p.pipe_m is not None else Decimal(points) * PIPE_M_PER_POINT
+    return points, pipe_m
+
+
+def _finish_options(room: RoomInput) -> Dict[str, Any]:
+    """works отделки (floor/walls/ceiling) → dict для calculate_materials/labor."""
+    w = room.works
+
+    def finish(sw) -> Any:
+        return sw.finish if sw.enabled else None
+
+    return {
+        "floor": finish(w.floor),
+        "walls": finish(w.walls),
+        "ceiling": finish(w.ceiling),
+        # Модификаторы живут на уровне поверхности (стены).
+        "wallpaper_pattern": bool(w.walls.enabled and w.walls.wallpaper_pattern),
+        "primer_two_coats": bool(w.walls.enabled and w.walls.primer_two_coats),
+    }
 
 
 @router.post("/calculate", response_model=EstimateResponse)
@@ -72,34 +131,32 @@ def calculate_estimate(
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
 
-        # Точки электрики/сантехники по типу комнаты (см. ELECTRICAL_POINTS/PLUMBING_POINTS).
-        # Объём работ гейтится в calculate_labor по repair_options.electric/plumbing.
-        elec_basic, elec_extended = ELECTRICAL_POINTS.get(room.room_type, (0, 0))
-        geometry['electrical_points'] = (
-            elec_extended if request.repair_options.electric == "extended" else elec_basic
-        )
-        geometry['plumbing_points'] = PLUMBING_POINTS.get(room.room_type, 0)
-
         for key in total_geometry:
             total_geometry[key] += Decimal(str(geometry[key]))
 
-        materials = calculate_materials(
-            geometry=geometry,
-            repair_options=request.repair_options.model_dump(),
-            db=db
-        )
-        all_materials.extend(materials)
+        # --- отделка (finish) по works комнаты ---
+        finish_options = _finish_options(room)
+        all_materials.extend(calculate_materials(
+            geometry=geometry, repair_options=finish_options, db=db
+        ))
+        all_labor.extend(calculate_labor(
+            geometry=geometry, repair_options=finish_options, db=db
+        ))
 
-        labor = calculate_labor(
-            geometry=geometry,
-            repair_options=request.repair_options.model_dump(),
-            db=db
-        )
-        all_labor.extend(labor)
+        # --- инженерка по явным числам works (дефолты от типа/площади) ---
+        sockets, lights, cable_m = _resolve_electric(room, geometry['floor_area'])
+        points, pipe_m = _resolve_plumbing(room)
+        all_materials.extend(calculate_engineering_materials(
+            sockets=sockets, lights=lights, cable_m=cable_m, pipe_m=pipe_m, db=db
+        ))
+        all_labor.extend(calculate_engineering_labor(
+            sockets=sockets, lights=lights, cable_m=cable_m,
+            plumbing_points=points, pipe_m=pipe_m, db=db
+        ))
 
-    # Множитель строк детализации: коэффициент типа ремонта × непредвиденные расходы (avg).
+    # Множитель строк детализации: непредвиденные расходы (avg). Класса ремонта больше нет (#222).
     # Нужен, чтобы сумма построчных total_avg точно совпадала с summary.*_avg.
-    line_factor = REPAIR_COEFFS[request.repair_type] * CONTINGENCY['avg']
+    line_factor = CONTINGENCY['avg']
 
     # Агрегация материалов с округлением до упаковок
     mat_groups: Dict[int, Dict] = {}
@@ -213,22 +270,21 @@ def calculate_estimate(
         labor_sum['avg'] += volume * labor_price.price_avg
         labor_sum['max'] += volume * labor_price.price_max
 
-    coeff_result = apply_repair_coeffs(
-        materials=materials_sum,
-        labor=labor_sum,
-        repair_type=request.repair_type
-    )
+    # Итог = материалы + работы, каждый со своим запасом на непредвиденные (CONTINGENCY).
+    # Классового множителя ремонта больше нет (#222).
+    mat_final = {k: materials_sum[k] * CONTINGENCY[k] for k in ('min', 'avg', 'max')}
+    lab_final = {k: labor_sum[k] * CONTINGENCY[k] for k in ('min', 'avg', 'max')}
 
     summary = Summary(
-        materials_min=float(coeff_result['materials_min']),
-        materials_avg=float(coeff_result['materials_avg']),
-        materials_max=float(coeff_result['materials_max']),
-        labor_min=float(coeff_result['labor_min']),
-        labor_avg=float(coeff_result['labor_avg']),
-        labor_max=float(coeff_result['labor_max']),
-        total_min=float(coeff_result['total_min']),
-        total_avg=float(coeff_result['total_avg']),
-        total_max=float(coeff_result['total_max']),
+        materials_min=float(mat_final['min']),
+        materials_avg=float(mat_final['avg']),
+        materials_max=float(mat_final['max']),
+        labor_min=float(lab_final['min']),
+        labor_avg=float(lab_final['avg']),
+        labor_max=float(lab_final['max']),
+        total_min=float(mat_final['min'] + lab_final['min']),
+        total_avg=float(mat_final['avg'] + lab_final['avg']),
+        total_max=float(mat_final['max'] + lab_final['max']),
     )
 
     geometry_summary = GeometrySummary(

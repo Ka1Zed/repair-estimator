@@ -12,6 +12,17 @@ pytestmark = pytest.mark.usefixtures("override_get_db", "stub_material_parser")
 client = TestClient(app)
 
 
+def W(floor="laminate", walls="paint", ceiling="paint", electric=True, plumbing=False):
+    """Блок works для комнаты. finish=None → поверхность выключена."""
+    return {
+        "floor": {"enabled": floor is not None, "finish": floor},
+        "walls": {"enabled": walls is not None, "finish": walls},
+        "ceiling": {"enabled": ceiling is not None, "finish": ceiling},
+        "electric": {"enabled": electric},
+        "plumbing": {"enabled": plumbing},
+    }
+
+
 def test_single_room():
     payload = {
         "city": "Казань",
@@ -29,17 +40,10 @@ def test_single_room():
                 "openings": [
                     {"type": "door", "width": 0.8, "height": 2.0},
                     {"type": "window", "width": 1.5, "height": 1.4}
-                ]
+                ],
+                "works": W()
             }
-        ],
-        "repair_type": "cosmetic",
-        "repair_options": {
-            "floor": "laminate",
-            "walls": "paint",
-            "ceiling": "paint",
-            "electric": "basic",
-            "plumbing": False
-        }
+        ]
     }
 
     response = client.post("/api/estimates/calculate", json=payload)
@@ -81,17 +85,10 @@ def test_response_schema():
                     {"x": 0, "y": 4}
                 ],
                 "room_type": "living",
-                "openings": []
+                "openings": [],
+                "works": W()
             }
-        ],
-        "repair_type": "cosmetic",
-        "repair_options": {
-            "floor": "laminate",
-            "walls": "paint",
-            "ceiling": "paint",
-            "electric": "basic",
-            "plumbing": False
-        }
+        ]
     }
     response = client.post("/api/estimates/calculate", json=payload)
     assert response.status_code == 200
@@ -108,6 +105,29 @@ def test_response_schema():
     required_geo_fields = ["floor_area", "ceiling_area", "wall_area", "perimeter"]
     for field in required_geo_fields:
         assert field in data["geometry"]
+
+
+def test_no_repair_type_required():
+    """Класса ремонта в контракте больше нет: запрос без repair_type успешно считается (#222)."""
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Спальня",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0}, {"x": 4, "y": 0},
+                    {"x": 4, "y": 3}, {"x": 0, "y": 3}
+                ],
+                "room_type": "living",
+                "openings": [],
+                "works": W(),
+            }
+        ]
+    }
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 200
+
 
 def test_single_room_exact_values():
     """Проверка точных значений для прямоугольной комнаты 4×3 с проёмами."""
@@ -127,17 +147,10 @@ def test_single_room_exact_values():
                 "openings": [
                     {"type": "door", "width": 0.8, "height": 2.0},
                     {"type": "window", "width": 1.5, "height": 1.4}
-                ]
+                ],
+                "works": W()
             }
-        ],
-        "repair_type": "cosmetic",
-        "repair_options": {
-            "floor": "laminate",
-            "walls": "paint",
-            "ceiling": "paint",
-            "electric": "basic",
-            "plumbing": False
-        }
+        ]
     }
 
     response = client.post("/api/estimates/calculate", json=payload)
@@ -172,7 +185,6 @@ def test_single_room_exact_values():
     putty = next(item for item in labor if item["service"] == "Шпаклевка стен")
     assert putty["volume"] == pytest.approx(34.1, 0.01)
 
-    # Проверяем, что есть услуги по полу и электрике (если они должны быть)
     # Например, укладка ламината
     laminate_install = next(item for item in labor if item["service"] == "Укладка ламината")
     assert laminate_install["volume"] == pytest.approx(12.0, 0.01)
@@ -182,6 +194,20 @@ def test_single_room_exact_values():
     assert summary["materials_min"] <= summary["materials_avg"] <= summary["materials_max"]
     assert summary["labor_min"] <= summary["labor_avg"] <= summary["labor_max"]
     assert summary["total_min"] <= summary["total_avg"] <= summary["total_max"]
+
+
+def test_no_class_multiplier():
+    """Класс ремонта убран: итог = материалы + работы, без классового множителя (#222).
+    Каждый агрегат = сумма строк × непредвиденные (CONTINGENCY)."""
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    summary = response.json()["summary"]
+
+    # avg-запас = 1.12 (CONTINGENCY). total_avg = (materials_avg + labor_avg), без ×коэфф. класса.
+    assert summary["total_avg"] == pytest.approx(
+        summary["materials_avg"] + summary["labor_avg"], rel=1e-6
+    )
+
 
 def test_two_rooms_grouping_and_rounding():
     """Две одинаковые комнаты: группировка материалов и удвоение с округлением."""
@@ -197,20 +223,10 @@ def test_two_rooms_grouping_and_rounding():
         "room_type": "living",
         "openings": [
             {"type": "door", "width": 0.8, "height": 2.0}
-        ]
+        ],
+        "works": W()
     }
-    payload = {
-        "city": "Казань",
-        "rooms": [room, room],
-        "repair_type": "cosmetic",
-        "repair_options": {
-            "floor": "laminate",
-            "walls": "paint",
-            "ceiling": "paint",
-            "electric": "basic",
-            "plumbing": False
-        }
-    }
+    payload = {"city": "Казань", "rooms": [room, room]}
 
     response = client.post("/api/estimates/calculate", json=payload)
     assert response.status_code == 200
@@ -224,15 +240,10 @@ def test_two_rooms_grouping_and_rounding():
     # Проверка, что материалы сгруппированы (должна быть одна строка ламината)
     assert len([m for m in data["materials"] if m["name"] == "Ламинат"]) == 1
 
-    # Проверка, что итоговая сумма примерно вдвое больше, чем для одной комнаты (с учётом округления)
-    # Для точности мы бы сравнили с отдельным запросом, но здесь просто проверим, что больше
-    # Сделаем запрос для одной комнаты с такой же геометрией (без проёмов) и сравним
-    single_room_payload = {**payload, "rooms": [room]}
-    single_response = client.post("/api/estimates/calculate", json=single_room_payload)
-    single_data = single_response.json()
-    single_total_avg = single_data["summary"]["total_avg"]
+    # Двойной набор должен быть дороже одиночного (с учётом округления).
+    single_response = client.post("/api/estimates/calculate", json={**payload, "rooms": [room]})
+    single_total_avg = single_response.json()["summary"]["total_avg"]
     double_total_avg = data["summary"]["total_avg"]
-    # Из-за округления double может быть не ровно в 2 раза, но должно быть больше single
     assert double_total_avg > single_total_avg
 
 
@@ -247,17 +258,10 @@ PAINT_PAYLOAD = {
                 {"x": 4, "y": 3}, {"x": 0, "y": 3}
             ],
             "room_type": "living",
-            "openings": []
+            "openings": [],
+            "works": W()
         }
-    ],
-    "repair_type": "cosmetic",
-    "repair_options": {
-        "floor": "laminate",
-        "walls": "paint",
-        "ceiling": "paint",
-        "electric": "basic",
-        "plumbing": False
-    }
+    ]
 }
 
 
@@ -353,8 +357,8 @@ def test_parser_fallback_on_error():
 
 
 def test_full_workset_has_electric_and_plumbing():
-    """Санузел с полным набором: электрика и сантехника попадают в смету с объёмом > 0
-    и ненулевой ценой; ни одна строка не остаётся без цены (silent P0 #181).
+    """Санузел с полным набором: электрика и сантехника попадают в смету по дефолтам
+    (числа не заданы) с объёмом > 0 и ненулевой ценой; ни одна строка не без цены (#181).
     Цены — из seed (парсер заглушён по умолчанию), тест не зависит от сети."""
     payload = {
         "city": "Казань",
@@ -369,41 +373,100 @@ def test_full_workset_has_electric_and_plumbing():
                 "room_type": "bathroom",
                 "openings": [
                     {"type": "door", "width": 0.8, "height": 2.0}
-                ]
+                ],
+                "works": W(floor="tile", walls="tile", ceiling="stretch",
+                           electric=True, plumbing=True)
             }
-        ],
-        "repair_type": "base",
-        "repair_options": {
-            "floor": "tile",
-            "walls": "tile",
-            "ceiling": "stretch",
-            "electric": "extended",
-            "plumbing": True
-        }
+        ]
     }
 
     response = client.post("/api/estimates/calculate", json=payload)
     assert response.status_code == 200
     data = response.json()
 
-    labor = data["labor"]
-    electric = next((x for x in labor if x["service"] == "Электромонтаж"), None)
-    plumbing = next((x for x in labor if x["service"] == "Сантехнические работы"), None)
+    labor = {x["service"]: x for x in data["labor"]}
 
-    # Объём по дефолтам room_type=bathroom: электрика extended = 8, сантехника = 3.
-    assert electric is not None and electric["volume"] == pytest.approx(8.0)
-    assert plumbing is not None and plumbing["volume"] == pytest.approx(3.0)
-    assert electric["total_avg"] > 0 and plumbing["total_avg"] > 0
-    assert electric["unit"] == "точка" and plumbing["unit"] == "точка"
+    # Дефолты bathroom: розетки 4, светильники 2 → кабель (4+2)*6 = 36 м.
+    assert labor["Монтаж розетки"]["volume"] == pytest.approx(4.0)
+    assert labor["Монтаж розетки"]["unit"] == "шт"
+    assert labor["Монтаж светильника"]["volume"] == pytest.approx(2.0)
+    assert labor["Прокладка кабеля"]["volume"] == pytest.approx(36.0)
+    assert labor["Прокладка кабеля"]["unit"] == "м"
 
-    # Штроба — отдельная строка от точки: 8 точек × 2 м/точка = 16 м.
-    grooving = next((x for x in labor if x["service"] == "Штробление"), None)
-    assert grooving is not None and grooving["volume"] == pytest.approx(16.0)
-    assert grooving["unit"] == "м" and grooving["total_avg"] > 0
+    # Сантехника bathroom по дефолту: 3 точки → труба 3*3 = 9 м.
+    assert labor["Сантехнические работы"]["volume"] == pytest.approx(3.0)
+    assert labor["Сантехнические работы"]["unit"] == "точка"
+    assert labor["Монтаж труб"]["volume"] == pytest.approx(9.0)
+
+    for name in ("Монтаж розетки", "Прокладка кабеля", "Сантехнические работы", "Монтаж труб"):
+        assert labor[name]["total_avg"] > 0
+
+    # Материалы инженерки: розетки/светильники штучно, кабель/труба с запасом.
+    mats = {m["name"]: m for m in data["materials"]}
+    assert mats["Розетка"]["quantity"] == pytest.approx(4.0)
+    assert mats["Светильник"]["quantity"] == pytest.approx(2.0)
 
     # Ни материалы, ни работы не остаются без цены на боевом наборе.
     for row in data["materials"] + data["labor"]:
         assert row["source"] != "нет цены"
+
+
+def test_explicit_zero_disables_default():
+    """Явный 0 в числовом поле — осознанный ноль: дефолт не подставляется (#222)."""
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Санузел",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0}, {"x": 2, "y": 0},
+                    {"x": 2, "y": 2}, {"x": 0, "y": 2}
+                ],
+                "room_type": "bathroom",
+                "openings": [{"type": "door", "width": 0.8, "height": 2.0}],
+                "works": {
+                    "floor": {"enabled": True, "finish": "tile"},
+                    "walls": {"enabled": True, "finish": "tile"},
+                    "ceiling": {"enabled": False, "finish": None},
+                    "electric": {"enabled": False},
+                    # Сантехника включена, но точек и труб — явный 0.
+                    "plumbing": {"enabled": True, "points": 0, "pipe_m": 0},
+                }
+            }
+        ]
+    }
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 200
+    services = {x["service"] for x in response.json()["labor"]}
+    # Явный 0 → сантехнических работ и монтажа труб нет.
+    assert "Сантехнические работы" not in services
+    assert "Монтаж труб" not in services
+
+
+def test_plumbing_enabled_adds_plumbing_rows():
+    """works.plumbing.enabled=true (числа не заданы) → в ответе появляются строки сантехники."""
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Кухня",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0}, {"x": 3, "y": 0},
+                    {"x": 3, "y": 3}, {"x": 0, "y": 3}
+                ],
+                "room_type": "kitchen",
+                "openings": [],
+                "works": W(floor="laminate", walls="paint", ceiling="paint",
+                           electric=False, plumbing=True)
+            }
+        ]
+    }
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 200
+    services = {x["service"] for x in response.json()["labor"]}
+    assert "Сантехнические работы" in services
 
 
 def test_plinth_subtracts_door_width():
@@ -422,17 +485,10 @@ def test_plinth_subtracts_door_width():
                 "room_type": "living",
                 "openings": [
                     {"type": "door", "width": 0.8, "height": 2.0}
-                ]
+                ],
+                "works": W()
             }
-        ],
-        "repair_type": "cosmetic",
-        "repair_options": {
-            "floor": "laminate",
-            "walls": "paint",
-            "ceiling": "paint",
-            "electric": "basic",
-            "plumbing": False
-        }
+        ]
     }
 
     response = client.post("/api/estimates/calculate", json=payload)
@@ -444,7 +500,6 @@ def test_plinth_subtracts_door_width():
     # Без вычета двери было бы 14 × 1.05 = 14.7 → ceil = 15.
     assert plinth["quantity"] == pytest.approx(14.0)
 
-# app/tests/test_estimate_endpoint.py (дополнение)
 
 def test_invalid_door_height():
     """Дверь выше комнаты → 422."""
@@ -455,15 +510,15 @@ def test_invalid_door_height():
             "height": 2.7,
             "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
             "room_type": "living",
-            "openings": [{"type": "door", "width": 0.8, "height": 3.0}]
-        }],
-        "repair_type": "cosmetic",
-        "repair_options": {"floor": "laminate", "walls": "paint", "ceiling": "paint"}
+            "openings": [{"type": "door", "width": 0.8, "height": 3.0}],
+            "works": W()
+        }]
     }
     response = client.post("/api/estimates/calculate", json=payload)
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert "высота двери" in detail.lower() or "превышать высоту" in detail
+
 
 def test_window_wider_than_wall():
     """Окно шире самой длинной стены → 422."""
@@ -474,15 +529,15 @@ def test_window_wider_than_wall():
             "height": 2.7,
             "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
             "room_type": "living",
-            "openings": [{"type": "window", "width": 5.0, "height": 1.5}]
-        }],
-        "repair_type": "cosmetic",
-        "repair_options": {"floor": "laminate", "walls": "paint", "ceiling": "paint"}
+            "openings": [{"type": "window", "width": 5.0, "height": 1.5}],
+            "works": W()
+        }]
     }
     response = client.post("/api/estimates/calculate", json=payload)
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert "длину самой длинной стены" in detail.lower()
+
 
 def test_total_openings_exceed_wall_area():
     """Суммарная площадь проёмов >= площади стен → 422."""
@@ -498,19 +553,18 @@ def test_total_openings_exceed_wall_area():
                 {"type": "window", "width": 3.0, "height": 2.7},
                 {"type": "window", "width": 3.0, "height": 2.7},
                 {"type": "window", "width": 3.0, "height": 2.7}
-            ]
-        }],
-        "repair_type": "cosmetic",
-        "repair_options": {"floor": "laminate", "walls": "paint", "ceiling": "paint"}
+            ],
+            "works": W()
+        }]
     }
     response = client.post("/api/estimates/calculate", json=payload)
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert "суммарная площадь проёмов" in detail.lower()
 
+
 def test_door_full_wall():
     """Дверь во всю стену – wall_area корректно уменьшается, но не становится отрицательной."""
-    # Комната 4×3, h=2.7. Одна стена длиной 4 м, дверь шириной 4 м, высотой 2.7 м
     payload = {
         "city": "Казань",
         "rooms": [{
@@ -518,15 +572,12 @@ def test_door_full_wall():
             "height": 2.7,
             "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
             "room_type": "living",
-            "openings": [{"type": "door", "width": 4.0, "height": 2.7}]
-        }],
-        "repair_type": "cosmetic",
-        "repair_options": {"floor": "laminate", "walls": "paint", "ceiling": "paint"}
+            "openings": [{"type": "door", "width": 4.0, "height": 2.7}],
+            "works": W()
+        }]
     }
     response = client.post("/api/estimates/calculate", json=payload)
     assert response.status_code == 200
     data = response.json()
     # Периметр = 14, стены до вычета = 14*2.7=37.8, дверь = 4*2.7=10.8, остаётся 27.0
     assert data["geometry"]["wall_area"] == pytest.approx(27.0, 0.01)
-    # wall_area положительная, расчёт не ушёл в минус.
-

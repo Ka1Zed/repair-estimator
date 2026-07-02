@@ -11,30 +11,53 @@ class Opening(BaseModel):
     width: float
     height: float
 
+
+class SurfaceWork(BaseModel):
+    """Отделка поверхности (пол/стены/потолок). См. works в docs/api.md."""
+    enabled: bool = False
+    # Ключ отделки из finishOptions.<группа> в room-types.json; null — поверхность
+    # включена, но отделка ещё не выбрана.
+    finish: Optional[str] = None
+    # Обои под рисунок (раппорт): +30% к расходу рулонов на подгонку (только стены).
+    # См. estimation-rules.md.
+    wallpaper_pattern: Optional[bool] = False
+    # Пористое/сильно впитывающее основание: грунтовка в 2 слоя вместо 1.
+    # См. estimation-rules.md.
+    primer_two_coats: Optional[bool] = False
+
+class ElectricWork(BaseModel):
+    """Электрика комнаты. Числа опциональны: при null бэкенд ставит дефолт от площади."""
+    enabled: bool = False
+    sockets: Optional[int] = None
+    lights: Optional[int] = None
+    cable_m: Optional[float] = None
+
+class PlumbingWork(BaseModel):
+    """Сантехника комнаты. Числа опциональны: при null бэкенд ставит дефолт от типа/площади."""
+    enabled: bool = False
+    points: Optional[int] = None
+    pipe_m: Optional[float] = None
+
+class Works(BaseModel):
+    """Работы и их настройки на уровне комнаты (см. docs/api.md)."""
+    floor: SurfaceWork = Field(default_factory=SurfaceWork)
+    walls: SurfaceWork = Field(default_factory=SurfaceWork)
+    ceiling: SurfaceWork = Field(default_factory=SurfaceWork)
+    electric: ElectricWork = Field(default_factory=ElectricWork)
+    plumbing: PlumbingWork = Field(default_factory=PlumbingWork)
+
 class RoomInput(BaseModel):
     name: str
     height: float = Field(gt=0)
     points: List[Point] = Field(min_length=3)
+    # room_type — пресет дефолтов, не констрейнт (бэкенд works не валидирует по нему).
     room_type: str
     openings: List[Opening] = []
-
-class RepairOptions(BaseModel):
-    floor: Optional[str] = None
-    walls: Optional[str] = None
-    ceiling: Optional[str] = None
-    electric: Optional[str] = None
-    plumbing: Optional[bool] = False
-    # Обои под рисунок (раппорт): +30% к расходу рулонов на подгонку. См. estimation-rules.md.
-    wallpaper_pattern: Optional[bool] = False
-    # Пористое/сильно впитывающее основание (газобетон, старая штукатурка, перед наливным полом):
-    # грунтовка в 2 слоя вместо 1. См. estimation-rules.md.
-    primer_two_coats: Optional[bool] = False
+    works: Works = Field(default_factory=Works)
 
 class EstimateRequest(BaseModel):
     city: str
     rooms: List[RoomInput]
-    repair_type: str = Field(..., pattern="^(cosmetic|base|extended)$")
-    repair_options: RepairOptions
 
 
 class GeometrySummary(BaseModel):

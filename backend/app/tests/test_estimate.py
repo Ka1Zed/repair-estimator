@@ -1,11 +1,11 @@
 # app/tests/test_estimate.py
 
-import pytest
 from decimal import Decimal
 
-from app.services.material_calc_service import calculate_materials, packs_to_buy
-from app.services.labor_calc_service import calculate_labor
-from app.services.repair_coeffs_service import apply_repair_coeffs
+from app.services.material_calc_service import (
+    calculate_materials, calculate_engineering_materials, packs_to_buy,
+)
+from app.services.labor_calc_service import calculate_labor, calculate_engineering_labor
 from app.services.geometry_service import calculate_room_geometry
 
 
@@ -127,34 +127,30 @@ class TestLaborCalc:
     """Модульные тесты для расчёта работ."""
 
     def test_labor_calc_rectangle(self, db_session):
-        """Прямоугольная комната 4×3, h=2.7, ламинат, покраска стен и потолка."""
+        """Прямоугольная комната 4×3, h=2.7, ламинат, покраска стен и потолка (только отделка)."""
         geometry = {
             'floor_area': Decimal('12.0'),
             'ceiling_area': Decimal('12.0'),
             'wall_area': Decimal('34.1'),
             'perimeter': Decimal('14.0'),
-            'electrical_points': Decimal('5'),
-            'plumbing_points': Decimal('2')
         }
-        repair_options = {
+        finish_options = {
             'floor': 'laminate',
             'walls': 'paint',
             'ceiling': 'paint',
-            'electric': 'basic',
-            'plumbing': True
         }
 
-        labor = calculate_labor(geometry, repair_options, db_session)
+        labor = calculate_labor(geometry, finish_options, db_session)
 
-        # Проверяем, что все ожидаемые услуги есть
+        # Отделочные работы есть; инженерка здесь не считается (отдельный путь).
         expected_services = {
-            'Покраска стен', 'Покраска потолка', 'Шпаклевка стен',
-            'Укладка ламината', 'Электромонтаж', 'Штробление', 'Сантехнические работы'
+            'Покраска стен', 'Покраска потолка', 'Шпаклевка стен', 'Укладка ламината',
         }
         returned_services = {item['service'] for item in labor}
         assert expected_services.issubset(returned_services)
+        assert 'Электромонтаж' not in returned_services
+        assert 'Сантехнические работы' not in returned_services
 
-        # Проверка объёмов
         painter_walls = next(item for item in labor if item['service'] == 'Покраска стен')
         assert painter_walls['volume'] == Decimal('34.1')
 
@@ -167,65 +163,47 @@ class TestLaborCalc:
         laminate_install = next(item for item in labor if item['service'] == 'Укладка ламината')
         assert laminate_install['volume'] == Decimal('12.0')
 
-        electric = next(item for item in labor if item['service'] == 'Электромонтаж')
-        assert electric['volume'] == Decimal('5')
 
-        # Штроба — отдельная строка от точки: 5 точек × 2 м/точка = 10 м.
-        grooving = next(item for item in labor if item['service'] == 'Штробление')
-        assert grooving['volume'] == Decimal('10.0')
+class TestEngineeringCalc:
+    """Электрика/сантехника по явным числам works (#222)."""
 
-        plumbing = next(item for item in labor if item['service'] == 'Сантехнические работы')
-        assert plumbing['volume'] == Decimal('2')
+    def test_engineering_labor_by_explicit_numbers(self, db_session):
+        """Работы электрики/сантехники берут объём из явных чисел, а не из геометрии."""
+        labor = calculate_engineering_labor(
+            sockets=6, lights=2, cable_m=Decimal('48'),
+            plumbing_points=3, pipe_m=Decimal('9'), db=db_session,
+        )
+        by_service = {item['service']: item for item in labor}
 
+        assert by_service['Монтаж розетки']['volume'] == Decimal('6')
+        assert by_service['Монтаж розетки']['unit'] == 'шт'
+        assert by_service['Монтаж светильника']['volume'] == Decimal('2')
+        assert by_service['Прокладка кабеля']['volume'] == Decimal('48')
+        assert by_service['Прокладка кабеля']['unit'] == 'м'
+        assert by_service['Сантехнические работы']['volume'] == Decimal('3')
+        assert by_service['Монтаж труб']['volume'] == Decimal('9')
 
-class TestRepairCoeffs:
-    """Тесты применения коэффициентов типа ремонта и непредвиденных расходов."""
+    def test_engineering_materials_units_and_waste(self, db_session):
+        """Штучные позиции без запаса, погонаж с waste_factor; труба не идёт как плинтус."""
+        mats = calculate_engineering_materials(
+            sockets=6, lights=2, cable_m=Decimal('50'), pipe_m=Decimal('10'), db=db_session,
+        )
+        by_name = {m['name']: m for m in mats}
 
-    def test_coeffs_scale(self):
-        """Проверка, что при переходе cosmetic → base итог умножается на 1.2."""
-        materials = {'min': Decimal('100'), 'avg': Decimal('200'), 'max': Decimal('300')}
-        labor = {'min': Decimal('400'), 'avg': Decimal('500'), 'max': Decimal('600')}
+        # Штучные — ровно число из запроса, без запаса.
+        assert by_name['Розетка']['quantity'] == Decimal('6')
+        assert by_name['Светильник']['quantity'] == Decimal('2')
+        # Погонаж — метраж × waste_factor 1.1 (не через плинтусную ветку quantity_of).
+        assert by_name['Кабель электрический']['quantity'] == Decimal('55.0')
+        assert by_name['Труба водопроводная']['quantity'] == Decimal('11.0')
+        # Труба: package_size 2 (хлыст) → округление до хлыстов на агрегации.
+        assert packs_to_buy(by_name['Труба водопроводная']['pack_quantity']) == 6  # ceil(11/2)
 
-        res_cosmetic = apply_repair_coeffs(materials, labor, 'cosmetic')
-        res_base = apply_repair_coeffs(materials, labor, 'base')
+    def test_engineering_zero_skips_lines(self, db_session):
+        """Нулевые числа (выключенная группа) не добавляют строк."""
+        assert calculate_engineering_labor(0, 0, 0, 0, 0, db_session) == []
+        assert calculate_engineering_materials(0, 0, 0, 0, db_session) == []
 
-        for key in ['materials_min', 'materials_avg', 'materials_max',
-                    'labor_min', 'labor_avg', 'labor_max',
-                    'total_min', 'total_avg', 'total_max']:
-            assert res_base[key] == res_cosmetic[key] * Decimal('1.2')
-
-    def test_min_avg_max_order(self):
-        """Проверка, что min ≤ avg ≤ max для всех категорий."""
-        materials = {'min': Decimal('100'), 'avg': Decimal('200'), 'max': Decimal('300')}
-        labor = {'min': Decimal('400'), 'avg': Decimal('500'), 'max': Decimal('600')}
-
-        for repair_type in ['cosmetic', 'base', 'extended']:
-            result = apply_repair_coeffs(materials, labor, repair_type)
-            for category in ['materials', 'labor', 'total']:
-                assert result[f'{category}_min'] <= result[f'{category}_avg'] <= result[f'{category}_max']
-
-    def test_cosmetic_with_standard_contingency(self):
-        """При cosmetic и коэффициенте непредвиденных = 1.0 сумма равна исходной."""
-        # В реальном коде контингент жёстко задан, поэтому мы не можем получить 1.0.
-        # Но мы можем проверить, что результат при cosmetic и контингенте = 1.1/1.12/1.15
-        # соответствует ожидаемому умножению.
-        materials = {'min': Decimal('100'), 'avg': Decimal('200'), 'max': Decimal('300')}
-        labor = {'min': Decimal('400'), 'avg': Decimal('500'), 'max': Decimal('600')}
-
-        result = apply_repair_coeffs(materials, labor, 'cosmetic')
-        # Для min: (100+400)*1.1 = 550
-        assert result['total_min'] == Decimal('550')
-        # avg: (200+500)*1.12 = 784
-        assert result['total_avg'] == Decimal('784')
-        # max: (300+600)*1.15 = 1035
-        assert result['total_max'] == Decimal('1035')
-
-    def test_unknown_repair_type_raises_error(self):
-        """Неизвестный тип ремонта вызывает ValueError."""
-        materials = {'min': Decimal('1'), 'avg': Decimal('2'), 'max': Decimal('3')}
-        labor = {'min': Decimal('4'), 'avg': Decimal('5'), 'max': Decimal('6')}
-        with pytest.raises(ValueError, match="Unknown repair_type: basic"):
-            apply_repair_coeffs(materials, labor, 'basic')
 
 class TestLShape:
     def test_l_shaped_room_materials(self, db_session):

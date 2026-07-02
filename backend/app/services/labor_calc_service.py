@@ -32,13 +32,12 @@ S_PAINT_CEILING = "Покраска потолка"
 S_PUTTY_WALLS   = "Шпаклевка стен"
 S_LAY_LAMINATE  = "Укладка ламината"
 S_LAY_TILE      = "Укладка плитки"
-S_ELECTRIC      = "Электромонтаж"
-S_GROOVING      = "Штробление"
+# Инженерка (works.electric / works.plumbing) — гранулярные операции по явным числам.
+S_CABLE_LAY     = "Прокладка кабеля"
+S_SOCKET_MOUNT  = "Монтаж розетки"
+S_LIGHT_MOUNT   = "Монтаж светильника"
+S_PIPE_MOUNT    = "Монтаж труб"
 S_PLUMBING      = "Сантехнические работы"
-
-# Норма погонажа штробы на одну точку электрики (м/точка) — см. estimation-rules.md.
-# Штробу считаем ОТДЕЛЬНОЙ строкой от точки, объём масштабируется от числа точек.
-GROOVE_M_PER_POINT = Decimal("2.0")
 
 
 def _labor_selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tuple]:
@@ -81,20 +80,8 @@ def _labor_selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> L
     if tiled > 0:
         sel.append((S_LAY_TILE, tiled))
 
-    # --- электрика (объём в точках; точки приходят из входа комнаты) ---
-    if repair_options.get("electric") in ("basic", "extended"):
-        pts = D(geom.get("electrical_points"))
-        if pts > 0:
-            sel.append((S_ELECTRIC, pts))
-            # Штроба — отдельная строка от точки: погонаж = точки × норма (м/точка).
-            sel.append((S_GROOVING, pts * GROOVE_M_PER_POINT))
-
-    # --- сантехника ---
-    if repair_options.get("plumbing"):
-        pts = D(geom.get("plumbing_points"))
-        if pts > 0:
-            sel.append((S_PLUMBING, pts))
-
+    # Электрика/сантехника здесь НЕ считаются: они идут по явным числам works
+    # через calculate_engineering_labor (#222).
     return sel
 
 
@@ -103,26 +90,12 @@ def _seed_source_id(db: Session):
     return src.id if src else None
 
 
-def calculate_labor(
-    geometry: Dict[str, Any],
-    repair_options: Dict[str, Any],
-    db: Session,
-) -> List[Dict[str, Any]]:
-    """
-    Объём и стоимость работ для одной комнаты.
-
-    geometry: floor_area, ceiling_area, wall_area (+ electrical_points / plumbing_points,
-              если есть электрика/сантехника — их кладёт B1-5 из входа/типа комнаты).
-    repair_options: {floor, walls, ceiling, electric, plumbing, ...}
-
-    Возвращает строки по контракту api.md:
-        service, specialist, volume, unit,
-        price_min/avg/max (за единицу), total_min/avg/max (= volume * price), source
-    """
+def _labor_rows(selections: List[tuple], db: Session, seed_id) -> List[Dict[str, Any]]:
+    """Собрать строки сметы работ по списку (имя_операции, объём)."""
     result: List[Dict[str, Any]] = []
-    seed_id = _seed_source_id(db)
 
-    for service_name, volume in _labor_selections(repair_options, geometry):
+    for service_name, volume in selections:
+        volume = D(volume)
         if volume <= 0:
             continue
 
@@ -160,3 +133,49 @@ def calculate_labor(
         })
 
     return result
+
+
+def calculate_labor(
+    geometry: Dict[str, Any],
+    repair_options: Dict[str, Any],
+    db: Session,
+) -> List[Dict[str, Any]]:
+    """
+    Объём и стоимость отделочных работ для одной комнаты (пол/стены/потолок).
+
+    Электрика и сантехника считаются отдельно (calculate_engineering_labor) по явным
+    числам works, а не по геометрии — см. #222.
+
+    geometry: floor_area, ceiling_area, wall_area
+    repair_options: {floor, walls, ceiling, ...}
+
+    Возвращает строки по контракту api.md:
+        service, specialist, volume, unit,
+        price_min/avg/max (за единицу), total_min/avg/max (= volume * price), source
+    """
+    return _labor_rows(_labor_selections(repair_options, geometry), db, _seed_source_id(db))
+
+
+def calculate_engineering_labor(
+    sockets: Any,
+    lights: Any,
+    cable_m: Any,
+    plumbing_points: Any,
+    pipe_m: Any,
+    db: Session,
+) -> List[Dict[str, Any]]:
+    """Работы электрики/сантехники по явным числам из works (#222).
+
+    Маппинг поле → операция (источник правды docs/estimation-rules.md):
+        cable_m → Прокладка кабеля, sockets → Монтаж розетки,
+        lights → Монтаж светильника, pipe_m → Монтаж труб,
+        plumbing.points → Сантехнические работы (подключение приборов).
+    """
+    selections = [
+        (S_CABLE_LAY, cable_m),
+        (S_SOCKET_MOUNT, sockets),
+        (S_LIGHT_MOUNT, lights),
+        (S_PIPE_MOUNT, pipe_m),
+        (S_PLUMBING, plumbing_points),
+    ]
+    return _labor_rows(selections, db, _seed_source_id(db))

@@ -200,8 +200,8 @@ def calculate_estimate(
             continue
 
         price_avg = price_obj.price_avg
-        # Строчный итог уже включает коэффициент ремонта и непредвиденные, чтобы
-        # сумма строк совпадала с summary (см. line_factor).
+        # Строчный итог уже включает запас на непредвиденные (CONTINGENCY), чтобы
+        # сумма строк совпадала с summary (см. line_factor). Класса ремонта больше нет (#222).
         total_avg = final_quantity * price_avg * line_factor
         source = db.query(PriceSource).filter(PriceSource.id == price_obj.source_id).first()
         source_name = source.name if source else "unknown"
@@ -245,7 +245,7 @@ def calculate_estimate(
 
         volume = group['volume']
         price_avg = labor_price.price_avg
-        # Строчный итог включает коэффициент ремонта и непредвиденные (как и у материалов).
+        # Строчный итог включает запас на непредвиденные (CONTINGENCY), как и у материалов.
         total_avg = volume * price_avg * line_factor
         labor_source = db.query(PriceSource).filter(
             PriceSource.id == labor_price.source_id

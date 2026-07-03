@@ -30,8 +30,11 @@ def test_seed_missing_restores_item_without_touching_parser_cache(isolated_seede
 
     check = SessionLocal()
     try:
-        # «Розетка» вернулась вместе с seed-ценами.
-        assert added["materials"] == 1
+        # «Розетка» вернулась вместе с seed-ценами. Считаем >= 1, а не == 1:
+        # seed_missing() читает реальные seed_data/*.json, и число «недостающих»
+        # позиций растёт по мере расширения seed — точная константа сделала бы
+        # тест хрупким ровно в том сценарии, ради которого дозасев и нужен.
+        assert added["materials"] >= 1
         restored = check.query(Material).filter_by(name="Розетка").first()
         assert restored is not None
         assert check.query(MaterialPrice).filter_by(material_id=restored.id).count() > 0

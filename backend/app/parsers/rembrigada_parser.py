@@ -7,6 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.parsers.base import BaseParser, ParsedPrice
+from app.parsers._stats import filter_outliers
 from app.parsers.labor_table_parser import LABOR_SERVICE_MAP, _matches
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,16 @@ class RembrigadaParser(BaseParser):
 
         if not prices:
             raise RuntimeError(f"Не найдено строк прайса для '{material_name}'")
+
+        # Отсекаем ценовые выбросы (#242) до расчёта вилки — тот же хелпер, что и у
+        # LaborTableParser, чтобы поведение парсеров работ не расходилось.
+        raw_count = len(prices)
+        prices = filter_outliers(prices)
+        if len(prices) < raw_count:
+            logger.info(
+                f"company_price: '{material_name}' — отброшено выбросов "
+                f"{raw_count - len(prices)} из {raw_count}"
+            )
 
         price_min = min(prices)
         price_max = max(prices)

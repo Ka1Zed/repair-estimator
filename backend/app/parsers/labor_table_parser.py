@@ -6,6 +6,7 @@ from decimal import Decimal
 import requests
 from bs4 import BeautifulSoup
 
+from app.parsers._stats import filter_outliers
 from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
@@ -216,6 +217,16 @@ class LaborTableParser(BaseParser):
 
         if not matched:
             raise RuntimeError(f"Не найдено строк прайса для '{material_name}'")
+
+        # Отсекаем ценовые выбросы (#242) до min/avg/max и до выбора source_url,
+        # чтобы вилка считалась по «телу» выборки, а ссылка не вела на выброс.
+        raw_count = len(matched)
+        matched = filter_outliers(matched, key=lambda it: it[0])
+        if len(matched) < raw_count:
+            logger.info(
+                f"{self.source_name}: '{material_name}' — отброшено выбросов "
+                f"{raw_count - len(matched)} из {raw_count}"
+            )
 
         prices = [price for (price, _) in matched]
         price_min = min(prices)

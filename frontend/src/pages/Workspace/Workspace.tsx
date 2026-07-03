@@ -8,6 +8,7 @@ import RoomPointsTable from "../../components/RoomPointsTable";
 import BlueprintUpload from "../../components/BlueprintUpload";
 import OpeningsForm from "../../components/OpeningsForm";
 import { RoomTypeSelector } from "../../components/RoomTypeSelector";
+import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
 import type { MaterialItem, LaborItem } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
@@ -123,6 +124,7 @@ export function Workspace() {
               height: Number(op.height),
             })),
             points: room.points.map((p) => ({ x: Number(p.x), y: Number(p.y) })),
+            works: room.works,
           })),
         };
         const res = (await calculateEstimate(payload)) as EstimateResponse;
@@ -334,8 +336,13 @@ export function Workspace() {
         </div>
 
         <div className={styles.block}>
-          <div className={styles.blockLabel}>Состав работ · тип комнаты</div>
+          <div className={styles.blockLabel}>Тип комнаты</div>
           <RoomTypeSelector />
+        </div>
+
+        <div className={styles.block}>
+          <div className={styles.blockLabel}>Состав работ</div>
+          <WorksPanel />
         </div>
 
         <div className={styles.block}>

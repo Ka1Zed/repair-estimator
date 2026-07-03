@@ -1,7 +1,6 @@
 import { useProjectStore } from "../store/projectStore";
 import { roomTypeOptions, type RoomTypeKey } from "../types/roomTypes";
 import styles from "./RoomTypeSelector.module.css";
-import { WorksCheckboxes } from "./WorksCheckboxes";
 import { Select } from "./ui/Select";
 
 export const RoomTypeSelector = () => {
@@ -28,7 +27,6 @@ export const RoomTypeSelector = () => {
         options={roomTypeOptions.map(({ key, label }) => ({ value: key, label }))}
         onChange={(v) => updateActiveRoomType(activeRoomIndex, v as RoomTypeKey)}
       />
-      <WorksCheckboxes />
     </div>
   );
 };

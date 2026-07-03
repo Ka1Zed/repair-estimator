@@ -62,7 +62,7 @@ export function Workspace() {
   // resizable split
   const containerRef = useRef<HTMLDivElement>(null);
   const dividerDragging = useRef(false);
-  const [splitPct, setSplitPct] = useState(75);
+  const [splitPct, setSplitPct] = useState(55);
   const [isDividerDragging, setIsDividerDragging] = useState(false);
 
   // interactive range state

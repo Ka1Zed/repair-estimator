@@ -12,7 +12,12 @@ from app.db.models import LaborPrice, LaborService, PriceSource
 from app.parsers.base import BaseParser, ParsedPrice
 from app.parsers.garantstroikompleks_parser import GarantStroiParser
 from app.parsers.kaz_stroyka_parser import KazStroykaParser
-from app.parsers.labor_table_parser import LABOR_SERVICE_MAP, _matches, _parse_price
+from app.parsers.labor_table_parser import (
+    LABOR_SERVICE_MAP,
+    _filter_outliers,
+    _matches,
+    _parse_price,
+)
 from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
 from app.parsers.prorabneva_parser import ProrabnevaParser
 from app.parsers.remont_uroven_parser import RemontUrovenParser
@@ -160,6 +165,60 @@ def test_multipage_unavailable_page_does_not_break_others():
 )
 def test_parse_price(text, expected):
     assert _parse_price(text) == expected
+
+
+# --- отсев ценовых выбросов методом Тьюки (#242) ---
+
+def _D(*xs):
+    return [Decimal(x) for x in xs]
+
+
+def test_filter_outliers_drops_high_outlier():
+    '''Дорогая нишевая работа отсекается — вилка считается по «телу» выборки.'''
+    prices = _D(400, 450, 500, 520, 550, 580, 600, 650, 7000)
+    filtered = _filter_outliers(prices)
+    assert Decimal(7000) not in filtered
+    assert max(filtered) < Decimal(7000)
+
+
+def test_filter_outliers_keeps_small_sample():
+    '''На выборке < 4 квартили не считаем — оставляем всё как есть.'''
+    prices = _D(400, 500, 7000)
+    assert _filter_outliers(prices) == prices
+
+
+def test_filter_outliers_degenerate_all_equal():
+    '''Все цены равны (iqr=0) → фильтр не должен обнулить выборку.'''
+    prices = _D(500, 500, 500, 500)
+    assert _filter_outliers(prices) == prices
+
+
+def test_filter_outliers_with_key_preserves_url():
+    '''key достаёт цену из пары (цена, url); отфильтрованные пары сохраняют url.'''
+    items = [(p, "u") for p in _D(400, 450, 500, 520, 550, 580, 600, 650, 7000)]
+    filtered = _filter_outliers(items, key=lambda it: it[0])
+    assert (Decimal(7000), "u") not in filtered
+    assert all(url == "u" for _, url in filtered)
+
+
+def _rows_html(service_rows: list[tuple[str, int]]) -> str:
+    cells = "".join(
+        f"<tr><td>{name}</td><td>{price} руб</td></tr>" for name, price in service_rows
+    )
+    return f"<html><body><table>{cells}</table></body></html>"
+
+
+def test_fetch_price_excludes_outlier_from_spread():
+    '''Прайс с явным выбросом по услуге → price_max не выброс, вилка по телу.'''
+    rows = [(f"Установка розетки №{i}", p)
+            for i, p in enumerate([400, 450, 500, 520, 550, 580, 600, 650, 7000])]
+    parser = GarantStroiParser()
+    parser._get_html = lambda url: _rows_html(rows)
+    parsed = parser.fetch_price("Электромонтаж")
+    assert parsed.price_max < Decimal(7000)
+    assert parsed.price_min == Decimal(400)
+    # Ссылка на источник по-прежнему проставлена (из отфильтрованного набора).
+    assert parsed.source_url in parser._page_urls()
 
 
 # --- запись региональной цены через update_labor_price (#166) ---

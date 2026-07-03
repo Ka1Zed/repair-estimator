@@ -209,6 +209,23 @@ def db_session(setup_test_db):
         db.close()
 
 
+@pytest.fixture
+def isolated_seeded_db(setup_test_db):
+    """Изолированная копия стандартного посева для тестов, которые МУТИРУЮТ БД
+    (удаляют/добавляют строки, пишут цены). Пересобирает каноничное состояние
+    до и после теста, чтобы не поехали другие тесты на общей session-scoped БД."""
+    def _rebuild():
+        Base.metadata.drop_all(bind=test_engine)
+        Base.metadata.create_all(bind=test_engine)
+        session = TestingSessionLocal()
+        seed_test_data(session)
+        session.close()
+
+    _rebuild()
+    yield
+    _rebuild()
+
+
 # --- Герметизация эндпоинт-тестов от сети (#174) ---
 # /api/estimates/calculate берёт цены материалов через парсер. Чтобы тесты не
 # тащили живой Мегастрой (флак на VPN/офлайн/смене вёрстки), парсер инжектится

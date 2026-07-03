@@ -1,37 +1,18 @@
 import { useState } from 'react';
-import { useProjectStore } from '../../store/projectStore';
-import { calculateEstimate } from '../../api/estimates';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import type { MaterialItem, LaborItem } from '../../types/estimate';
 import { EstimateLedger, type LedgerRow } from '../../components/EstimateLedger/EstimateLedger';
 import { RepairOptionsForm } from '../../components/RepairOptionsForm/RepairOptionsForm';
 import { EstimateSummary, type SummaryData } from '../../components/EstimateSummary';
-import type { MaterialItem, LaborItem } from '../../types/estimate';
 import styles from './EstimateResult.module.css';
 
 const fmt = (n: number) => n.toLocaleString('ru-RU');
 
-interface GeometryData {
-  floor_area: number;
-  ceiling_area: number;
-  wall_area: number;
-  perimeter: number;
-}
-
-interface EstimateResponse {
-  summary: SummaryData;
-  geometry: GeometryData;
-  materials: MaterialItem[];
-  labor: LaborItem[];
-}
-
 function materialToLedgerRow(item: MaterialItem): LedgerRow {
   const details: LedgerRow['details'] = [
-    { label: 'Базовое кол-во', value: `${item.base_quantity} ${item.unit}` },
-    { label: 'Запас', value: `×${item.waste_factor} (+${Math.round((item.waste_factor - 1) * 100)}%)` },
-    { label: 'Упаковок', value: `${item.packs} × ${item.package_size} ${item.unit}` },
-    { label: 'Итого кол-во', value: `${item.quantity} ${item.unit}` },
     { label: 'Цена за единицу', value: `${fmt(item.price_avg)} ₽/${item.unit}` },
+    { label: 'Количество', value: `${item.quantity} ${item.unit}` },
     { label: 'Итого', value: `${fmt(item.total_avg)} ₽` },
     { label: 'Источник', value: item.source },
   ];
@@ -61,15 +42,34 @@ function laborToLedgerRow(item: LaborItem): LedgerRow {
   };
 }
 
+
+import { useProjectStore } from '../../store/projectStore';
+import { calculateEstimate } from '../../api/estimates';
+
+
+interface GeometryData {
+  floor_area: number;
+  ceiling_area: number;
+  wall_area: number;
+  perimeter: number;
+}
+
+// Обновляем интерфейс всего ответа
+interface EstimateResponse {
+  summary: SummaryData;
+  geometry: GeometryData;
+  materials: MaterialItem[];
+  labor: LaborItem[];
+}
 export function EstimateResult() {
   const { rooms, repair_type, repair_options } = useProjectStore();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [estimateData, setEstimateData] = useState<EstimateResponse | null>(null);
-
   const handleCalculate = async () => {
     setIsLoading(true);
     setError(null);
+
     try {
       const payload = {
         city: "Казань", // TODO: взять из стора когда появится поле city
@@ -82,11 +82,16 @@ export function EstimateResult() {
           openings: room.openings.map(op => ({
             ...op,
             width: Number(op.width),
-            height: Number(op.height),
+            height: Number(op.height)
           })),
-          points: room.points.map(p => ({ x: Number(p.x), y: Number(p.y) })),
-        })),
+          points: room.points.map(p => ({
+            x: Number(p.x),
+            y: Number(p.y)
+          }))
+        }))
       };
+
+    
       const data = await calculateEstimate(payload);
       setEstimateData(data as EstimateResponse);
     } catch (err) {
@@ -99,6 +104,7 @@ export function EstimateResult() {
 
   return (
     <div className={styles.container}>
+      {/* Шапка с кнопками */}
       <div className={styles.headerRow}>
         <h2>Результат расчёта сметы</h2>
         <div style={{ display: 'flex', gap: '10px' }}>
@@ -113,9 +119,13 @@ export function EstimateResult() {
 
       <RepairOptionsForm />
 
+      {/* Показываем ошибки, если сервер упал */}
       {error && <div style={{ color: 'red', marginTop: '20px' }}>{error}</div>}
+
+      {/* Показываем лоадер во время загрузки */}
       {isLoading && <div style={{ marginTop: '20px', fontSize: '18px' }}>Загрузка данных с сервера... ⏳</div>}
 
+      {/* Отрисовываем таблицы ТОЛЬКО если данные успешно пришли */}
       {!isLoading && !error && estimateData && (
         <>
           {estimateData.geometry && (

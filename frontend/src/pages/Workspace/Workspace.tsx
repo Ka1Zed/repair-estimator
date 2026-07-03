@@ -165,7 +165,10 @@ export function Workspace() {
   const handleDividerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dividerDragging.current || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    // вычитаем padding 24px с каждой стороны (.page), чтобы курсор не отставал
+    const paddingX = 24;
+    const contentWidth = rect.width - paddingX * 2;
+    const pct = ((e.clientX - rect.left - paddingX) / contentWidth) * 100;
     setSplitPct(Math.min(75, Math.max(25, Math.round(pct))));
   };
 
@@ -487,6 +490,7 @@ export function Workspace() {
                 </tbody>
               </table>
 
+              {/* переключатель режима цен — суммы в таблице выше, здесь только подписи */}
               <div className={styles.rangeRow}>
                 <div
                   className={`${styles.rangeCol} ${styles.rangeColClickable}`}
@@ -494,9 +498,6 @@ export function Workspace() {
                 >
                   <span className={`${styles.rangeCap} ${priceMode === "min" ? styles.rangeCapActive : ""}`}>
                     Минимум
-                  </span>
-                  <span className={`${styles.rangeValue} ${priceMode === "min" ? styles.rangeValueActive : ""}`}>
-                    {formatPrice(data.summary.total_min)}
                   </span>
                 </div>
                 <div
@@ -506,9 +507,6 @@ export function Workspace() {
                   <span className={`${styles.rangeCap} ${priceMode === "avg" ? styles.rangeCapActive : ""}`}>
                     Средняя
                   </span>
-                  <span className={`${styles.rangeValue} ${styles.rangeValueMain} ${priceMode === "avg" ? styles.rangeValueActive : ""}`}>
-                    {formatPrice(data.summary.total_avg)}
-                  </span>
                 </div>
                 <div
                   className={`${styles.rangeCol} ${styles.rangeColRight} ${styles.rangeColClickable}`}
@@ -516,9 +514,6 @@ export function Workspace() {
                 >
                   <span className={`${styles.rangeCap} ${priceMode === "max" ? styles.rangeCapActive : ""}`}>
                     Максимум
-                  </span>
-                  <span className={`${styles.rangeValue} ${priceMode === "max" ? styles.rangeValueActive : ""}`}>
-                    {formatPrice(data.summary.total_max)}
                   </span>
                 </div>
               </div>

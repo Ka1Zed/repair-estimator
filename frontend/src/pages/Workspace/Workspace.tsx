@@ -39,6 +39,7 @@ const formatNum = (n: number) =>
   n.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const formatQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
+// Регион, по которому реально взялась цена; null → базовая seed-цена (не зависит от города).
 const regionLabel = (region?: string | null) => region ?? "базовая цена";
 
 type PriceMode = "min" | "avg" | "max";
@@ -77,6 +78,8 @@ export function Workspace() {
     [regions, city],
   );
 
+  // silent=true — авто-пересчёт по дебаунсу: молча пропускаем невалидное состояние,
+  // не пугаем пользователя ошибкой, пока он редактирует.
   const runCalculate = useCallback(
     async (silent: boolean) => {
       const geometryValid = rooms.every(
@@ -89,6 +92,7 @@ export function Workspace() {
         return;
       }
 
+      // Невалидные проёмы не отправляем: иначе кривая ширина/высота уедет в wall_area.
       if (rooms.some(roomHasInvalidOpenings)) {
         if (!silent) {
           setError(
@@ -132,6 +136,8 @@ export function Workspace() {
     [rooms, city, repairType, repairOptions],
   );
 
+  // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
+  // Дебаунс схлопывает всё перетаскивание угла в один запрос к бэку.
   useEffect(() => {
     const timer = setTimeout(() => runCalculate(true), 500);
     return () => clearTimeout(timer);
@@ -139,11 +145,13 @@ export function Workspace() {
 
   const handleCalculate = () => runCalculate(false);
 
+  // Кнопка расчёта недоступна, пока есть проёмы с некорректными размерами.
   const hasInvalidOpenings = useMemo(
     () => rooms.some(roomHasInvalidOpenings),
     [rooms],
   );
 
+  // Слайдер вилки: позиция средней между min и max
   const avgPos = useMemo(() => {
     if (!data) return 50;
     const { total_min, total_avg, total_max } = data.summary;
@@ -218,8 +226,12 @@ export function Workspace() {
         volume: `${formatQty(m.quantity)} ${m.unit}`,
         price: rub(Math.round(m.price_avg * priceScale)),
         details: [
-          { label: "Цена за единицу", value: rub(Math.round(m.price_avg * priceScale)) },
-          { label: "Итог по позиции", value: rub(Math.round(m.total_avg * priceScale)) },
+          { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
+          { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
+          { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
+          { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
+          { label: "Цена за единицу", value: rub(m.price_avg) },
+          { label: "Итог по позиции", value: rub(m.total_avg) },
           { label: "Источник цены", value: m.source, url: m.source_url },
           { label: "Регион", value: regionLabel(m.region) },
           ...(m.updated_at
@@ -239,8 +251,8 @@ export function Workspace() {
         price: rub(Math.round(l.price_avg * priceScale)),
         details: [
           { label: "Специалист", value: l.specialist },
-          { label: "Цена за единицу", value: rub(Math.round(l.price_avg * priceScale)) },
-          { label: "Итог по позиции", value: rub(Math.round(l.total_avg * priceScale)) },
+          { label: "Цена за единицу", value: rub(l.price_avg) },
+          { label: "Итог по позиции", value: rub(l.total_avg) },
           { label: "Источник цены", value: l.source, url: l.source_url },
           { label: "Регион", value: regionLabel(l.region) },
         ],

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -61,6 +61,11 @@ class RoomInput(BaseModel):
 class EstimateRequest(BaseModel):
     city: str
     rooms: List[RoomInput]
+    # Стадийность сметы (#190). finish_only (дефолт) — только чистовая отделка;
+    # rough_and_finish — добавить черновые работы (демонтаж, выравнивание, стяжка,
+    # гидроизоляция, грунт). Класса ремонта в контракте нет (#222) — объём задаётся
+    # составом works, а глубину (черновая+чистовая vs только финиш) задаёт scope.
+    scope: Literal["finish_only", "rough_and_finish"] = "finish_only"
 
 
 class GeometrySummary(BaseModel):
@@ -96,6 +101,10 @@ class MaterialItem(BaseModel):
 class LaborItem(BaseModel):
     service: str
     specialist: str
+    # Стадия работы (#190): rough (черновая) / pre_finish (предчистовая) /
+    # finish (чистовая). Классифицирует строку по этапу ремонта, чтобы фронт
+    # мог сгруппировать смету и пользователь не принял финиш за полную смету.
+    stage: Literal["rough", "pre_finish", "finish"]
     volume: float
     unit: str
     price_avg: float
@@ -121,6 +130,10 @@ class Summary(BaseModel):
     total_max: float
 
 class EstimateResponse(BaseModel):
+    # Эхо запрошенной стадийности (#190). finish_only — смета покрывает только
+    # чистовую отделку (без черновых работ); это ЯВНО помечено, чтобы пользователь
+    # не принял финиш за полную смету капремонта (черновые = 40–60% сметы).
+    scope: str
     summary: Summary
     geometry: GeometrySummary
     materials: List[MaterialItem]

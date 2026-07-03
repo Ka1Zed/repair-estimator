@@ -375,9 +375,9 @@ export function Workspace() {
                 </div>
               </div>
               <div className={styles.rangeTrack}>
-                <span className={styles.rangeEnd} style={{ left: "0%" }} />
+                <span className={styles.rangeEnd} style={{ left: 0 }} />
                 <span className={styles.rangeDot} style={{ left: `${avgPos}%` }} />
-                <span className={styles.rangeEnd} style={{ left: "100%" }} />
+                <span className={styles.rangeEnd} style={{ right: 0 }} />
               </div>
 
               {/* вкладки */}

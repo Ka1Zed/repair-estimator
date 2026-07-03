@@ -152,6 +152,12 @@ def seed_test_data(session):
         {"name": "Монтаж розетки", "specialist_type": "Электрик", "unit": "шт"},
         {"name": "Монтаж светильника", "specialist_type": "Электрик", "unit": "шт"},
         {"name": "Монтаж труб", "specialist_type": "Сантехник", "unit": "м"},
+        # Черновые работы (#190).
+        {"name": "Демонтаж", "specialist_type": "Разнорабочий", "unit": "м²"},
+        {"name": "Выравнивание стен", "specialist_type": "Штукатур", "unit": "м²"},
+        {"name": "Стяжка пола", "specialist_type": "Стяжечник", "unit": "м²"},
+        {"name": "Гидроизоляция", "specialist_type": "Гидроизолировщик", "unit": "м²"},
+        {"name": "Грунтование", "specialist_type": "Маляр", "unit": "м²"},
     ]
     for s in services_data:
         svc = LaborService(**s)

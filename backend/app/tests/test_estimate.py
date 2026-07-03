@@ -5,7 +5,9 @@ from decimal import Decimal
 from app.services.material_calc_service import (
     calculate_materials, calculate_engineering_materials, packs_to_buy,
 )
-from app.services.labor_calc_service import calculate_labor, calculate_engineering_labor
+from app.services.labor_calc_service import (
+    calculate_labor, calculate_engineering_labor, calculate_rough_labor,
+)
 from app.services.geometry_service import calculate_room_geometry
 
 
@@ -125,6 +127,42 @@ class TestMaterialCalc:
         assert primer_2['quantity'] == Decimal('12.8304')
         assert primer_2['quantity'] == primer_1['quantity'] * Decimal('2')
 
+    def test_wall_condition_scales_starting_putty(self, db_session):
+        """wall_condition масштабирует только стартовую шпаклёвку; финишная неизменна."""
+        geometry = {
+            'floor_area': Decimal('20.0'),
+            'ceiling_area': Decimal('20.0'),
+            'wall_area': Decimal('48.6'),
+            'perimeter': Decimal('18.0'),
+            'door_width_sum': Decimal('1.2'),
+        }
+        base_opts = {'floor': None, 'walls': 'paint', 'ceiling': None}
+
+        no_field = calculate_materials(geometry, base_opts, db_session)
+        normal = calculate_materials(geometry, {**base_opts, 'wall_condition': 'normal'}, db_session)
+        even = calculate_materials(geometry, {**base_opts, 'wall_condition': 'even'}, db_session)
+        uneven = calculate_materials(geometry, {**base_opts, 'wall_condition': 'uneven'}, db_session)
+
+        def start(mats):
+            return next(m for m in mats if m['name'] == 'Шпаклевка стартовая')['quantity']
+
+        def finish(mats):
+            return next(m for m in mats if m['name'] == 'Шпаклевка финишная')['quantity']
+
+        normal_qty = start(normal)
+        # Дефолт (поле отсутствует) эквивалентен "normal": 48.6 * 5.0 * 1.1 = 267.3
+        assert normal_qty == Decimal('267.3')
+        assert start(no_field) == normal_qty
+        # even ×0.6, uneven ×1.6 к норме.
+        assert start(even) == normal_qty * Decimal('0.6')
+        assert start(uneven) == normal_qty * Decimal('1.6')
+
+        # Финишная шпаклёвка одинакова во всех вариантах: 48.6 * 1.0 * 1.1 = 53.46
+        assert finish(no_field) == Decimal('53.46')
+        assert finish(normal) == finish(no_field)
+        assert finish(even) == finish(no_field)
+        assert finish(uneven) == finish(no_field)
+
 
 
 class TestLaborCalc:
@@ -166,6 +204,65 @@ class TestLaborCalc:
 
         laminate_install = next(item for item in labor if item['service'] == 'Укладка ламината')
         assert laminate_install['volume'] == Decimal('12.0')
+
+    def test_finish_labor_carries_stage(self, db_session):
+        """Каждая отделочная строка помечена стадией: покраска — finish, шпаклёвка — pre_finish (#190)."""
+        geometry = {
+            'floor_area': Decimal('12.0'),
+            'ceiling_area': Decimal('12.0'),
+            'wall_area': Decimal('34.1'),
+            'perimeter': Decimal('14.0'),
+        }
+        labor = calculate_labor(geometry, {'walls': 'paint'}, db_session)
+        by_service = {item['service']: item for item in labor}
+        assert by_service['Покраска стен']['stage'] == 'finish'
+        assert by_service['Шпаклевка стен']['stage'] == 'pre_finish'
+
+
+class TestRoughLabor:
+    """Черновые работы при scope=rough_and_finish (#190)."""
+
+    GEOM = {
+        'floor_area': Decimal('12.0'),
+        'ceiling_area': Decimal('12.0'),
+        'wall_area': Decimal('34.1'),
+        'perimeter': Decimal('14.0'),
+    }
+
+    def test_bathroom_rough_works(self, db_session):
+        """Санузел с плиткой: демонтаж, выравнивание, стяжка, гидроизоляция, грунт — все rough."""
+        rough = calculate_rough_labor(
+            self.GEOM, {'floor': 'tile', 'walls': 'tile'}, 'bathroom', db_session,
+        )
+        by_service = {item['service']: item for item in rough}
+
+        expected = {'Демонтаж', 'Выравнивание стен', 'Стяжка пола', 'Гидроизоляция', 'Грунтование'}
+        assert expected.issubset(set(by_service))
+        # Все черновые строки помечены стадией rough.
+        assert all(item['stage'] == 'rough' for item in rough)
+
+        # Жёсткие связки по объёму: демонтаж/стяжка/гидроизоляция — по полу, выравнивание — по стенам.
+        assert by_service['Демонтаж']['volume'] == Decimal('12.0')
+        assert by_service['Стяжка пола']['volume'] == Decimal('12.0')
+        assert by_service['Гидроизоляция']['volume'] == Decimal('12.0')
+        assert by_service['Выравнивание стен']['volume'] == Decimal('34.1')
+
+    def test_dry_room_without_tile_skips_waterproof(self, db_session):
+        """Жилая комната без плитки: гидроизоляции нет, но демонтаж/выравнивание/стяжка есть."""
+        rough = calculate_rough_labor(
+            self.GEOM, {'floor': 'laminate', 'walls': 'paint'}, 'living', db_session,
+        )
+        services = {item['service'] for item in rough}
+        assert 'Гидроизоляция' not in services
+        assert {'Демонтаж', 'Выравнивание стен', 'Стяжка пола'}.issubset(services)
+
+    def test_dry_room_with_tile_floor_skips_waterproof(self, db_session):
+        """Плитка на полу в сухой комнате гидроизоляцию не тянет — только мокрая зона."""
+        rough = calculate_rough_labor(
+            self.GEOM, {'floor': 'tile', 'walls': 'paint'}, 'living', db_session,
+        )
+        services = {item['service'] for item in rough}
+        assert 'Гидроизоляция' not in services
 
 
 class TestEngineeringCalc:

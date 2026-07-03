@@ -174,6 +174,14 @@ export function Workspace() {
     setIsDividerDragging(false);
   };
 
+  // Слайдер вилки: позиция средней между min и max
+  const avgPos = useMemo(() => {
+    if (!data) return 50;
+    const { total_min, total_avg, total_max } = data.summary;
+    if (total_max <= total_min) return 50;
+    return ((total_avg - total_min) / (total_max - total_min)) * 100;
+  }, [data]);
+
   // --- drag handlers ---
   const getPosFromEvent = (e: React.PointerEvent): number => {
     if (!trackRef.current) return 0;

@@ -127,35 +127,54 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
     doc.text('Геометрия помещений:', 14, currentY);
     doc.setFontSize(10);
     const geomText = Object.entries(data.geometry)
-      .map(([k, v]) => `${geometryLocales[k] || k}: ${v}`) // Используем русификатор
+      .map(([k, v]) => `${geometryLocales[k] || k}: ${v}`) 
       .join(' | ');
     doc.text(geomText, 14, currentY + 6);
-    currentY += 14;
+    currentY += 15; 
     doc.setFontSize(12);
   }
 
   doc.text('Материалы:', 14, currentY);
   autoTable(doc, {
-    startY: currentY + 4,
+    startY: currentY + 5,
     head: [['Наименование', 'Кол-во', 'Ед.', 'Цена', 'Итого']],
     body: data.materials.map(m => [
       m.name, m.quantity, m.unit, formatPricePDF(m.price_avg), formatPricePDF(m.total_avg)
     ]),
-    styles: { font: 'Roboto' }
+    styles: { font: 'Roboto' },
+    headStyles: { halign: 'center' },
+    columnStyles: {
+      0: { halign: 'left', cellWidth: 'auto' }, 
+      1: { halign: 'right', cellWidth: 20 },    
+      2: { halign: 'center', cellWidth: 15 },   
+      3: { halign: 'right', cellWidth: 35 },    
+      4: { halign: 'right', cellWidth: 35 }     
+    }
   });
 
-  currentY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+  
+  currentY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 15;
   doc.text('Работы:', 14, currentY);
   autoTable(doc, {
-    startY: currentY + 4,
+    startY: currentY + 5,
     head: [['Услуга', 'Специалист', 'Объем', 'Ед.', 'Цена', 'Итого']],
     body: data.labor.map(l => [
       l.service, l.specialist, l.volume, l.unit, formatPricePDF(l.price_avg), formatPricePDF(l.total_avg)
     ]),
-    styles: { font: 'Roboto' }
+    styles: { font: 'Roboto' },
+    headStyles: { halign: 'center' },
+    columnStyles: {
+      0: { halign: 'left', cellWidth: 'auto' }, 
+      1: { halign: 'left', cellWidth: 35 },     
+      2: { halign: 'right', cellWidth: 20 },    
+      3: { halign: 'center', cellWidth: 15 },  
+      4: { halign: 'right', cellWidth: 30 },    
+      5: { halign: 'right', cellWidth: 30 }     
+    }
   });
 
-  currentY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+  
+  currentY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 15;
   doc.setFontSize(12);
   doc.text(`Итого (Мин): ${formatPricePDF(data.summary.total_min)}`, 14, currentY);
   doc.text(`Итого (Средняя): ${formatPricePDF(data.summary.total_avg)}`, 14, currentY + 7);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./Workspace.module.css";
 import { exportPdf, exportXlsx } from "../../utils/exportEstimate";
 
@@ -8,7 +8,6 @@ import RoomPointsTable from "../../components/RoomPointsTable";
 import BlueprintUpload from "../../components/BlueprintUpload";
 import OpeningsForm from "../../components/OpeningsForm";
 import { RoomTypeSelector } from "../../components/RoomTypeSelector";
-import { RepairOptionsForm } from "../../components/RepairOptionsForm/RepairOptionsForm";
 
 import type { MaterialItem, LaborItem } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
@@ -47,7 +46,6 @@ export function Workspace() {
   const city = useProjectStore((s) => s.city);
   const setCity = useProjectStore((s) => s.setCity);
   const repairType = useProjectStore((s) => s.repair_type);
-  const repairOptions = useProjectStore((s) => s.repair_options);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
@@ -57,6 +55,12 @@ export function Workspace() {
   const [data, setData] = useState<EstimateResponse | null>(null);
   const [tab, setTab] = useState<"materials" | "labor">("materials");
   const [regions, setRegions] = useState<string[]>([]);
+
+  // resizable split
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dividerDragging = useRef(false);
+  const [splitPct, setSplitPct] = useState(75);
+  const [isDividerDragging, setIsDividerDragging] = useState(false);
 
   // Список городов для селектора. Если текущего города нет в ответе бэка,
   // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
@@ -101,8 +105,6 @@ export function Workspace() {
       try {
         const payload = {
           city,
-          repair_type: repairType,
-          repair_options: repairOptions,
           rooms: rooms.map((room) => ({
             name: room.name,
             room_type: room.room_type,
@@ -126,7 +128,7 @@ export function Workspace() {
         setIsLoading(false);
       }
     },
-    [rooms, city, repairType, repairOptions],
+    [rooms, city],
   );
 
   // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
@@ -144,13 +146,24 @@ export function Workspace() {
     [rooms],
   );
 
-  // Слайдер вилки: позиция средней между min и max
-  const avgPos = useMemo(() => {
-    if (!data) return 50;
-    const { total_min, total_avg, total_max } = data.summary;
-    if (total_max <= total_min) return 50;
-    return ((total_avg - total_min) / (total_max - total_min)) * 100;
-  }, [data]);
+  // --- divider drag handlers ---
+  const handleDividerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dividerDragging.current = true;
+    setIsDividerDragging(true);
+  };
+
+  const handleDividerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dividerDragging.current || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    setSplitPct(Math.min(75, Math.max(25, Math.round(pct))));
+  };
+
+  const handleDividerUp = () => {
+    dividerDragging.current = false;
+    setIsDividerDragging(false);
+  };
 
   const sectionTotal = useMemo(() => {
     if (!data) return 0;
@@ -198,9 +211,9 @@ export function Workspace() {
   );
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} ref={containerRef}>
       {/* ===== ЛЕВО: редактор ===== */}
-      <section className={styles.left}>
+      <section className={styles.left} style={{ width: `${splitPct}%` }}>
         <div className={styles.eyebrow}>Проект · план помещения</div>
         <h1 className={styles.title}>
           Постройте комнату
@@ -218,7 +231,6 @@ export function Workspace() {
           <RoomPolygonEditor />
         </div>
 
-        {/* высота потолка + класс ремонта — сразу под холстом */}
         <div className={styles.paramsRow}>
           <div className={styles.cityField}>
             <div className={styles.blockLabel}>Город (цены)</div>
@@ -243,7 +255,6 @@ export function Workspace() {
               <span className={styles.heightUnit}>м</span>
             </div>
           </div>
-          <RepairOptionsForm />
         </div>
 
         <div className={styles.block}>
@@ -268,6 +279,13 @@ export function Workspace() {
           <BlueprintUpload />
         </div>
 
+        {data && (
+          <div className={styles.planTotal}>
+            <span className={styles.planTotalLabel}>Ориентировочно</span>
+            <span className={styles.planTotalValue}>{formatPrice(data.summary.total_avg)}</span>
+          </div>
+        )}
+
         <button
           className={styles.calcBtn}
           onClick={handleCalculate}
@@ -282,6 +300,15 @@ export function Workspace() {
         )}
         {error && <div className={styles.error}>{error}</div>}
       </section>
+
+      {/* ===== РАЗДЕЛИТЕЛЬ (перетаскивается) ===== */}
+      <div
+        className={`${styles.divider} ${isDividerDragging ? styles.dividerDragging : ""}`}
+        onPointerDown={handleDividerDown}
+        onPointerMove={handleDividerMove}
+        onPointerUp={handleDividerUp}
+        onPointerCancel={handleDividerUp}
+      />
 
       {/* ===== ПРАВО: аналитика ===== */}
       <aside className={styles.right}>
@@ -356,29 +383,38 @@ export function Workspace() {
                 </div>
               </div>
 
-              {/* вилка стоимости */}
+              {/* три итога: материалы / работы / итого × низкая/средняя/высокая */}
               <div className={styles.blockLabel}>Вилка стоимости</div>
-              <div className={styles.rangeRow}>
-                <div className={styles.rangeCol}>
-                  <span className={styles.rangeCap}>Минимум</span>
-                  <span className={styles.rangeValue}>{formatPrice(data.summary.total_min)}</span>
-                </div>
-                <div className={`${styles.rangeCol} ${styles.rangeColCenter}`}>
-                  <span className={`${styles.rangeCap} ${styles.rangeCapAccent}`}>Средняя</span>
-                  <span className={`${styles.rangeValue} ${styles.rangeValueMain}`}>
-                    {formatPrice(data.summary.total_avg)}
-                  </span>
-                </div>
-                <div className={`${styles.rangeCol} ${styles.rangeColRight}`}>
-                  <span className={styles.rangeCap}>Максимум</span>
-                  <span className={styles.rangeValue}>{formatPrice(data.summary.total_max)}</span>
-                </div>
-              </div>
-              <div className={styles.rangeTrack}>
-                <span className={styles.rangeEnd} style={{ left: 0 }} />
-                <span className={styles.rangeDot} style={{ left: `${avgPos}%` }} />
-                <span className={styles.rangeEnd} style={{ right: 0 }} />
-              </div>
+              <table className={styles.summaryTable}>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Низкая</th>
+                    <th>Средняя</th>
+                    <th>Высокая</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Материалы</td>
+                    <td>{formatPrice(data.summary.materials_min)}</td>
+                    <td>{formatPrice(data.summary.materials_avg)}</td>
+                    <td>{formatPrice(data.summary.materials_max)}</td>
+                  </tr>
+                  <tr>
+                    <td>Работы</td>
+                    <td>{formatPrice(data.summary.labor_min)}</td>
+                    <td>{formatPrice(data.summary.labor_avg)}</td>
+                    <td>{formatPrice(data.summary.labor_max)}</td>
+                  </tr>
+                  <tr className={styles.summaryTableTotalRow}>
+                    <td>Итого</td>
+                    <td>{formatPrice(data.summary.total_min)}</td>
+                    <td>{formatPrice(data.summary.total_avg)}</td>
+                    <td>{formatPrice(data.summary.total_max)}</td>
+                  </tr>
+                </tbody>
+              </table>
 
               {/* вкладки */}
               <div className={styles.tabs}>

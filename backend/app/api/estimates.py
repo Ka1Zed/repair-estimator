@@ -103,6 +103,7 @@ def _finish_options(room: RoomInput) -> Dict[str, Any]:
         # Модификаторы живут на уровне поверхности (стены).
         "wallpaper_pattern": bool(w.walls.enabled and w.walls.wallpaper_pattern),
         "primer_two_coats": bool(w.walls.enabled and w.walls.primer_two_coats),
+        "wall_condition": w.walls.wall_condition if w.walls.enabled else None,
     }
 
 

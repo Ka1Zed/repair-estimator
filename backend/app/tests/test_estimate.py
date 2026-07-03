@@ -125,6 +125,42 @@ class TestMaterialCalc:
         assert primer_2['quantity'] == Decimal('12.8304')
         assert primer_2['quantity'] == primer_1['quantity'] * Decimal('2')
 
+    def test_wall_condition_scales_starting_putty(self, db_session):
+        """wall_condition масштабирует только стартовую шпаклёвку; финишная неизменна."""
+        geometry = {
+            'floor_area': Decimal('20.0'),
+            'ceiling_area': Decimal('20.0'),
+            'wall_area': Decimal('48.6'),
+            'perimeter': Decimal('18.0'),
+            'door_width_sum': Decimal('1.2'),
+        }
+        base_opts = {'floor': None, 'walls': 'paint', 'ceiling': None}
+
+        no_field = calculate_materials(geometry, base_opts, db_session)
+        normal = calculate_materials(geometry, {**base_opts, 'wall_condition': 'normal'}, db_session)
+        even = calculate_materials(geometry, {**base_opts, 'wall_condition': 'even'}, db_session)
+        uneven = calculate_materials(geometry, {**base_opts, 'wall_condition': 'uneven'}, db_session)
+
+        def start(mats):
+            return next(m for m in mats if m['name'] == 'Шпаклевка стартовая')['quantity']
+
+        def finish(mats):
+            return next(m for m in mats if m['name'] == 'Шпаклевка финишная')['quantity']
+
+        normal_qty = start(normal)
+        # Дефолт (поле отсутствует) эквивалентен "normal": 48.6 * 5.0 * 1.1 = 267.3
+        assert normal_qty == Decimal('267.3')
+        assert start(no_field) == normal_qty
+        # even ×0.6, uneven ×1.6 к норме.
+        assert start(even) == normal_qty * Decimal('0.6')
+        assert start(uneven) == normal_qty * Decimal('1.6')
+
+        # Финишная шпаклёвка одинакова во всех вариантах: 48.6 * 1.0 * 1.1 = 53.46
+        assert finish(no_field) == Decimal('53.46')
+        assert finish(normal) == finish(no_field)
+        assert finish(even) == finish(no_field)
+        assert finish(uneven) == finish(no_field)
+
 
 
 class TestLaborCalc:

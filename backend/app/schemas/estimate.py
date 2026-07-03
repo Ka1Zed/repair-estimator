@@ -24,6 +24,9 @@ class SurfaceWork(BaseModel):
     # Пористое/сильно впитывающее основание: грунтовка в 2 слоя вместо 1.
     # См. estimation-rules.md.
     primer_two_coats: Optional[bool] = False
+    # Состояние/кривизна основания под выравнивание (even/normal/uneven):
+    # масштабирует расход только стартовой шпаклёвки. См. estimation-rules.md.
+    wall_condition: Optional[str] = None
 
 class ElectricWork(BaseModel):
     """Электрика комнаты. Числа опциональны: при null бэкенд ставит дефолт от площади."""

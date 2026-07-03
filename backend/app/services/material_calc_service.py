@@ -124,6 +124,14 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
 # Надбавка на подгонку рисунка (раппорт) у обоев под рисунок — см. estimation-rules.md.
 WALLPAPER_PATTERN_FACTOR = Decimal("1.3")
 
+# Кривизна основания под выравнивание → множитель расхода СТАРТОВОЙ шпаклёвки
+# (норма 5.0 кг/м², вилка 3–8, см. estimation-rules.md). Финишную не трогает.
+WALL_CONDITION_FACTOR = {
+    "even":   Decimal("0.6"),   # ровные стены ≈3 кг/м²
+    "normal": Decimal("1.0"),   # дефолт, текущая норма 5.0 кг/м²
+    "uneven": Decimal("1.6"),   # кривые ≈8 кг/м²
+}
+
 
 def quantity_of(
     material: Material,
@@ -151,6 +159,12 @@ def quantity_of(
         return base * w, base
     if unit in ("кг", "м²"):
         base = area * (c if c > 0 else Decimal(1))
+        # Кривизна основания масштабирует только стартовую шпаклёвку (выравнивание).
+        # Множитель складываем в base (до запаса), как раппорт у обоев.
+        if material.name == M_PUTTY_START:
+            base = base * WALL_CONDITION_FACTOR.get(
+                repair_options.get("wall_condition"), Decimal(1)
+            )
         return base * w, base
     if unit == "м":  # плинтус: периметр − ширина дверей
         length = D(geom.get("perimeter")) - D(geom.get("door_width_sum"))

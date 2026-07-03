@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { RoomTypeKey } from "../types/roomTypes";
+import type { RoomTypeKey, FloorFinish, WallFinish, CeilingFinish } from "../types/roomTypes";
+import { roomTypes } from "../types/roomTypes";
 import { demoRoomData } from "../data/demoRoom";
 import { uid } from "../utils/uid";
 
@@ -27,6 +28,56 @@ export interface RepairOptions {
   plumbing?: boolean;
 }
 
+export interface FloorWorks {
+  enabled: boolean;
+  finish: FloorFinish | null;
+}
+
+export interface WallsWorks {
+  enabled: boolean;
+  finish: WallFinish | null;
+  wallpaper_pattern: boolean;
+  primer_two_coats: boolean;
+}
+
+export interface CeilingWorks {
+  enabled: boolean;
+  finish: CeilingFinish | null;
+  primer_two_coats: boolean;
+}
+
+export interface ElectricWorks {
+  enabled: boolean;
+  sockets: number | null;
+  lights: number | null;
+  cable_m: number | null;
+}
+
+export interface PlumbingWorks {
+  enabled: boolean;
+  points: number | null;
+  pipe_m: number | null;
+}
+
+export interface RoomWorks {
+  floor: FloorWorks;
+  walls: WallsWorks;
+  ceiling: CeilingWorks;
+  electric: ElectricWorks;
+  plumbing: PlumbingWorks;
+}
+
+export function defaultWorksForRoomType(rt: RoomTypeKey): RoomWorks {
+  const rule = roomTypes[rt];
+  return {
+    floor: { enabled: true, finish: rule.floor[0] ?? null },
+    walls: { enabled: true, finish: rule.walls[0] ?? null, wallpaper_pattern: false, primer_two_coats: false },
+    ceiling: { enabled: true, finish: rule.ceiling[0] ?? null, primer_two_coats: false },
+    electric: { enabled: true, sockets: 4, lights: 2, cable_m: null },
+    plumbing: { enabled: rule.plumbing.required, points: rule.plumbing.required ? 2 : null, pipe_m: null },
+  };
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -34,6 +85,7 @@ export interface Room {
   room_type: RoomTypeKey;
   points: Point[];
   openings: Opening[];
+  works: RoomWorks;
 }
 
 interface ProjectState {
@@ -61,6 +113,7 @@ interface ProjectState {
     value: string | number,
   ) => void;
   deleteOpening: (openingIndex: number) => void;
+  updateRoomWorks: (roomIndex: number, works: Partial<RoomWorks>) => void;
   clearActiveRoom: () => void;
   loadDemoRoom: () => void;
   resetProject: () => void;
@@ -86,6 +139,7 @@ const createDefaultRoom = (name: string): Room => ({
     { x: 0, y: 3 },
   ],
   openings: [],
+  works: defaultWorksForRoomType("living"),
 });
 
 // Город по умолчанию совпадает с DEFAULT_REGION на бэкенде (app/api/regions.py):
@@ -223,6 +277,16 @@ export const useProjectStore = create<ProjectState>()(
           repair_options: { ...state.repair_options, ...options },
         })),
 
+      updateRoomWorks: (roomIndex, works) =>
+        set((state) => {
+          const newRooms = [...state.rooms];
+          newRooms[roomIndex] = {
+            ...newRooms[roomIndex],
+            works: { ...newRooms[roomIndex].works, ...works },
+          };
+          return { rooms: newRooms };
+        }),
+
       clearActiveRoom: () =>
         set((state) => {
           const newRooms = [...state.rooms];
@@ -256,7 +320,7 @@ export const useProjectStore = create<ProjectState>()(
     }),
     {
       name: "repair-estimator-draft",
-      version: 2,
+      version: 3,
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>;
         if (version === 1) {
@@ -270,6 +334,18 @@ export const useProjectStore = create<ProjectState>()(
               const r = { ...room };
               delete r['repair_options'];
               return r;
+            }),
+          };
+        }
+        if (version === 2) {
+          // works переехал с проектного уровня (repair_options) на уровень комнаты
+          const rooms = (state.rooms as Array<Record<string, unknown>>) ?? [];
+          return {
+            ...state,
+            rooms: rooms.map((room) => {
+              if (room.works) return room;
+              const rt = (room.room_type as RoomTypeKey) ?? "living";
+              return { ...room, works: defaultWorksForRoomType(rt) };
             }),
           };
         }

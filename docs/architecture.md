@@ -7,12 +7,17 @@
 
 ```ts
 ProjectState {
-  repair_type:    "cosmetic" | "base" | "extended"
-  repair_options: RepairOptions          // опции работ, общие для всего проекта
-  rooms:          Room[]
+  city:            string                // город для расчёта цен
+  repair_type:     "cosmetic" | "base" | "extended"  // для PDF-экспорта
+  repair_options:  RepairOptions         // устаревшее поле, не отправляется в API
+  rooms:           Room[]
   activeRoomIndex: number
 }
 ```
+
+> **Примечание:** `repair_type` и `repair_options` сохраняются в сторе для совместимости,
+> но в новый API (`POST /api/estimates/calculate`) **не отправляются**. Вместо них каждая
+> комната содержит поле `works` (см. ниже).
 
 ## Тип Room
 
@@ -23,9 +28,10 @@ ProjectState {
 | `id`        | `string` (UUID)                | Локальный идентификатор, в API не отправляется    |
 | `name`      | `string`                       | Название комнаты («Спальня», «Кухня»)             |
 | `height`    | `number \| string`             | Высота потолка в метрах; конвертировать через `Number()` перед отправкой |
-| `room_type` | `"living" \| "kitchen" \| "bathroom" \| "hallway"` | Тип комнаты                   |
+| `room_type` | `"living" \| "kitchen" \| "bathroom" \| "hallway"` | Тип комнаты (пресет дефолтов)       |
 | `points`    | `{ x: number \| string, y: number \| string }[]` | Вершины многоугольника в метрах; конвертировать через `Number()` перед отправкой |
 | `openings`  | `Opening[]`                    | Проёмы (двери и окна)                             |
+| `works`     | `RoomWorks`                    | Состав работ и отделка — на уровне комнаты        |
 
 ## Тип Opening
 
@@ -36,30 +42,35 @@ ProjectState {
 | `width`  | `number \| string`     | Ширина в метрах; конвертировать через `Number()` перед отправкой |
 | `height` | `number \| string`     | Высота в метрах; конвертировать через `Number()` перед отправкой |
 
-## Тип RepairOptions (уровень проекта)
+## Тип RoomWorks
 
-`repair_options` — единый объект для всего проекта, не привязан к отдельной комнате.
-Управляется компонентом `WorksCheckboxes` и применяется ко всем комнатам при расчёте.
+`works` — объект на каждую комнату. Управляется компонентом `WorksPanel`.
+Допустимые `finish`-значения для каждого типа комнаты — `allowedWorks(room_type)` из `roomTypes.ts`.
 
-| Поле       | Тип                  | Значения                                           |
-|------------|----------------------|----------------------------------------------------|
-| `floor`    | `string \| null`     | `"laminate"`, `"linoleum"`, `"parquet"`, `"tile"`, `null` |
-| `walls`    | `string \| null`     | `"paint"`, `"wallpaper"`, `"tile"`, `null`         |
-| `ceiling`  | `string \| null`     | `"paint"`, `"stretch"`, `null`                     |
-| `electric` | `string \| null`     | `"basic"`, `"extended"`, `null`                    |
-| `plumbing` | `boolean`            | Сантехника                                         |
+### Отделочные группы
 
-Допустимые значения per room_type — см. `docs/room-types.json`.
+| Ключ       | Поле `enabled` | Поле `finish`                                       | Модификаторы                                      |
+|------------|----------------|-----------------------------------------------------|---------------------------------------------------|
+| `floor`    | `boolean`      | `"laminate" \| "linoleum" \| "parquet" \| "tile" \| null` | —                                          |
+| `walls`    | `boolean`      | `"paint" \| "wallpaper" \| "tile" \| "moisture_paint" \| null` | `wallpaper_pattern: boolean`, `primer_two_coats: boolean` |
+| `ceiling`  | `boolean`      | `"paint" \| "moisture_paint" \| "stretch" \| null`  | `primer_two_coats: boolean`                       |
+
+### Инженерные группы
+
+| Ключ        | Поле `enabled` | Числовые поля                                        |
+|-------------|----------------|------------------------------------------------------|
+| `electric`  | `boolean`      | `sockets: number \| null`, `lights: number \| null`, `cable_m: number \| null` |
+| `plumbing`  | `boolean`      | `points: number \| null`, `pipe_m: number \| null`   |
+
+Сантехника (`plumbing`) отображается в `WorksPanel` только если `allowedWorks(room_type).plumbing.available === true`.
 
 ## Сборка payload для POST /api/estimates/calculate
 
-Frontend 2 (`EstimateResult.tsx`) строит тело запроса так:
+`Workspace.tsx` строит тело запроса так:
 
 ```ts
 {
-  city: "Казань",                  // TODO: вынести в стор
-  repair_type,                     // из стора
-  repair_options,                  // из стора (проектный уровень)
+  city,                    // из стора
   rooms: rooms.map(room => ({
     name: room.name,
     room_type: room.room_type,
@@ -70,6 +81,7 @@ Frontend 2 (`EstimateResult.tsx`) строит тело запроса так:
       width: Number(op.width),
       height: Number(op.height),
     })),
+    works: room.works,     // состав работ на уровне комнаты
   })),
 }
 ```
@@ -79,5 +91,7 @@ Frontend 2 (`EstimateResult.tsx`) строит тело запроса так:
 ## Инварианты (не нарушать)
 
 - `height`, `x`, `y`, `width`, `height` в проёмах хранятся как `number | string` (пользователь может ввести строку в input). Перед отправкой в API всегда конвертировать через `Number()`.
-- `repair_options` — один на проект. Если комнатам нужны разные опции, это потребует изменения API-контракта (задача за рамками MVP).
+- `works` — один объект на комнату. Разные комнаты могут иметь разные наборы работ.
+- `works.floor.finish` (и аналогично walls/ceiling) валидируется на фронте по `allowedWorks(room_type)`, но бэкенд не отвергает нетипичные комбинации.
 - `activeRoomIndex` — только UI-состояние, в API не отправляется.
+- Версия стора: **3**. Миграция v1→v2 переносит `repair_options` с уровня комнат на уровень проекта; v2→v3 добавляет `works` в каждую комнату по умолчанию из `defaultWorksForRoomType(room_type)`.

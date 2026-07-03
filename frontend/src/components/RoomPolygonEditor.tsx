@@ -89,7 +89,7 @@ export default function RoomPolygonEditor() {
 
   if (points.length < 3) {
     return (
-      <div style={{ marginTop: "20px", width: "100%", maxWidth: "450px" }}>
+      <div style={{ marginTop: "20px", width: "100%" }}>
         <div style={{ color: "#888", marginBottom: "15px" }}>
           Добавьте минимум 3 точки для отображения плана или загрузите готовый
           пример.
@@ -278,7 +278,7 @@ export default function RoomPolygonEditor() {
   };
 
   return (
-    <div style={{ marginTop: "20px", width: "100%", maxWidth: "450px" }}>
+    <div style={{ marginTop: "20px", width: "100%" }}>
       <div
         style={{
           display: "flex",

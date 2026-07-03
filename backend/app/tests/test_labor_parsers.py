@@ -12,7 +12,7 @@ from app.db.models import LaborPrice, LaborService, PriceSource
 from app.parsers.base import BaseParser, ParsedPrice
 from app.parsers.garantstroikompleks_parser import GarantStroiParser
 from app.parsers.kaz_stroyka_parser import KazStroykaParser
-from app.parsers.labor_table_parser import _parse_price
+from app.parsers.labor_table_parser import LABOR_SERVICE_MAP, _matches, _parse_price
 from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
 from app.parsers.prorabneva_parser import ProrabnevaParser
 from app.parsers.remont_uroven_parser import RemontUrovenParser
@@ -280,3 +280,28 @@ def test_labor_single_site_reports_one_source(db_session):
     finally:
         db_session.delete(row)
         db_session.commit()
+
+
+class TestRoughWorksRouting:
+    """Черновые строки прайса роутятся в отдельные услуги, а не выкидываются (#190)."""
+
+    def test_rough_rows_match_their_services(self):
+        """Демонтаж/выравнивание/стяжка/гидроизоляция/грунт находят свою услугу."""
+        cases = {
+            "Демонтаж перегородки": "Демонтаж",
+            "Выравнивание стен штукатуркой": "Выравнивание стен",
+            "Устройство стяжки пола": "Стяжка пола",
+            "Гидроизоляция пола санузла": "Гидроизоляция",
+            "Грунтование стен": "Грунтование",
+        }
+        for row_name, service in cases.items():
+            assert _matches(row_name.lower(), LABOR_SERVICE_MAP[service]), \
+                f"строка «{row_name}» не попала в услугу «{service}»"
+
+    def test_finish_services_still_exclude_rough(self):
+        """Финишные услуги по-прежнему исключают черновые строки — цена финиша не засоряется."""
+        assert not _matches("демонтаж старой краски со стен", LABOR_SERVICE_MAP["Покраска стен"])
+        assert not _matches("выравнивание стен штукатуркой", LABOR_SERVICE_MAP["Покраска стен"])
+        assert not _matches("грунтование стен", LABOR_SERVICE_MAP["Покраска стен"])
+        # А чистая покраска стен в свою услугу попадает.
+        assert _matches("покраска стен в два слоя", LABOR_SERVICE_MAP["Покраска стен"])

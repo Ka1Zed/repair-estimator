@@ -515,6 +515,71 @@ def test_plinth_subtracts_door_width():
     assert plinth["quantity"] == pytest.approx(14.0)
 
 
+def _bathroom_payload(scope=None):
+    """Санузел с плиткой; scope=None → поле не отправляем (проверяем дефолт)."""
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Санузел",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0}, {"x": 2, "y": 0},
+                    {"x": 2, "y": 2}, {"x": 0, "y": 2}
+                ],
+                "room_type": "bathroom",
+                "openings": [{"type": "door", "width": 0.8, "height": 2.0}],
+                "works": W(floor="tile", walls="tile", ceiling=None,
+                           electric=True, plumbing=True),
+            }
+        ],
+    }
+    if scope is not None:
+        payload["scope"] = scope
+    return payload
+
+
+def test_finish_only_is_default_and_labeled():
+    """Дефолт scope=finish_only: черновых работ нет, ответ явно помечен финишным (#190)."""
+    response = client.post("/api/estimates/calculate", json=_bathroom_payload())
+    assert response.status_code == 200
+    data = response.json()
+
+    # Ответ явно сообщает, что это только финиш (фронт не выдаст его за полную смету).
+    assert data["scope"] == "finish_only"
+
+    services = {x["service"] for x in data["labor"]}
+    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+        assert rough not in services
+    # У каждой строки работ есть стадия.
+    assert all("stage" in lab for lab in data["labor"])
+
+
+def test_rough_scope_adds_rough_works():
+    """scope=rough_and_finish: черновые работы санузла попадают в смету со стадией rough (#190)."""
+    response = client.post("/api/estimates/calculate",
+                           json=_bathroom_payload("rough_and_finish"))
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "rough_and_finish"
+
+    labor = {x["service"]: x for x in data["labor"]}
+    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+        assert rough in labor, f"нет черновой работы «{rough}»"
+        assert labor[rough]["stage"] == "rough"
+        assert labor[rough]["total_avg"] > 0
+
+    # Гидроизоляция санузла обязательна и считается по площади пола (4 м²).
+    assert labor["Гидроизоляция"]["volume"] == pytest.approx(4.0)
+
+
+def test_invalid_scope_rejected():
+    """Неизвестный scope отклоняется валидацией (422)."""
+    response = client.post("/api/estimates/calculate",
+                           json=_bathroom_payload("only_rough"))
+    assert response.status_code == 422
+
+
 def test_invalid_door_height():
     """Дверь выше комнаты → 422."""
     payload = {

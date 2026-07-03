@@ -10,5 +10,10 @@
   {"name": "Прокладка кабеля", "specialist_type": "Электрик", "unit": "м"},
   {"name": "Монтаж розетки", "specialist_type": "Электрик", "unit": "шт"},
   {"name": "Монтаж светильника", "specialist_type": "Электрик", "unit": "шт"},
-  {"name": "Монтаж труб", "specialist_type": "Сантехник", "unit": "м"}
+  {"name": "Монтаж труб", "specialist_type": "Сантехник", "unit": "м"},
+  {"name": "Демонтаж", "specialist_type": "Разнорабочий", "unit": "м²"},
+  {"name": "Выравнивание стен", "specialist_type": "Штукатур", "unit": "м²"},
+  {"name": "Стяжка пола", "specialist_type": "Стяжечник", "unit": "м²"},
+  {"name": "Гидроизоляция", "specialist_type": "Гидроизолировщик", "unit": "м²"},
+  {"name": "Грунтование", "specialist_type": "Маляр", "unit": "м²"}
 ]

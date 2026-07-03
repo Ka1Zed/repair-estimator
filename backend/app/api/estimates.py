@@ -16,7 +16,9 @@ from app.services.geometry_service import calculate_room_geometry
 from app.services.material_calc_service import (
     calculate_materials, calculate_engineering_materials, packs_to_buy,
 )
-from app.services.labor_calc_service import calculate_labor, calculate_engineering_labor
+from app.services.labor_calc_service import (
+    calculate_labor, calculate_engineering_labor, calculate_rough_labor,
+)
 from app.services.repair_coeffs_service import CONTINGENCY
 from app.services.price_aggregator_service import get_price, get_labor_price
 from app.parsers.base import BaseParser
@@ -144,6 +146,13 @@ def calculate_estimate(
             geometry=geometry, repair_options=finish_options, db=db
         ))
 
+        # --- черновые работы (#190): только при scope=rough_and_finish ---
+        if request.scope == "rough_and_finish":
+            all_labor.extend(calculate_rough_labor(
+                geometry=geometry, repair_options=finish_options,
+                room_type=room.room_type, db=db,
+            ))
+
         # --- инженерка по явным числам works (дефолты от типа/площади) ---
         sockets, lights, cable_m = _resolve_electric(room, geometry['floor_area'])
         points, pipe_m = _resolve_plumbing(room)
@@ -245,6 +254,7 @@ def calculate_estimate(
         if service not in labor_groups:
             labor_groups[service] = {
                 'specialist': job['specialist'],
+                'stage': job['stage'],
                 'unit': job['unit'],
                 'volume': Decimal(0),
             }
@@ -270,6 +280,7 @@ def calculate_estimate(
         labor_response.append(LaborItem(
             service=service,
             specialist=group['specialist'],
+            stage=group['stage'],
             volume=float(volume),
             unit=group['unit'],
             price_avg=float(price_avg),
@@ -310,6 +321,7 @@ def calculate_estimate(
     )
 
     return EstimateResponse(
+        scope=request.scope,
         summary=summary,
         geometry=geometry_summary,
         materials=materials_response,

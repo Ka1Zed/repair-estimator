@@ -38,6 +38,45 @@ S_SOCKET_MOUNT  = "Монтаж розетки"
 S_LIGHT_MOUNT   = "Монтаж светильника"
 S_PIPE_MOUNT    = "Монтаж труб"
 S_PLUMBING      = "Сантехнические работы"
+# Черновые работы (#190) — добавляются только при scope=rough_and_finish.
+S_DEMOLITION    = "Демонтаж"
+S_LEVEL_WALLS   = "Выравнивание стен"
+S_SCREED_FLOOR  = "Стяжка пола"
+S_WATERPROOF    = "Гидроизоляция"
+S_PRIMER        = "Грунтование"
+
+
+# ---- стадии ремонта (#190): rough / pre_finish / finish ----
+# Источник правды — docs/estimation-rules.md, раздел «Стадии работ и порядок».
+# Мапа keyed по имени операции; строка без записи считается finish (чистовая).
+STAGE_BY_SERVICE = {
+    # черновая: снос, выравнивание, мокрые процессы, грунт, разводка инженерки
+    S_DEMOLITION:   "rough",
+    S_LEVEL_WALLS:  "rough",
+    S_SCREED_FLOOR: "rough",
+    S_WATERPROOF:   "rough",
+    S_PRIMER:       "rough",
+    S_CABLE_LAY:    "rough",   # разводка электрики — черновой этап
+    S_PIPE_MOUNT:   "rough",   # разводка сантехники — черновой этап
+    # предчистовая: подготовка основания под финиш
+    S_PUTTY_WALLS:  "pre_finish",
+    # чистовая: финишная отделка и установка приборов
+    S_PAINT_WALLS:   "finish",
+    S_PAINT_CEILING: "finish",
+    S_LAY_LAMINATE:  "finish",
+    S_LAY_TILE:      "finish",
+    S_SOCKET_MOUNT:  "finish",
+    S_LIGHT_MOUNT:   "finish",
+    S_PLUMBING:      "finish",
+}
+
+# Типы комнат-мокрых зон: гидроизоляция обязательна (docs/estimation-rules.md).
+WET_ROOM_TYPES = {"bathroom", "wc", "toilet", "санузел"}
+
+
+def stage_of(service_name: str) -> str:
+    """Стадия ремонта по имени операции; дефолт — finish (чистовая)."""
+    return STAGE_BY_SERVICE.get(service_name, "finish")
 
 
 def _labor_selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tuple]:
@@ -121,6 +160,7 @@ def _labor_rows(selections: List[tuple], db: Session, seed_id) -> List[Dict[str,
         result.append({
             "service": service.name,                 # операция
             "specialist": service.specialist_type,   # ← поле specialist_type, не specialist
+            "stage": stage_of(service.name),         # стадия ремонта (#190)
             "volume": volume,
             "unit": service.unit,
             "price_min": p_min,                       # цена за единицу
@@ -154,6 +194,41 @@ def calculate_labor(
         price_min/avg/max (за единицу), total_min/avg/max (= volume * price), source
     """
     return _labor_rows(_labor_selections(repair_options, geometry), db, _seed_source_id(db))
+
+
+def calculate_rough_labor(
+    geometry: Dict[str, Any],
+    repair_options: Dict[str, Any],
+    room_type: str,
+    db: Session,
+) -> List[Dict[str, Any]]:
+    """Черновые работы одной комнаты (#190), только при scope=rough_and_finish.
+
+    Жёсткие связки (docs/estimation-rules.md, «Стадии работ и порядок»):
+      - демонтаж старой отделки — всегда (по площади пола);
+      - отделка стен (покраска/обои/плитка) тянет выравнивание стен + грунт;
+      - отделка пола тянет стяжку;
+      - мокрая зона или плитка на полу тянет гидроизоляцию.
+
+    Материалы черновых стадий пока не считаем — это отдельная строка работ
+    (labor-only), материалы черновой — follow-up (см. issue #190).
+    """
+    walls = repair_options.get("walls")
+    floor = repair_options.get("floor")
+    wall_area = D(geometry.get("wall_area"))
+    floor_area = D(geometry.get("floor_area"))
+
+    sel: List[tuple] = [(S_DEMOLITION, floor_area)]
+
+    if walls is not None:
+        sel.append((S_LEVEL_WALLS, wall_area))   # плитка/покраска тянут выравнивание
+        sel.append((S_PRIMER, wall_area))        # грунт между черновой и предчистовой
+    if floor is not None:
+        sel.append((S_SCREED_FLOOR, floor_area))
+    if room_type in WET_ROOM_TYPES or floor == "tile":
+        sel.append((S_WATERPROOF, floor_area))   # гидроизоляция обязательна в мокрой зоне
+
+    return _labor_rows(sel, db, _seed_source_id(db))
 
 
 def calculate_engineering_labor(

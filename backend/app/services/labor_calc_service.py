@@ -71,7 +71,9 @@ STAGE_BY_SERVICE = {
 }
 
 # Типы комнат-мокрых зон: гидроизоляция обязательна (docs/estimation-rules.md).
-WET_ROOM_TYPES = {"bathroom", "wc", "toilet", "санузел"}
+# Значения — id из docs/room-types.json. Появится новый мокрый тип (напр. кухня-
+# мойка) — добавить и сюда, и в room-types.json синхронно.
+WET_ROOM_TYPES = {"bathroom"}
 
 
 def stage_of(service_name: str) -> str:
@@ -208,7 +210,8 @@ def calculate_rough_labor(
       - демонтаж старой отделки — всегда (по площади пола);
       - отделка стен (покраска/обои/плитка) тянет выравнивание стен + грунт;
       - отделка пола тянет стяжку;
-      - мокрая зона или плитка на полу тянет гидроизоляцию.
+      - мокрая зона (санузел) тянет гидроизоляцию; в сухой комнате плитка на полу
+        сама по себе гидроизоляцию не требует.
 
     Материалы черновых стадий пока не считаем — это отдельная строка работ
     (labor-only), материалы черновой — follow-up (см. issue #190).
@@ -225,7 +228,7 @@ def calculate_rough_labor(
         sel.append((S_PRIMER, wall_area))        # грунт между черновой и предчистовой
     if floor is not None:
         sel.append((S_SCREED_FLOOR, floor_area))
-    if room_type in WET_ROOM_TYPES or floor == "tile":
+    if room_type in WET_ROOM_TYPES:
         sel.append((S_WATERPROOF, floor_area))   # гидроизоляция обязательна в мокрой зоне
 
     return _labor_rows(sel, db, _seed_source_id(db))

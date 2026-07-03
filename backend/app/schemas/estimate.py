@@ -104,7 +104,7 @@ class LaborItem(BaseModel):
     # Стадия работы (#190): rough (черновая) / pre_finish (предчистовая) /
     # finish (чистовая). Классифицирует строку по этапу ремонта, чтобы фронт
     # мог сгруппировать смету и пользователь не принял финиш за полную смету.
-    stage: str
+    stage: Literal["rough", "pre_finish", "finish"]
     volume: float
     unit: str
     price_avg: float

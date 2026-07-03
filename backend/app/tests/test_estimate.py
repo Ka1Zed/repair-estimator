@@ -256,6 +256,14 @@ class TestRoughLabor:
         assert 'Гидроизоляция' not in services
         assert {'Демонтаж', 'Выравнивание стен', 'Стяжка пола'}.issubset(services)
 
+    def test_dry_room_with_tile_floor_skips_waterproof(self, db_session):
+        """Плитка на полу в сухой комнате гидроизоляцию не тянет — только мокрая зона."""
+        rough = calculate_rough_labor(
+            self.GEOM, {'floor': 'tile', 'walls': 'paint'}, 'living', db_session,
+        )
+        services = {item['service'] for item in rough}
+        assert 'Гидроизоляция' not in services
+
 
 class TestEngineeringCalc:
     """Электрика/сантехника по явным числам works (#222)."""

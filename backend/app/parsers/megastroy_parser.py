@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.parsers import headless_session
+from app.parsers._stats import filter_outliers
 from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
@@ -95,29 +96,6 @@ def _item_url(item, page_url: str) -> str | None:
     return abs_url if abs_url.startswith(("http://", "https://")) else None
 
 
-def _filter_outliers(
-    items: list[tuple[Decimal, str | None]],
-) -> list[tuple[Decimal, str | None]]:
-    # Отсекаем ценовые выбросы методом Тьюки (1.5·IQR): категория Мегастроя
-    # смешивает грунты/колеры по ~175 ₽ и дизайнерские краски по ~15000 ₽, из-за
-    # чего вилка раздувалась в десятки раз (#207). Считаем квартили по ценам и
-    # оставляем товары в пределах [Q1−1.5·IQR, Q3+1.5·IQR]. Представитель-источник
-    # (#197) выбирается уже из отфильтрованного набора → ссылка ведёт на
-    # релевантный товар, а не на нишевую спецкраску у края категории.
-    if len(items) < 4:
-        # На малой выборке квартили бессмысленны — оставляем как есть.
-        return items
-    prices = sorted(price for price, _ in items)
-    q1, _, q3 = statistics.quantiles(prices, n=4)
-    iqr = q3 - q1
-    lo = q1 - Decimal("1.5") * iqr
-    hi = q3 + Decimal("1.5") * iqr
-    filtered = [it for it in items if lo <= it[0] <= hi]
-    # Защита от вырожденного случая (все цены равны → iqr=0 → отсечь нечего):
-    # если фильтр вдруг всё выкинул, откатываемся к исходной выборке.
-    return filtered or items
-
-
 def _parse_page(html: str, page_url: str) -> list[tuple[Decimal, str | None]]:
     # Достаёт со страницы пары (цена, ссылка на карточку товара).
     soup = BeautifulSoup(html, "html.parser")
@@ -182,7 +160,7 @@ class MegastroyParser(BaseParser):
         # Категория смешивает разнородные товары — отсекаем ценовые выбросы (#207),
         # иначе min/avg/max и товар-представитель (#197) считаются по всей категории.
         raw_count = len(items)
-        items = _filter_outliers(items)
+        items = filter_outliers(items, key=lambda it: it[0])
         if len(items) < raw_count:
             logger.info(
                 f"  Мегастрой '{material_name}': отброшено выбросов "

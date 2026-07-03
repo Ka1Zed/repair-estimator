@@ -8,11 +8,11 @@ from decimal import Decimal
 import pytest
 
 from app.parsers import megastroy_parser
+from app.parsers._stats import filter_outliers
 from app.parsers.megastroy_parser import (
     CATEGORY_MAP,
     MegastroyParser,
     _build_headers,
-    _filter_outliers,
     _parse_page,
 )
 
@@ -106,7 +106,7 @@ def _items(*prices: str) -> list[tuple[Decimal, str | None]]:
 def test_filter_outliers_drops_high_designer_paint():
     # Бытовые интерьерные краски в узкой полосе + один дизайнерский выброс 14999.
     items = _items("175", "200", "210", "220", "230", "250", "14999")
-    filtered = _filter_outliers(items)
+    filtered = filter_outliers(items, key=lambda it: it[0])
     prices = [p for p, _ in filtered]
     assert Decimal("14999") not in prices
     assert max(prices) / min(prices) < 4  # вилка сузилась с ~85× до разумной
@@ -115,13 +115,13 @@ def test_filter_outliers_drops_high_designer_paint():
 def test_filter_outliers_keeps_small_sample():
     # На выборке < 4 квартили бессмысленны — ничего не отсекаем.
     items = _items("100", "9000", "14999")
-    assert _filter_outliers(items) == items
+    assert filter_outliers(items, key=lambda it: it[0]) == items
 
 
 def test_filter_outliers_keeps_equal_prices():
     # Все цены равны → IQR=0 → отсекать нечего, выборка не должна опустеть.
     items = _items("250", "250", "250", "250")
-    assert _filter_outliers(items) == items
+    assert filter_outliers(items, key=lambda it: it[0]) == items
 
 
 def test_fetch_price_excludes_outliers_from_spread_and_source(monkeypatch):

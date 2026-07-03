@@ -6,6 +6,7 @@ from decimal import Decimal
 import requests
 from bs4 import BeautifulSoup
 
+from app.parsers._stats import filter_outliers
 from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
@@ -134,29 +135,6 @@ def _matches(name: str, rule: dict) -> bool:
     return True
 
 
-def _filter_outliers(items: list, key=lambda x: x) -> list:
-    # Отсев ценовых выбросов методом Тьюки (1.5·IQR) для прайсов работ, по образцу
-    # megastroy_parser._filter_outliers (#207). Один прайс мешает мелкие операции
-    # (розетка 180 ₽) и нишевые дорогие работы (7500 ₽) под одной услугой, из-за
-    # чего региональная вилка раздувалась в разы (#242). Считаем квартили по ценам и
-    # оставляем строки в пределах [Q1−1.5·IQR, Q3+1.5·IQR]. `key` достаёт цену из
-    # элемента: у LaborTableParser это пара (цена, url), у Rembrigada — сама цена.
-    # Источник-представитель (#166) затем выбирается уже из отфильтрованного набора.
-    if len(items) < 4:
-        # На малой выборке квартили бессмысленны — оставляем как есть.
-        return items
-    prices = sorted(key(it) for it in items)
-    q1, _, q3 = statistics.quantiles(prices, n=4)
-    iqr = q3 - q1
-    lo = q1 - Decimal("1.5") * iqr
-    hi = q3 + Decimal("1.5") * iqr
-    filtered = [it for it in items if lo <= key(it) <= hi]
-    # Защита от вырождения (все цены равны → iqr=0 → отсекать нечего): если фильтр
-    # вдруг всё выкинул, откатываемся к исходной выборке — цена работы не должна
-    # пропасть и уйти в seed из-за фильтра (#242).
-    return filtered or items
-
-
 class LaborTableParser(BaseParser):
     '''
     Базовый парсер прайса отделочных работ из HTML-таблицы.
@@ -243,7 +221,7 @@ class LaborTableParser(BaseParser):
         # Отсекаем ценовые выбросы (#242) до min/avg/max и до выбора source_url,
         # чтобы вилка считалась по «телу» выборки, а ссылка не вела на выброс.
         raw_count = len(matched)
-        matched = _filter_outliers(matched, key=lambda it: it[0])
+        matched = filter_outliers(matched, key=lambda it: it[0])
         if len(matched) < raw_count:
             logger.info(
                 f"{self.source_name}: '{material_name}' — отброшено выбросов "

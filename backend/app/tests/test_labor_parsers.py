@@ -12,9 +12,9 @@ from app.db.models import LaborPrice, LaborService, PriceSource
 from app.parsers.base import BaseParser, ParsedPrice
 from app.parsers.garantstroikompleks_parser import GarantStroiParser
 from app.parsers.kaz_stroyka_parser import KazStroykaParser
+from app.parsers._stats import filter_outliers
 from app.parsers.labor_table_parser import (
     LABOR_SERVICE_MAP,
-    _filter_outliers,
     _matches,
     _parse_price,
 )
@@ -176,27 +176,35 @@ def _D(*xs):
 def test_filter_outliers_drops_high_outlier():
     '''Дорогая нишевая работа отсекается — вилка считается по «телу» выборки.'''
     prices = _D(400, 450, 500, 520, 550, 580, 600, 650, 7000)
-    filtered = _filter_outliers(prices)
+    filtered = filter_outliers(prices)
     assert Decimal(7000) not in filtered
     assert max(filtered) < Decimal(7000)
+
+
+def test_filter_outliers_drops_outlier_on_issue_sample():
+    '''Пример из #242 [400, 500, 550, 600, 7000] (5 строк) — выброс отсекается.'''
+    prices = _D(400, 500, 550, 600, 7000)
+    filtered = filter_outliers(prices)
+    assert Decimal(7000) not in filtered
+    assert filtered == _D(400, 500, 550, 600)
 
 
 def test_filter_outliers_keeps_small_sample():
     '''На выборке < 4 квартили не считаем — оставляем всё как есть.'''
     prices = _D(400, 500, 7000)
-    assert _filter_outliers(prices) == prices
+    assert filter_outliers(prices) == prices
 
 
 def test_filter_outliers_degenerate_all_equal():
     '''Все цены равны (iqr=0) → фильтр не должен обнулить выборку.'''
     prices = _D(500, 500, 500, 500)
-    assert _filter_outliers(prices) == prices
+    assert filter_outliers(prices) == prices
 
 
 def test_filter_outliers_with_key_preserves_url():
     '''key достаёт цену из пары (цена, url); отфильтрованные пары сохраняют url.'''
     items = [(p, "u") for p in _D(400, 450, 500, 520, 550, 580, 600, 650, 7000)]
-    filtered = _filter_outliers(items, key=lambda it: it[0])
+    filtered = filter_outliers(items, key=lambda it: it[0])
     assert (Decimal(7000), "u") not in filtered
     assert all(url == "u" for _, url in filtered)
 

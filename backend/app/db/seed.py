@@ -6,26 +6,33 @@ from app.db.models import Material, PriceSource, LaborService, MaterialPrice, La
 
 from decimal import Decimal
 
+SEED_PATH = Path(__file__).resolve().parent / "seed_data"
+
+
+def _load_seed_data() -> dict:
+    """Читает все seed_data/*.json одним словарём (общий вход для seed и дозасева)."""
+    def _read(name: str, encoding: str | None = None):
+        with open(SEED_PATH / name, "r", encoding=encoding) as file:
+            return json.load(file)
+
+    return {
+        "materials": _read("materials.json"),
+        "sources": _read("price_sources.json"),
+        "services": _read("labor_services.json"),
+        "material_prices": _read("material_prices.json"),
+        "labor_prices": _read("labor_prices.json"),
+        "room_types": _read("room_types.json", encoding="utf-8"),
+    }
+
+
 def seed():
-    SEED_PATH = Path(__file__).resolve().parent / "seed_data"
-
-    with open(SEED_PATH / "materials.json", 'r') as file:
-        data = json.load(file)
-
-    with open(SEED_PATH / "price_sources.json", 'r') as file:
-        data_sources = json.load(file)
-
-    with open(SEED_PATH / "labor_services.json", 'r') as file:
-        data_services = json.load(file)
-
-    with open(SEED_PATH / "material_prices.json", 'r') as file:
-        data_material_prices = json.load(file)
-    
-    with open(SEED_PATH / "labor_prices.json", 'r') as file:
-        data_labor_prices = json.load(file)
-
-    with open(SEED_PATH / "room_types.json", 'r', encoding='utf-8') as file:
-        data_room_types = json.load(file)
+    loaded = _load_seed_data()
+    data = loaded["materials"]
+    data_sources = loaded["sources"]
+    data_services = loaded["services"]
+    data_material_prices = loaded["material_prices"]
+    data_labor_prices = loaded["labor_prices"]
+    data_room_types = loaded["room_types"]
 
     session = SessionLocal()
     session.query(RoomType).delete()
@@ -108,6 +115,91 @@ def seed():
     session.close()
 
 
+def seed_missing() -> dict:
+    """Идемпотентный дозасев: добавляет недостающие справочники и seed-цены,
+    НИЧЕГО не удаляя.
+
+    В отличие от seed() (полный wipe-and-reseed, затирающий кэш парсеров),
+    здесь INSERT только того, чего в БД ещё нет:
+    - источники/материалы/услуги, которых нет по name;
+    - seed-цены — ТОЛЬКО для материалов/услуг, у которых цен ещё нет.
+    Существующие цены (в т.ч. собранные парсерами через update_prices) не трогаются.
+    Возвращает счётчик добавленного. Безопасно запускать повторно.
+    """
+    loaded = _load_seed_data()
+    session = SessionLocal()
+    added = {
+        "sources": 0, "materials": 0, "services": 0,
+        "material_prices": 0, "labor_prices": 0,
+    }
+    try:
+        existing_sources = {s.name for s in session.query(PriceSource).all()}
+        for item in loaded["sources"]:
+            if item["name"] not in existing_sources:
+                session.add(PriceSource(**item))
+                added["sources"] += 1
+
+        existing_materials = {m.name for m in session.query(Material).all()}
+        for item in loaded["materials"]:
+            if item["name"] not in existing_materials:
+                session.add(Material(**item))
+                added["materials"] += 1
+
+        existing_services = {s.name for s in session.query(LaborService).all()}
+        for item in loaded["services"]:
+            if item["name"] not in existing_services:
+                session.add(LaborService(**item))
+                added["services"] += 1
+
+        session.flush()
+
+        materials_by_name = {m.name: m for m in session.query(Material).all()}
+        services_by_name = {s.name: s for s in session.query(LaborService).all()}
+        sources_by_name = {s.name: s for s in session.query(PriceSource).all()}
+
+        # Цены добавляем только позициям без цен — чтобы не плодить дубли seed-строк
+        # у материалов/услуг, где уже есть цены (в т.ч. от парсеров).
+        priced_materials = {
+            mid for (mid,) in session.query(MaterialPrice.material_id).distinct()
+        }
+        for item in loaded["material_prices"]:
+            material = materials_by_name[item["material"]]
+            if material.id in priced_materials:
+                continue
+            session.add(MaterialPrice(
+                material_id=material.id,
+                source_id=sources_by_name[item["source"]].id,
+                price_min=Decimal(item["price_min"]),
+                price_avg=Decimal(item["price_avg"]),
+                price_max=Decimal(item["price_max"]),
+                region=item.get("region"),
+            ))
+            added["material_prices"] += 1
+
+        priced_services = {
+            sid for (sid,) in session.query(LaborPrice.labor_service_id).distinct()
+        }
+        for item in loaded["labor_prices"]:
+            service = services_by_name[item["service"]]
+            if service.id in priced_services:
+                continue
+            session.add(LaborPrice(
+                labor_service_id=service.id,
+                source_id=sources_by_name[item["source"]].id,
+                price_min=Decimal(item["price_min"]),
+                price_avg=Decimal(item["price_avg"]),
+                price_max=Decimal(item["price_max"]),
+                region=item.get("region"),
+            ))
+            added["labor_prices"] += 1
+
+        session.commit()
+    finally:
+        session.close()
+
+    return added
+
+
 def _already_seeded() -> bool:
     """Есть ли уже справочные данные (значит, БД не пустая)."""
     session = SessionLocal()
@@ -120,10 +212,17 @@ def _already_seeded() -> bool:
 if __name__ == "__main__":
     import sys
 
+    # --missing: идемпотентный дозасев непустой БД (добавить новые позиции
+    # из seed_data, не трогая существующие цены). Безопасен на проде — не
+    # затирает кэш парсеров. Именно этот режим применяет новые материалы/
+    # услуги после мёржа в seed без полного wipe-and-reseed.
+    if "--missing" in sys.argv:
+        added = seed_missing()
+        print(f"Seed (дозасев): добавлено {added}.")
     # --if-empty: режим деплоя — засеять только пустую БД и не перетирать
     # данные (в т.ч. правки цен) при каждом рестарте контейнера.
     # Без флага (тесты/dev) seed всегда делает полный сброс, как и раньше.
-    if "--if-empty" in sys.argv and _already_seeded():
+    elif "--if-empty" in sys.argv and _already_seeded():
         print("Seed: данные уже есть, пропускаю (--if-empty).")
     else:
         seed()

@@ -41,6 +41,8 @@ const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
 // Регион, по которому реально взялась цена; null → базовая seed-цена (не зависит от города).
 const regionLabel = (region?: string | null) => region ?? "базовая цена";
 
+type PriceMode = "min" | "avg" | "max";
+
 export function Workspace() {
   const rooms = useProjectStore((s) => s.rooms);
   const city = useProjectStore((s) => s.city);
@@ -61,6 +63,12 @@ export function Workspace() {
   const dividerDragging = useRef(false);
   const [splitPct, setSplitPct] = useState(75);
   const [isDividerDragging, setIsDividerDragging] = useState(false);
+
+  // interactive range state
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [priceMode, setPriceMode] = useState<PriceMode>("avg");
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragPos, setDragPos] = useState(0);
 
   // Список городов для селектора. Если текущего города нет в ответе бэка,
   // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
@@ -119,6 +127,7 @@ export function Workspace() {
         };
         const res = (await calculateEstimate(payload)) as EstimateResponse;
         setData(res);
+        setPriceMode("avg");
       } catch (err) {
         console.error(err);
         if (!silent) {
@@ -165,18 +174,72 @@ export function Workspace() {
     setIsDividerDragging(false);
   };
 
+  // --- drag handlers ---
+  const getPosFromEvent = (e: React.PointerEvent): number => {
+    if (!trackRef.current) return 0;
+    const rect = trackRef.current.getBoundingClientRect();
+    return Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+  };
+
+  const snapToMode = (pos: number): PriceMode => {
+    const dMin = Math.abs(pos);
+    const dAvg = Math.abs(pos - avgPos);
+    const dMax = Math.abs(pos - 100);
+    if (dMin <= dAvg && dMin <= dMax) return "min";
+    if (dMax <= dAvg) return "max";
+    return "avg";
+  };
+
+  const handleTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!data) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const pos = getPosFromEvent(e);
+    setIsDragging(true);
+    setDragPos(pos);
+  };
+
+  const handleTrackPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging) return;
+    setDragPos(getPosFromEvent(e));
+  };
+
+  const handleTrackPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging) return;
+    setIsDragging(false);
+    setPriceMode(snapToMode(getPosFromEvent(e)));
+  };
+
+  const dotVisualPos = isDragging
+    ? dragPos
+    : priceMode === "min"
+    ? 0
+    : priceMode === "max"
+    ? 100
+    : avgPos;
+
+  // --- price scaling ---
+  const priceScale = useMemo(() => {
+    if (!data) return 1;
+    const { total_min, total_avg, total_max } = data.summary;
+    if (total_avg === 0) return 1;
+    if (priceMode === "min") return total_min / total_avg;
+    if (priceMode === "max") return total_max / total_avg;
+    return 1;
+  }, [data, priceMode]);
+
   const sectionTotal = useMemo(() => {
     if (!data) return 0;
     const items = tab === "materials" ? data.materials : data.labor;
-    return items.reduce((sum, i) => sum + (i.total_avg ?? 0), 0);
-  }, [data, tab]);
+    const sum = items.reduce((s, i) => s + (i.total_avg ?? 0), 0);
+    return Math.round(sum * priceScale);
+  }, [data, tab, priceScale]);
 
   const materialRows: LedgerRow[] = useMemo(
     () =>
       (data?.materials ?? ([] as MaterialItem[])).map((m) => ({
         name: m.name,
         volume: `${formatQty(m.quantity)} ${m.unit}`,
-        price: rub(m.price_avg),
+        price: rub(Math.round(m.price_avg * priceScale)),
         details: [
           { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
           { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
@@ -186,10 +249,12 @@ export function Workspace() {
           { label: "Итог по позиции", value: rub(m.total_avg) },
           { label: "Источник цены", value: m.source, url: m.source_url },
           { label: "Регион", value: regionLabel(m.region) },
-          ...(m.updated_at ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }] : []),
+          ...(m.updated_at
+            ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
+            : []),
         ],
       })),
-    [data],
+    [data, priceScale],
   );
 
   const laborRows: LedgerRow[] = useMemo(
@@ -198,7 +263,7 @@ export function Workspace() {
         name: l.service,
         subtitle: l.specialist,
         volume: `${formatQty(l.volume)} ${l.unit}`,
-        price: rub(l.price_avg),
+        price: rub(Math.round(l.price_avg * priceScale)),
         details: [
           { label: "Специалист", value: l.specialist },
           { label: "Цена за единицу", value: rub(l.price_avg) },
@@ -207,7 +272,7 @@ export function Workspace() {
           { label: "Регион", value: regionLabel(l.region) },
         ],
       })),
-    [data],
+    [data, priceScale],
   );
 
   return (
@@ -266,7 +331,6 @@ export function Workspace() {
           <OpeningsForm />
         </div>
 
-        {/* координаты углов спрятаны под тогл, чтобы не загромождать */}
         <details className={styles.pointsDetails}>
           <summary className={styles.pointsSummary}>Координаты углов</summary>
           <div className={styles.pointsBody}>
@@ -274,7 +338,6 @@ export function Workspace() {
           </div>
         </details>
 
-        {/* загрузка чертежа — ниже, как вспомогательный сценарий */}
         <div className={styles.block}>
           <BlueprintUpload />
         </div>
@@ -415,6 +478,67 @@ export function Workspace() {
                   </tr>
                 </tbody>
               </table>
+
+              <div className={styles.rangeRow}>
+                <div
+                  className={`${styles.rangeCol} ${styles.rangeColClickable}`}
+                  onClick={() => !isDragging && setPriceMode("min")}
+                >
+                  <span className={`${styles.rangeCap} ${priceMode === "min" ? styles.rangeCapActive : ""}`}>
+                    Минимум
+                  </span>
+                  <span className={`${styles.rangeValue} ${priceMode === "min" ? styles.rangeValueActive : ""}`}>
+                    {formatPrice(data.summary.total_min)}
+                  </span>
+                </div>
+                <div
+                  className={`${styles.rangeCol} ${styles.rangeColCenter} ${styles.rangeColClickable}`}
+                  onClick={() => !isDragging && setPriceMode("avg")}
+                >
+                  <span className={`${styles.rangeCap} ${priceMode === "avg" ? styles.rangeCapActive : ""}`}>
+                    Средняя
+                  </span>
+                  <span className={`${styles.rangeValue} ${styles.rangeValueMain} ${priceMode === "avg" ? styles.rangeValueActive : ""}`}>
+                    {formatPrice(data.summary.total_avg)}
+                  </span>
+                </div>
+                <div
+                  className={`${styles.rangeCol} ${styles.rangeColRight} ${styles.rangeColClickable}`}
+                  onClick={() => !isDragging && setPriceMode("max")}
+                >
+                  <span className={`${styles.rangeCap} ${priceMode === "max" ? styles.rangeCapActive : ""}`}>
+                    Максимум
+                  </span>
+                  <span className={`${styles.rangeValue} ${priceMode === "max" ? styles.rangeValueActive : ""}`}>
+                    {formatPrice(data.summary.total_max)}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                ref={trackRef}
+                className={`${styles.rangeTrack} ${isDragging ? styles.rangeTrackDragging : ""}`}
+                onPointerDown={handleTrackPointerDown}
+                onPointerMove={handleTrackPointerMove}
+                onPointerUp={handleTrackPointerUp}
+                onPointerCancel={handleTrackPointerUp}
+              >
+                <span
+                  className={`${styles.rangeEnd} ${priceMode === "min" && !isDragging ? styles.rangeEndActive : ""}`}
+                  style={{ left: 0 }}
+                />
+                <span
+                  className={styles.rangeDot}
+                  style={{
+                    left: `${dotVisualPos}%`,
+                    transition: isDragging ? "none" : "left 0.2s ease",
+                  }}
+                />
+                <span
+                  className={`${styles.rangeEnd} ${priceMode === "max" && !isDragging ? styles.rangeEndActive : ""}`}
+                  style={{ right: 0 }}
+                />
+              </div>
 
               {/* вкладки */}
               <div className={styles.tabs}>

@@ -119,6 +119,7 @@ export function Workspace() {
         };
         const res = (await calculateEstimate(payload)) as EstimateResponse;
         setData(res);
+        setPriceMode("avg");
       } catch (err) {
         console.error(err);
         if (!silent) {
@@ -135,11 +136,6 @@ export function Workspace() {
     const timer = setTimeout(() => runCalculate(true), 500);
     return () => clearTimeout(timer);
   }, [runCalculate]);
-
-  // reset to avg when new estimate arrives
-  useEffect(() => {
-    setPriceMode("avg");
-  }, [data]);
 
   const handleCalculate = () => runCalculate(false);
 

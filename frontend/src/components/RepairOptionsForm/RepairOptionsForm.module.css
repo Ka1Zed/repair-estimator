@@ -1,0 +1,42 @@
+.section {
+  margin-bottom: 24px;
+}
+
+.label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b0b0b0;
+  margin-bottom: 10px;
+}
+
+.options {
+  display: flex;
+  gap: 20px;
+}
+
+.optBtn {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  color: #9a9a9a;
+  border-bottom: 1.5px solid transparent;
+}
+
+.optBtn:hover {
+  color: var(--text-h);
+}
+
+.optBtnActive {
+  color: var(--text-h);
+  border-bottom-color: var(--accent);
+}
+
+.description {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #6b6b6b;
+}

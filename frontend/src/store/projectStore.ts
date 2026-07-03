@@ -200,7 +200,11 @@ export const useProjectStore = create<ProjectState>()(
       updateActiveRoomType: (index, room_type) =>
         set((state) => {
           const newRooms = [...state.rooms];
-          newRooms[index] = { ...newRooms[index], room_type };
+          newRooms[index] = {
+            ...newRooms[index],
+            room_type,
+            works: defaultWorksForRoomType(room_type),
+          };
           return { rooms: newRooms };
         }),
 
@@ -322,13 +326,14 @@ export const useProjectStore = create<ProjectState>()(
       name: "repair-estimator-draft",
       version: 3,
       migrate: (persisted: unknown, version: number) => {
-        const state = persisted as Record<string, unknown>;
-        if (version === 1) {
-          // repair_options переехал из rooms[i] на уровень проекта
-          const rooms = (state.rooms as Array<Record<string, unknown>>) ?? [];
+        let s = persisted as Record<string, unknown>;
+
+        if (version < 2) {
+          // v1 → v2: repair_options переехал из rooms[i] на уровень проекта
+          const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
           const fromRoom = rooms[0]?.repair_options as RepairOptions | undefined;
-          return {
-            ...state,
+          s = {
+            ...s,
             repair_options: fromRoom ?? { ...DEFAULT_REPAIR_OPTIONS },
             rooms: rooms.map((room) => {
               const r = { ...room };
@@ -337,11 +342,12 @@ export const useProjectStore = create<ProjectState>()(
             }),
           };
         }
-        if (version === 2) {
-          // works переехал с проектного уровня (repair_options) на уровень комнаты
-          const rooms = (state.rooms as Array<Record<string, unknown>>) ?? [];
-          return {
-            ...state,
+
+        if (version < 3) {
+          // v2 → v3: works переехал на уровень каждой комнаты
+          const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
+          s = {
+            ...s,
             rooms: rooms.map((room) => {
               if (room.works) return room;
               const rt = (room.room_type as RoomTypeKey) ?? "living";
@@ -349,7 +355,8 @@ export const useProjectStore = create<ProjectState>()(
             }),
           };
         }
-        return state;
+
+        return s;
       },
     },
   ),

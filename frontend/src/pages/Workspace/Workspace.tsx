@@ -8,7 +8,7 @@ import RoomPointsTable from "../../components/RoomPointsTable";
 import BlueprintUpload from "../../components/BlueprintUpload";
 import OpeningsForm from "../../components/OpeningsForm";
 import { RoomTypeSelector } from "../../components/RoomTypeSelector";
-import { RepairOptionsForm } from "../../components/RepairOptionsForm/RepairOptionsForm";
+import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
 import type { MaterialItem, LaborItem } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
@@ -49,7 +49,6 @@ export function Workspace() {
   const city = useProjectStore((s) => s.city);
   const setCity = useProjectStore((s) => s.setCity);
   const repairType = useProjectStore((s) => s.repair_type);
-  const repairOptions = useProjectStore((s) => s.repair_options);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
@@ -107,8 +106,6 @@ export function Workspace() {
       try {
         const payload = {
           city,
-          repair_type: repairType,
-          repair_options: repairOptions,
           rooms: rooms.map((room) => ({
             name: room.name,
             room_type: room.room_type,
@@ -119,6 +116,7 @@ export function Workspace() {
               height: Number(op.height),
             })),
             points: room.points.map((p) => ({ x: Number(p.x), y: Number(p.y) })),
+            works: room.works,
           })),
         };
         const res = (await calculateEstimate(payload)) as EstimateResponse;
@@ -133,7 +131,7 @@ export function Workspace() {
         setIsLoading(false);
       }
     },
-    [rooms, city, repairType, repairOptions],
+    [rooms, city],
   );
 
   // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
@@ -305,12 +303,16 @@ export function Workspace() {
               <span className={styles.heightUnit}>м</span>
             </div>
           </div>
-          <RepairOptionsForm />
         </div>
 
         <div className={styles.block}>
-          <div className={styles.blockLabel}>Состав работ · тип комнаты</div>
+          <div className={styles.blockLabel}>Тип комнаты</div>
           <RoomTypeSelector />
+        </div>
+
+        <div className={styles.block}>
+          <div className={styles.blockLabel}>Состав работ</div>
+          <WorksPanel />
         </div>
 
         <div className={styles.block}>

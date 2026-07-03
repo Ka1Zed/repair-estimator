@@ -59,12 +59,20 @@ export function Workspace() {
   const [tab, setTab] = useState<"materials" | "labor">("materials");
   const [regions, setRegions] = useState<string[]>([]);
 
+  // resizable split
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dividerDragging = useRef(false);
+  const [splitPct, setSplitPct] = useState(55);
+  const [isDividerDragging, setIsDividerDragging] = useState(false);
+
   // interactive range state
   const trackRef = useRef<HTMLDivElement>(null);
   const [priceMode, setPriceMode] = useState<PriceMode>("avg");
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState(0);
 
+  // Список городов для селектора. Если текущего города нет в ответе бэка,
+  // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
   useEffect(() => {
     apiClient
       .fetchRegions()
@@ -148,6 +156,28 @@ export function Workspace() {
     () => rooms.some(roomHasInvalidOpenings),
     [rooms],
   );
+
+  // --- divider drag handlers ---
+  const handleDividerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dividerDragging.current = true;
+    setIsDividerDragging(true);
+  };
+
+  const handleDividerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dividerDragging.current || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    // вычитаем padding 24px с каждой стороны (.page), чтобы курсор не отставал
+    const paddingX = 24;
+    const contentWidth = rect.width - paddingX * 2;
+    const pct = ((e.clientX - rect.left - paddingX) / contentWidth) * 100;
+    setSplitPct(Math.min(75, Math.max(25, Math.round(pct))));
+  };
+
+  const handleDividerUp = () => {
+    dividerDragging.current = false;
+    setIsDividerDragging(false);
+  };
 
   // Слайдер вилки: позиция средней между min и max
   const avgPos = useMemo(() => {
@@ -259,9 +289,9 @@ export function Workspace() {
   );
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} ref={containerRef}>
       {/* ===== ЛЕВО: редактор ===== */}
-      <section className={styles.left}>
+      <section className={styles.left} style={{ width: `${splitPct}%` }}>
         <div className={styles.eyebrow}>Проект · план помещения</div>
         <h1 className={styles.title}>
           Постройте комнату
@@ -330,6 +360,13 @@ export function Workspace() {
           <BlueprintUpload />
         </div>
 
+        {data && (
+          <div className={styles.planTotal}>
+            <span className={styles.planTotalLabel}>Ориентировочно</span>
+            <span className={styles.planTotalValue}>{formatPrice(data.summary.total_avg)}</span>
+          </div>
+        )}
+
         <button
           className={styles.calcBtn}
           onClick={handleCalculate}
@@ -344,6 +381,15 @@ export function Workspace() {
         )}
         {error && <div className={styles.error}>{error}</div>}
       </section>
+
+      {/* ===== РАЗДЕЛИТЕЛЬ (перетаскивается) ===== */}
+      <div
+        className={`${styles.divider} ${isDividerDragging ? styles.dividerDragging : ""}`}
+        onPointerDown={handleDividerDown}
+        onPointerMove={handleDividerMove}
+        onPointerUp={handleDividerUp}
+        onPointerCancel={handleDividerUp}
+      />
 
       {/* ===== ПРАВО: аналитика ===== */}
       <aside className={styles.right}>
@@ -418,8 +464,40 @@ export function Workspace() {
                 </div>
               </div>
 
-              {/* вилка стоимости */}
+              {/* три итога: материалы / работы / итого × низкая/средняя/высокая */}
               <div className={styles.blockLabel}>Вилка стоимости</div>
+              <table className={styles.summaryTable}>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Низкая</th>
+                    <th>Средняя</th>
+                    <th>Высокая</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Материалы</td>
+                    <td>{formatPrice(data.summary.materials_min)}</td>
+                    <td>{formatPrice(data.summary.materials_avg)}</td>
+                    <td>{formatPrice(data.summary.materials_max)}</td>
+                  </tr>
+                  <tr>
+                    <td>Работы</td>
+                    <td>{formatPrice(data.summary.labor_min)}</td>
+                    <td>{formatPrice(data.summary.labor_avg)}</td>
+                    <td>{formatPrice(data.summary.labor_max)}</td>
+                  </tr>
+                  <tr className={styles.summaryTableTotalRow}>
+                    <td>Итого</td>
+                    <td>{formatPrice(data.summary.total_min)}</td>
+                    <td>{formatPrice(data.summary.total_avg)}</td>
+                    <td>{formatPrice(data.summary.total_max)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {/* переключатель режима цен — суммы в таблице выше, здесь только подписи */}
               <div className={styles.rangeRow}>
                 <div
                   className={`${styles.rangeCol} ${styles.rangeColClickable}`}
@@ -427,9 +505,6 @@ export function Workspace() {
                 >
                   <span className={`${styles.rangeCap} ${priceMode === "min" ? styles.rangeCapActive : ""}`}>
                     Минимум
-                  </span>
-                  <span className={`${styles.rangeValue} ${priceMode === "min" ? styles.rangeValueActive : ""}`}>
-                    {formatPrice(data.summary.total_min)}
                   </span>
                 </div>
                 <div
@@ -439,9 +514,6 @@ export function Workspace() {
                   <span className={`${styles.rangeCap} ${priceMode === "avg" ? styles.rangeCapActive : ""}`}>
                     Средняя
                   </span>
-                  <span className={`${styles.rangeValue} ${styles.rangeValueMain} ${priceMode === "avg" ? styles.rangeValueActive : ""}`}>
-                    {formatPrice(data.summary.total_avg)}
-                  </span>
                 </div>
                 <div
                   className={`${styles.rangeCol} ${styles.rangeColRight} ${styles.rangeColClickable}`}
@@ -449,9 +521,6 @@ export function Workspace() {
                 >
                   <span className={`${styles.rangeCap} ${priceMode === "max" ? styles.rangeCapActive : ""}`}>
                     Максимум
-                  </span>
-                  <span className={`${styles.rangeValue} ${priceMode === "max" ? styles.rangeValueActive : ""}`}>
-                    {formatPrice(data.summary.total_max)}
                   </span>
                 </div>
               </div>

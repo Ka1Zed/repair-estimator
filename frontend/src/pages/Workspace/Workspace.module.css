@@ -1,24 +1,130 @@
-/* Двухколоночная рабочая страница: слева редактор, справа аналитика */
+/* Двухколоночная рабочая страница: слева редактор, справа аналитика.
+   Граница перетаскивается — ширина левой колонки задаётся inline style. */
 
 .page {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  display: flex;
   gap: 0;
   max-width: 1680px;
   margin: 0 auto;
   padding: 0 24px 80px;
   box-sizing: border-box;
+  align-items: stretch;
 }
 
 .left {
-  padding: 36px 56px 36px 8px;
+  padding: 36px 32px 36px 8px;
   min-width: 0;
+  flex-shrink: 0;
+}
+
+/* Разделитель: невидимая полоса с захватом курсора */
+.divider {
+  width: 8px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  position: relative;
+  touch-action: none;
+  user-select: none;
+}
+
+.divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  height: 48px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.15s;
+}
+
+.divider:hover::after,
+.dividerDragging::after {
+  background: var(--accent-border, #b0b0b0);
 }
 
 .right {
-  padding: 36px 8px 36px 56px;
+  padding: 36px 8px 36px 32px;
   border-left: 1px solid var(--border);
   min-width: 0;
+  flex: 1;
+}
+
+/* Компактный тотал на стороне плана — появляется после расчёта */
+.planTotal {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 24px;
+  padding: 14px 18px;
+  background: #f8f8f8;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.planTotalLabel {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+}
+
+.planTotalValue {
+  font-family: var(--serif);
+  font-size: 24px;
+  color: var(--text-h);
+}
+
+/* Таблица трёх итогов (материалы / работы / итого × мин/сред/макс) */
+.summaryTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 32px;
+  font-size: 13px;
+}
+
+.summaryTable th {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+  font-weight: 400;
+  padding: 0 0 8px;
+  text-align: right;
+}
+
+.summaryTable th:first-child {
+  text-align: left;
+}
+
+.summaryTable td {
+  padding: 8px 0;
+  text-align: right;
+  color: var(--text-h);
+  border-top: 1px solid var(--border);
+}
+
+.summaryTable td:first-child {
+  text-align: left;
+  color: var(--text);
+}
+
+.summaryTable td:nth-child(3) {
+  font-weight: 500;
+}
+
+.summaryTableTotalRow td {
+  font-family: var(--serif);
+  font-size: 15px;
+  padding-top: 12px;
+  border-top: 2px solid var(--border);
+}
+
+.summaryTableTotalRow td:first-child {
+  font-family: inherit;
+  font-size: 13px;
 }
 
 /* Правая колонка липкая и со СВОИМ скроллом: пристёгнута к экрану, а если её
@@ -424,12 +530,17 @@
 
 @media (max-width: 1080px) {
   .page {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
   .left {
+    width: 100% !important;
     padding: 24px 8px;
   }
+  .divider {
+    display: none;
+  }
   .right {
+    width: 100% !important;
     padding: 24px 8px;
     border-left: none;
     border-top: 1px solid var(--border);

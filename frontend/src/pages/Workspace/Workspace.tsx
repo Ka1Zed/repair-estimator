@@ -47,7 +47,6 @@ export function Workspace() {
   const rooms = useProjectStore((s) => s.rooms);
   const city = useProjectStore((s) => s.city);
   const setCity = useProjectStore((s) => s.setCity);
-  const repairType = useProjectStore((s) => s.repair_type);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
@@ -408,7 +407,7 @@ export function Workspace() {
                 onClick={() =>
                   data &&
                   import("../../utils/exportEstimate").then((m) =>
-                    m.exportPdf(data, city, repairType)
+                    m.exportPdf(data, city)
                   )
                 }
                 disabled={!data}

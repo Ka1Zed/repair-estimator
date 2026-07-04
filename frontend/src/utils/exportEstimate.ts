@@ -106,7 +106,7 @@ const fmtQty = (x: number) => x.toLocaleString('ru-RU', { maximumFractionDigits:
 // Запас в процентах из множителя waste_factor (1.1 → «+10%»)
 const wastePct = (waste_factor: number) => `+${Math.round((waste_factor - 1) * 100)}%`;
 
-export const exportPdf = async (data: EstimateExportData, city: string, repairType: string) => {
+export const exportPdf = async (data: EstimateExportData, city: string) => {
   const doc = new jsPDF();
 
   try {
@@ -185,7 +185,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
   doc.line(marginX, 26, pageW - marginX, 26);
   doc.setFontSize(10);
   doc.setTextColor(...PDF_MUTED);
-  const meta = `Город: ${city}    ·    Тип ремонта: ${repairType}    ·    Дата: ${new Date().toLocaleDateString('ru-RU')}`;
+  const meta = `Город: ${city}    ·    Дата: ${new Date().toLocaleDateString('ru-RU')}`;
   doc.text(meta, marginX, 33);
 
   let currentY = 44;

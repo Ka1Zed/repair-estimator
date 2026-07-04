@@ -5,8 +5,6 @@ import { roomTypes } from "../types/roomTypes";
 import { demoRoomData } from "../data/demoRoom";
 import { uid } from "../utils/uid";
 
-export type RepairType = "cosmetic" | "base" | "extended";
-
 export interface Point {
   x: number | string;
   y: number | string;
@@ -15,7 +13,6 @@ export interface Point {
 export interface Opening {
   id: string;
   type: "door" | "window";
-  // Поля могут быть строкой во время ввода; в Number() конвертируются в EstimateResult перед POST.
   width: number | string;
   height: number | string;
 }
@@ -90,14 +87,10 @@ export interface Room {
 
 interface ProjectState {
   city: string;
-  repair_type: RepairType;
-  repair_options: RepairOptions;
   rooms: Room[];
   activeRoomIndex: number;
 
   setCity: (city: string) => void;
-  setRepairType: (type: RepairType) => void;
-  updateRepairOptions: (options: Partial<RepairOptions>) => void;
   addRoom: () => void;
   deleteRoom: (index: number) => void;
   setActiveRoom: (index: number) => void;
@@ -148,8 +141,6 @@ const DEFAULT_CITY = "Казань";
 
 const initialState = {
   city: DEFAULT_CITY,
-  repair_type: "cosmetic" as RepairType,
-  repair_options: { ...DEFAULT_REPAIR_OPTIONS },
   rooms: [createDefaultRoom("Комната 1")],
   activeRoomIndex: 0,
 };
@@ -160,8 +151,6 @@ export const useProjectStore = create<ProjectState>()(
       ...initialState,
 
       setCity: (city) => set({ city }),
-
-      setRepairType: (type) => set({ repair_type: type }),
 
       addRoom: () =>
         set((state) => {
@@ -275,11 +264,6 @@ export const useProjectStore = create<ProjectState>()(
           };
           return { rooms: newRooms };
         }),
-
-      updateRepairOptions: (options) =>
-        set((state) => ({
-          repair_options: { ...state.repair_options, ...options },
-        })),
 
       updateRoomWorks: (roomIndex, works) =>
         set((state) => {

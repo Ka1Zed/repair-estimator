@@ -133,7 +133,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
       m.name, m.quantity, m.unit, formatPricePDF(m.price_avg), formatPricePDF(m.total_avg)
     ]),
     styles: { font: 'Roboto' },
-    headStyles: { halign: 'center' },
+    headStyles: { halign: 'center', fontStyle: 'normal' },
     columnStyles: {
       0: { halign: 'left', cellWidth: 77 },
       1: { halign: 'right', cellWidth: 20 },
@@ -152,7 +152,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
       l.service, l.specialist, l.volume, l.unit, formatPricePDF(l.price_avg), formatPricePDF(l.total_avg)
     ]),
     styles: { font: 'Roboto' },
-    headStyles: { halign: 'center' },
+    headStyles: { halign: 'center', fontStyle: 'normal' },
     columnStyles: {
       0: { halign: 'left', cellWidth: 52 },
       1: { halign: 'left', cellWidth: 35 },

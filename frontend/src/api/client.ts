@@ -1,5 +1,7 @@
-// Берем базовый URL из .env файла, если его нет - стучимся на локальный бэкенд FastAPI
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+// VITE_API_URL задаётся только для cross-origin деплоев (см. README).
+// По умолчанию — пустая строка: запросы уходят на тот же origin, а Vite-прокси
+// (dev) и nginx (prod) маршрутизируют /api/* и /health на бэкенд.
+const API_URL = import.meta.env.VITE_API_URL ?? "";
 
 class ApiClient {
   private baseUrl: string;
@@ -71,6 +73,19 @@ class ApiClient {
   // 5. Справочник городов для регионального ценообразования (GET /api/regions)
   async fetchRegions(): Promise<{ default: string; regions: string[] }> {
     return this.request<{ default: string; regions: string[] }>("/api/regions");
+  }
+
+  // 6. Загрузка чертежа (POST /api/blueprints/upload) — FormData, без Content-Type header
+  async uploadBlueprint(formData: FormData): Promise<unknown> {
+    const response = await fetch(`${this.baseUrl}/api/blueprints/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error((body as { detail?: string }).detail ?? `HTTP ${response.status}`);
+    }
+    return response.json();
   }
 }
 

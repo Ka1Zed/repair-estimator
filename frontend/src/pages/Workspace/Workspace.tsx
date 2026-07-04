@@ -48,7 +48,6 @@ export function Workspace() {
   const rooms = useProjectStore((s) => s.rooms);
   const city = useProjectStore((s) => s.city);
   const setCity = useProjectStore((s) => s.setCity);
-  const repairType = useProjectStore((s) => s.repair_type);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
@@ -406,7 +405,7 @@ export function Workspace() {
             <div className={styles.exportRow}>
               <button
                 className={styles.exportBtn}
-                onClick={() => data && exportPdf(data, city, repairType)}
+                onClick={() => data && exportPdf(data, city)}
                 disabled={!data}
               >
                 Скачать PDF

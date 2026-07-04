@@ -90,7 +90,7 @@ export const exportXlsx = (data: EstimateExportData) => {
 };
 
 
-export const exportPdf = async (data: EstimateExportData, city: string, repairType: string) => {
+export const exportPdf = async (data: EstimateExportData, city: string) => {
   const doc = new jsPDF();
 
   try {
@@ -118,10 +118,9 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
   doc.text('Проект: Смета на ремонт', 14, 15);
   doc.setFontSize(12);
   doc.text(`Город: ${city}`, 14, 22);
-  doc.text(`Тип ремонта: ${repairType}`, 14, 28);
-  doc.text(`Дата: ${new Date().toLocaleDateString('ru-RU')}`, 14, 34);
+  doc.text(`Дата: ${new Date().toLocaleDateString('ru-RU')}`, 14, 28);
 
-  let currentY = 42;
+  let currentY = 36;
 
   if (data.geometry && Object.keys(data.geometry).length > 0) {
     doc.text('Геометрия помещений:', 14, currentY);

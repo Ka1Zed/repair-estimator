@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
+import { apiClient } from "../api/client";
 import BlueprintReview from "./BlueprintReview";
 
 interface Point {
@@ -61,17 +62,7 @@ export default function BlueprintUpload() {
     formData.append("file", file);
 
     try {
-      const res = await fetch("/api/blueprints/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail ?? `HTTP ${res.status}`);
-      }
-
-      const data: BlueprintResult = await res.json();
+      const data = (await apiClient.uploadBlueprint(formData)) as BlueprintResult;
       setResult(data);
       // Никакого авто-применения: ведём через ручную проверку и калибровку
       if (data.points.length >= 3) setReviewing(true);

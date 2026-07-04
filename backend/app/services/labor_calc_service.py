@@ -30,8 +30,12 @@ def D(value) -> Decimal:
 S_PAINT_WALLS   = "Покраска стен"
 S_PAINT_CEILING = "Покраска потолка"
 S_PUTTY_WALLS   = "Шпаклевка стен"
+S_WALLPAPER     = "Поклейка обоев"
 S_LAY_LAMINATE  = "Укладка ламината"
+S_LAY_LINOLEUM  = "Укладка линолеума"
+S_LAY_PARQUET   = "Укладка паркета"
 S_LAY_TILE      = "Укладка плитки"
+S_STRETCH_CEIL  = "Монтаж натяжного потолка"  # цена за м², материал в цене работы
 # Инженерка (works.electric / works.plumbing) — гранулярные операции по явным числам.
 S_CABLE_LAY     = "Прокладка кабеля"
 S_SOCKET_MOUNT  = "Монтаж розетки"
@@ -63,8 +67,12 @@ STAGE_BY_SERVICE = {
     # чистовая: финишная отделка и установка приборов
     S_PAINT_WALLS:   "finish",
     S_PAINT_CEILING: "finish",
+    S_WALLPAPER:     "finish",
     S_LAY_LAMINATE:  "finish",
+    S_LAY_LINOLEUM:  "finish",
+    S_LAY_PARQUET:   "finish",
     S_LAY_TILE:      "finish",
+    S_STRETCH_CEIL:  "finish",
     S_SOCKET_MOUNT:  "finish",
     S_LIGHT_MOUNT:   "finish",
     S_PLUMBING:      "finish",
@@ -94,23 +102,28 @@ def _labor_selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> L
     sel: List[tuple] = []
 
     # --- стены ---
+    # Покраска — одна операция «Покраска стен» независимо от типа краски
+    # (обычная/влагостойкая): работа фиксирована за операцию, отличается материал.
     if walls in ("paint", "moisture_paint"):
         sel.append((S_PUTTY_WALLS, wall_area))   # подготовка
         sel.append((S_PAINT_WALLS, wall_area))
     elif walls == "wallpaper":
         sel.append((S_PUTTY_WALLS, wall_area))   # подготовка под обои
-        # услуги "Поклейка обоев" в seed НЕТ — поклейка как работа не посчитается (см. примечание)
+        sel.append((S_WALLPAPER, wall_area))     # поклейка
 
     # --- потолок ---
     if ceiling in ("paint", "moisture_paint"):
         sel.append((S_PAINT_CEILING, ceiling_area))
-    # ceiling == "stretch": услуги монтажа натяжного в seed нет → пропуск
+    elif ceiling == "stretch":
+        sel.append((S_STRETCH_CEIL, ceiling_area))  # монтаж натяжного (материал в цене)
 
     # --- пол ---
     if floor == "laminate":
         sel.append((S_LAY_LAMINATE, floor_area))
-    elif floor in ("linoleum", "parquet"):
-        sel.append((S_LAY_LAMINATE, floor_area))  # отдельной услуги нет → fallback на укладку
+    elif floor == "linoleum":
+        sel.append((S_LAY_LINOLEUM, floor_area))
+    elif floor == "parquet":
+        sel.append((S_LAY_PARQUET, floor_area))
 
     # --- плитка (пол + стены одной услугой) ---
     tiled = Decimal(0)

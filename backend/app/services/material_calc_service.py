@@ -20,11 +20,13 @@ from app.db.models import Material
 # ---- имена материалов (как в seed_data/materials.json) ----
 M_PAINT_WALLS   = "Краска для стен"
 M_PAINT_CEILING = "Краска потолочная"
+M_PAINT_MOIST   = "Краска влагостойкая"   # влагостойкая (мокрые зоны), стены и потолок
 M_PRIMER        = "Грунтовка"
 M_PUTTY_START   = "Шпаклевка стартовая"
 M_PUTTY         = "Шпаклевка финишная"
 M_LAMINATE      = "Ламинат"
 M_LINOLEUM      = "Линолеум"
+M_PARQUET       = "Паркетная доска"
 M_PLINTH        = "Плинтус"
 M_TILE          = "Плитка"
 M_ADHESIVE      = "Плиточный клей"
@@ -41,6 +43,7 @@ M_PIPE          = "Труба водопроводная"
 LAYERS = {
     M_PAINT_WALLS:   2,
     M_PAINT_CEILING: 2,
+    M_PAINT_MOIST:   2,
     M_PRIMER:        1,
 }
 
@@ -86,26 +89,28 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
         sel.append((M_LINOLEUM, floor_area))
         sel.append((M_PLINTH, floor_area))
     elif floor == "parquet":
-        # материала "Паркет" в seed нет — пропускаем покрытие, но плинтус нужен
+        sel.append((M_PARQUET, floor_area))
         sel.append((M_PLINTH, floor_area))
     # floor == "tile" обрабатывается в блоке плитки ниже (плинтус не нужен)
 
     # --- стены ---
-    if walls == "paint":
+    # Покраска (обычная/влагостойкая) идёт с одинаковой подготовкой основания
+    # (грунт → стартовая → финишная шпаклёвка), отличается только сама краска.
+    if walls in ("paint", "moisture_paint"):
         sel.append((M_PRIMER, wall_area))        # грунтовка, 1 слой
         sel.append((M_PUTTY_START, wall_area))   # стартовая шпаклёвка (выравнивание)
         sel.append((M_PUTTY, wall_area))         # финишная шпаклёвка
-        sel.append((M_PAINT_WALLS, wall_area))   # краска, 2 слоя
+        sel.append((M_PAINT_WALLS if walls == "paint" else M_PAINT_MOIST, wall_area))  # 2 слоя
     elif walls == "wallpaper":
         sel.append((M_WALLPAPER, wall_area))
-    elif walls == "moisture_paint":
-        # отдельного материала нет — берём обычную краску для стен как fallback (MVP)
-        sel.append((M_PAINT_WALLS, wall_area))
 
     # --- потолок ---
-    if ceiling in ("paint", "moisture_paint"):
+    if ceiling == "paint":
         sel.append((M_PAINT_CEILING, ceiling_area))
-    # ceiling == "stretch" (натяжной) — это работа, не материал → пропускаем
+    elif ceiling == "moisture_paint":
+        sel.append((M_PAINT_MOIST, ceiling_area))   # влагостойкая (санузел)
+    # ceiling == "stretch" (натяжной) — материал (плёнка/профиль) входит в цену
+    # работы «Монтаж натяжного потолка» → отдельной строки материала нет
 
     # --- плитка (пол + стены) ---
     tiled = Decimal(0)

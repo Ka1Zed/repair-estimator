@@ -1,6 +1,9 @@
 # app/tests/test_estimate.py
 
+import json
 from decimal import Decimal
+from itertools import product
+from pathlib import Path
 
 from app.services.material_calc_service import (
     calculate_materials, calculate_engineering_materials, packs_to_buy,
@@ -9,6 +12,10 @@ from app.services.labor_calc_service import (
     calculate_labor, calculate_engineering_labor, calculate_rough_labor,
 )
 from app.services.geometry_service import calculate_room_geometry
+from app.services.price_aggregator_service import get_price, get_labor_price
+
+# Источник правды по типам комнат и допустимым отделкам (docs/room-types.json).
+ROOM_TYPES_JSON = Path(__file__).resolve().parents[3] / "docs" / "room-types.json"
 
 
 class TestMaterialCalc:
@@ -309,6 +316,85 @@ class TestEngineeringCalc:
         """Нулевые числа (выключенная группа) не добавляют строк."""
         assert calculate_engineering_labor(0, 0, 0, 0, 0, db_session) == []
         assert calculate_engineering_materials(0, 0, 0, 0, db_session) == []
+
+
+class TestFinishOptionsCoverage:
+    """Каждая отделка из docs/room-types.json должна иметь расчётную базу: свой
+    материал/работу с seed-ценой. Иначе смета молча занижается (#231)."""
+
+    GEOM = {
+        'floor_area': Decimal('12.0'),
+        'ceiling_area': Decimal('12.0'),
+        'wall_area': Decimal('34.1'),
+        'perimeter': Decimal('14.0'),
+        'door_width_sum': Decimal('0.8'),
+    }
+
+    @staticmethod
+    def _room_types():
+        with open(ROOM_TYPES_JSON, encoding="utf-8") as file:
+            return json.load(file)["roomTypes"]
+
+    def test_every_room_type_finish_combo_is_priced(self, db_session):
+        """Для каждой комбинации room_type × (floor,walls,ceiling) смета отдаёт
+        ненулевые строки материалов и работ, и у каждой есть seed-цена
+        (нет source «нет цены» / молчаливо потерянных строк работ)."""
+        for rt_key, rt in self._room_types().items():
+            for floor, walls, ceiling in product(rt["floor"], rt["walls"], rt["ceiling"]):
+                opts = {"floor": floor, "walls": walls, "ceiling": ceiling}
+                ctx = f"{rt_key} {opts}"
+
+                materials = calculate_materials(self.GEOM, opts, db_session)
+                labor = calculate_labor(self.GEOM, opts, db_session)
+
+                assert materials, f"нет материалов: {ctx}"
+                assert labor, f"нет работ: {ctx}"
+
+                for m in materials:
+                    assert m["quantity"] > 0, f"нулевое количество {m['name']}: {ctx}"
+                    # get_price → seed-цена; None означало бы source «нет цены» в смете.
+                    assert get_price(m["name"]) is not None, f"нет цены материала {m['name']}: {ctx}"
+                for job in labor:
+                    # Работа без цены молча выпадает из сметы (endpoint: continue).
+                    assert get_labor_price(job["service"]) is not None, \
+                        f"нет цены работы {job['service']}: {ctx}"
+
+    def test_wallpaper_has_gluing_work(self, db_session):
+        """living + обои: в работах есть «Поклейка обоев» (раньше = 0)."""
+        labor = calculate_labor(self.GEOM, {"walls": "wallpaper"}, db_session)
+        services = {j["service"] for j in labor}
+        assert "Поклейка обоев" in services
+        assert get_labor_price("Поклейка обоев") is not None
+
+    def test_parquet_maps_to_own_material_and_work(self, db_session):
+        """Паркет: отдельный материал «Паркетная доска» и работа «Укладка паркета»,
+        не молчаливый fallback на ламинат."""
+        opts = {"floor": "parquet"}
+        materials = {m["name"] for m in calculate_materials(self.GEOM, opts, db_session)}
+        services = {j["service"] for j in calculate_labor(self.GEOM, opts, db_session)}
+        assert "Паркетная доска" in materials
+        assert "Укладка паркета" in services
+        assert "Укладка ламината" not in services
+
+    def test_moisture_paint_maps_to_own_material(self, db_session):
+        """Влагостойкая краска на стенах — свой материал, не «Краска для стен»."""
+        opts = {"walls": "moisture_paint"}
+        materials = {m["name"] for m in calculate_materials(self.GEOM, opts, db_session)}
+        assert "Краска влагостойкая" in materials
+        assert "Краска для стен" not in materials
+
+    def test_stretch_ceiling_is_a_priced_work(self, db_session):
+        """bathroom + натяжной потолок: работа «Монтаж натяжного потолка» с ценой > 0,
+        отдельной строки материала нет (материал в цене работы)."""
+        opts = {"ceiling": "stretch"}
+        labor = calculate_labor(self.GEOM, opts, db_session)
+        by_service = {j["service"]: j for j in labor}
+        assert "Монтаж натяжного потолка" in by_service
+        assert by_service["Монтаж натяжного потолка"]["volume"] == Decimal("12.0")
+        price = get_labor_price("Монтаж натяжного потолка")
+        assert price is not None and price.price_avg > 0
+        # Натяжной не даёт строки материала.
+        assert calculate_materials(self.GEOM, opts, db_session) == []
 
 
 class TestLShape:

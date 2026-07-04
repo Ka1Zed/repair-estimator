@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useProjectStore } from "../store/projectStore";
 import { getSelfIntersectingEdges } from "../utils/polygonValidation";
 
@@ -88,6 +88,8 @@ export default function RoomPolygonEditor() {
     </div>
   );
 
+  const badEdges = useMemo(() => getSelfIntersectingEdges(points), [points]);
+
   if (points.length < 3) {
     return (
       <div style={{ marginTop: "20px", width: "100%" }}>
@@ -160,7 +162,6 @@ export default function RoomPolygonEditor() {
     .map((p) => `${(p.x - activeOffsetX) * activeScale},${(p.y - activeOffsetY) * activeScale}`)
     .join(" ");
 
-  const badEdges = getSelfIntersectingEdges(points);
   const hasBadEdges = badEdges.size > 0;
 
   const handlePointerDown = (index: number) => {
@@ -413,7 +414,7 @@ export default function RoomPolygonEditor() {
                 y1={(p.y - activeOffsetY) * activeScale}
                 x2={(nextP.x - activeOffsetX) * activeScale}
                 y2={(nextP.y - activeOffsetY) * activeScale}
-                stroke={isBad ? "#C0392B" : "var(--accent)"}
+                stroke={isBad ? "var(--error)" : "var(--accent)"}
                 strokeWidth={isBad ? "2.5" : "1.5"}
                 strokeDasharray={isBad ? "5 3" : undefined}
               />
@@ -549,10 +550,10 @@ export default function RoomPolygonEditor() {
           style={{
             marginTop: "10px",
             padding: "8px 12px",
-            background: "#fdf2f2",
-            border: "1px solid #f0c0bc",
+            background: "var(--error-bg)",
+            border: "1px solid var(--error-border)",
             borderRadius: "4px",
-            color: "#C0392B",
+            color: "var(--error)",
             fontSize: "13px",
           }}
         >

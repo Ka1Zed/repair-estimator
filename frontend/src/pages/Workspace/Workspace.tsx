@@ -117,6 +117,14 @@ export function Workspace() {
         return;
       }
 
+      // validateHeight ловит и верхний предел (> 10 м), который geometryValid пропускает.
+      if (rooms.some((r) => validateHeight(r.height) !== null)) {
+        if (!silent) {
+          setError("Высота потолка должна быть больше нуля и не превышать 10 м.");
+        }
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
       try {
@@ -172,6 +180,11 @@ export function Workspace() {
   const heightError = useMemo(
     () => validateHeight(activeRoom?.height ?? ""),
     [activeRoom?.height],
+  );
+
+  const hasInvalidHeight = useMemo(
+    () => rooms.some((r) => validateHeight(r.height) !== null),
+    [rooms],
   );
 
   // --- divider drag handlers ---
@@ -393,7 +406,12 @@ export function Workspace() {
         <button
           className={styles.calcBtn}
           onClick={handleCalculate}
-          disabled={isLoading || hasInvalidOpenings || hasSelfIntersectingPolygon}
+          disabled={
+            isLoading ||
+            hasInvalidOpenings ||
+            hasSelfIntersectingPolygon ||
+            hasInvalidHeight
+          }
         >
           {isLoading ? "Считаем…" : "Рассчитать смету"}
         </button>

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./Workspace.module.css";
-import { exportPdf, exportXlsx } from "../../utils/exportEstimate";
 
 import RoomsList from "../../components/RoomsList";
 import RoomPolygonEditor from "../../components/RoomPolygonEditor";
@@ -406,14 +405,22 @@ export function Workspace() {
             <div className={styles.exportRow}>
               <button
                 className={styles.exportBtn}
-                onClick={() => data && exportPdf(data, city, repairType)}
+                onClick={() =>
+                  data &&
+                  import("../../utils/exportEstimate").then((m) =>
+                    m.exportPdf(data, city, repairType)
+                  )
+                }
                 disabled={!data}
               >
                 Скачать PDF
               </button>
               <button
                 className={styles.exportBtn}
-                onClick={() => data && exportXlsx(data)}
+                onClick={() =>
+                  data &&
+                  import("../../utils/exportEstimate").then((m) => m.exportXlsx(data))
+                }
                 disabled={!data}
               >
                 Экспорт в Excel

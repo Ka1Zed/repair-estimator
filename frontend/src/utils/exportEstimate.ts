@@ -1,5 +1,5 @@
 import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import autoTable, { type CellHookData } from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 
 import type { SummaryData } from '../components/EstimateSummary';
@@ -100,6 +100,12 @@ const sourceLabel = (source: string, region?: string | null) => {
 const getFinalY = (d: jsPDF) =>
   (d as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
+// Числовое кол-во: без хвостовых нулей, максимум 2 знака
+const fmtQty = (x: number) => x.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+
+// Запас в процентах из множителя waste_factor (1.1 → «+10%»)
+const wastePct = (waste_factor: number) => `+${Math.round((waste_factor - 1) * 100)}%`;
+
 export const exportPdf = async (data: EstimateExportData, city: string, repairType: string) => {
   const doc = new jsPDF();
 
@@ -155,6 +161,21 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
     doc.text(text, marginX, y);
   };
 
+  // Делает ячейки колонки «Источник» кликабельными ссылками на source_url:
+  // подсвечивает акцентом и вешает doc.link поверх ячейки.
+  const sourceLinks = (items: { source_url?: string | null }[], col: number) => ({
+    didParseCell: (h: CellHookData) => {
+      if (h.section === 'body' && h.column.index === col && items[h.row.index]?.source_url) {
+        h.cell.styles.textColor = PDF_ACCENT;
+      }
+    },
+    didDrawCell: (h: CellHookData) => {
+      if (h.section !== 'body' || h.column.index !== col) return;
+      const url = items[h.row.index]?.source_url;
+      if (url) doc.link(h.cell.x, h.cell.y, h.cell.width, h.cell.height, { url });
+    },
+  });
+
   // Обложка: титул + акцентная линейка + мета
   doc.setFontSize(22);
   doc.setTextColor(...PDF_HEADING);
@@ -185,6 +206,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
   sectionHeading('Материалы', currentY);
   autoTable(doc, {
     ...tableBase,
+    ...sourceLinks(data.materials, 5),
     startY: currentY + 4,
     head: [['Наименование', 'Кол-во', 'Ед.', 'Цена', 'Итого', 'Источник']],
     body: data.materials.map(m => [
@@ -204,6 +226,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
   sectionHeading('Работы', currentY);
   autoTable(doc, {
     ...tableBase,
+    ...sourceLinks(data.labor, 6),
     startY: currentY + 4,
     head: [['Услуга', 'Специалист', 'Объём', 'Ед.', 'Цена', 'Итого', 'Источник']],
     body: data.labor.map(l => [
@@ -243,6 +266,39 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
       1: { halign: 'right', cellWidth: 45 },
       2: { halign: 'right', cellWidth: 45 },
       3: { halign: 'right', cellWidth: 46 }
+    }
+  });
+
+  // Детализация количества материалов: из чего сложилось «Кол-во» в смете
+  currentY = getFinalY(doc) + 14;
+  // не оставлять заголовок секции «висеть» внизу страницы — перенести целиком
+  if (currentY > pageH - 45) {
+    doc.addPage();
+    currentY = 20;
+  }
+  sectionHeading('Детализация количества материалов', currentY);
+  doc.setFontSize(8);
+  doc.setTextColor(...PDF_MUTED);
+  doc.text('Количество = базовый расход × запас, округлённое вверх до целых упаковок', marginX, currentY + 5);
+  autoTable(doc, {
+    ...tableBase,
+    startY: currentY + 9,
+    head: [['Материал', 'Базовый расход', 'Запас', 'Фасовка', 'Упаковок', 'Итого']],
+    body: data.materials.map(m => [
+      m.name,
+      `${fmtQty(m.base_quantity)} ${m.unit}`,
+      wastePct(m.waste_factor),
+      `${fmtQty(m.package_size)} ${m.unit}`,
+      m.packs,
+      `${fmtQty(m.quantity)} ${m.unit}`,
+    ]),
+    columnStyles: {
+      0: { halign: 'left', cellWidth: 58 },
+      1: { halign: 'right', cellWidth: 32 },
+      2: { halign: 'center', cellWidth: 18 },
+      3: { halign: 'right', cellWidth: 28 },
+      4: { halign: 'right', cellWidth: 20 },
+      5: { halign: 'right', cellWidth: 26 }
     }
   });
 

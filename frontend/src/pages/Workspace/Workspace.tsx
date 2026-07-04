@@ -15,6 +15,7 @@ import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/
 
 import { useProjectStore } from "../../store/projectStore";
 import { roomHasInvalidOpenings } from "../../utils/openingValidation";
+import { hasSelfIntersection, validateHeight } from "../../utils/polygonValidation";
 import { calculateEstimate } from "../../api/estimates";
 import { apiClient } from "../../api/client";
 import { Select } from "../../components/ui/Select";
@@ -107,6 +108,21 @@ export function Workspace() {
         return;
       }
 
+      if (rooms.some((r) => r.points.length >= 3 && hasSelfIntersection(r.points))) {
+        if (!silent) {
+          setError("Контур комнаты самопересекается — площадь будет неверной. Исправьте форму.");
+        }
+        return;
+      }
+
+      // validateHeight ловит и верхний предел (> 10 м), который geometryValid пропускает.
+      if (rooms.some((r) => validateHeight(r.height) !== null)) {
+        if (!silent) {
+          setError("Высота потолка должна быть больше нуля и не превышать 10 м.");
+        }
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
       try {
@@ -149,9 +165,23 @@ export function Workspace() {
 
   const handleCalculate = () => runCalculate(false);
 
-  // Кнопка расчёта недоступна, пока есть проёмы с некорректными размерами.
   const hasInvalidOpenings = useMemo(
     () => rooms.some(roomHasInvalidOpenings),
+    [rooms],
+  );
+
+  const hasSelfIntersectingPolygon = useMemo(
+    () => rooms.some((r) => r.points.length >= 3 && hasSelfIntersection(r.points)),
+    [rooms],
+  );
+
+  const heightError = useMemo(
+    () => validateHeight(activeRoom?.height ?? ""),
+    [activeRoom?.height],
+  );
+
+  const hasInvalidHeight = useMemo(
+    () => rooms.some((r) => validateHeight(r.height) !== null),
     [rooms],
   );
 
@@ -325,11 +355,17 @@ export function Workspace() {
                 className={styles.heightInput}
                 type="number"
                 step="0.1"
+                min="0.01"
                 value={activeRoom?.height ?? ""}
                 onChange={(e) => setHeight(e.target.value)}
               />
               <span className={styles.heightUnit}>м</span>
             </div>
+            {heightError && (
+              <div className={styles.error} style={{ marginTop: 4, fontSize: 12 }}>
+                {heightError}
+              </div>
+            )}
           </div>
         </div>
 
@@ -368,13 +404,23 @@ export function Workspace() {
         <button
           className={styles.calcBtn}
           onClick={handleCalculate}
-          disabled={isLoading || hasInvalidOpenings}
+          disabled={
+            isLoading ||
+            hasInvalidOpenings ||
+            hasSelfIntersectingPolygon ||
+            hasInvalidHeight
+          }
         >
           {isLoading ? "Считаем…" : "Рассчитать смету"}
         </button>
         {hasInvalidOpenings && (
           <div className={styles.error}>
             Исправьте размеры проёмов — расчёт недоступен.
+          </div>
+        )}
+        {hasSelfIntersectingPolygon && (
+          <div className={styles.error}>
+            Контур комнаты самопересекается — исправьте форму.
           </div>
         )}
         {error && <div className={styles.error}>{error}</div>}

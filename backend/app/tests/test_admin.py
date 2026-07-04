@@ -82,6 +82,30 @@ def test_update_existing_manual_material_price(manual_source):
         db.close()
 
 
+def test_update_without_region_preserves_existing(manual_source):
+    material_id = manual_source["material_id"]
+    # первый PATCH задаёт region="Казань"
+    client.patch(f"/api/admin/material-prices/{material_id}", json=_valid_body())
+
+    # второй PATCH без region не должен затирать существующее значение
+    resp = client.patch(
+        f"/api/admin/material-prices/{material_id}",
+        json={"price_min": 200, "price_avg": 250, "price_max": 300},
+    )
+    assert resp.status_code == 200, resp.text
+
+    db = TestingSessionLocal()
+    try:
+        source = db.query(PriceSource).filter(PriceSource.name == "manual").first()
+        row = db.query(MaterialPrice).filter(
+            MaterialPrice.material_id == material_id,
+            MaterialPrice.source_id == source.id,
+        ).first()
+        assert row.region == "Казань"
+    finally:
+        db.close()
+
+
 def test_update_labor_price(manual_source):
     labor_id = manual_source["labor_id"]
     resp = client.patch(f"/api/admin/labor-prices/{labor_id}", json=_valid_body())

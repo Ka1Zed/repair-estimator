@@ -38,7 +38,10 @@ def _upsert_manual_price(session, price_model, entity_model, fk_field: str, enti
     price.price_min = body.price_min
     price.price_avg = body.price_avg
     price.price_max = body.price_max
-    price.region = body.region
+    # region обновляем только если он явно прислан — иначе PATCH без region затирал бы
+    # существующее значение в None (частичное обновление, а не полная замена строки).
+    if "region" in body.model_fields_set:
+        price.region = body.region
     price.updated_at = datetime.now(timezone.utc)
 
     session.commit()

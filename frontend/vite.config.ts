@@ -7,6 +7,12 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:8000',
+      '/health': 'http://localhost:8000',
     },
+  },
+  build: {
+    // Экспорт (jspdf/xlsx) вынесен в ленивый чанк и грузится только по клику,
+    // поэтому его размер не влияет на первичную загрузку — поднимаем порог.
+    chunkSizeWarningLimit: 800,
   },
 })

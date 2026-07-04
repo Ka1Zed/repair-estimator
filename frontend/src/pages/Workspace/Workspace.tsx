@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./Workspace.module.css";
-import { exportPdf, exportXlsx } from "../../utils/exportEstimate";
 
 import RoomsList from "../../components/RoomsList";
 import RoomPolygonEditor from "../../components/RoomPolygonEditor";
@@ -49,7 +48,6 @@ export function Workspace() {
   const rooms = useProjectStore((s) => s.rooms);
   const city = useProjectStore((s) => s.city);
   const setCity = useProjectStore((s) => s.setCity);
-  const repairType = useProjectStore((s) => s.repair_type);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
@@ -452,14 +450,22 @@ export function Workspace() {
             <div className={styles.exportRow}>
               <button
                 className={styles.exportBtn}
-                onClick={() => data && exportPdf(data, city, repairType)}
+                onClick={() =>
+                  data &&
+                  import("../../utils/exportEstimate").then((m) =>
+                    m.exportPdf(data, city)
+                  )
+                }
                 disabled={!data}
               >
                 Скачать PDF
               </button>
               <button
                 className={styles.exportBtn}
-                onClick={() => data && exportXlsx(data)}
+                onClick={() =>
+                  data &&
+                  import("../../utils/exportEstimate").then((m) => m.exportXlsx(data))
+                }
                 disabled={!data}
               >
                 Экспорт в Excel

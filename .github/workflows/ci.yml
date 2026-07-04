@@ -116,6 +116,10 @@ jobs:
         working-directory: frontend
         run: npm run lint --if-present
 
+      - name: Check roomTypes sync
+        if: steps.check.outputs.exists == 'true'
+        run: node frontend/scripts/check-roomtypes-sync.mjs
+
       - name: Build
         if: steps.check.outputs.exists == 'true'
         working-directory: frontend

@@ -2,7 +2,6 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 
-
 import type { SummaryData } from '../components/EstimateSummary';
 import type { MaterialItem, LaborItem } from '../types/estimate';
 
@@ -13,27 +12,21 @@ export interface EstimateExportData {
     ceiling_area: number;
     wall_area: number;
     perimeter: number;
-  }; 
+  };
   materials: MaterialItem[];
   labor: LaborItem[];
 }
 
 const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
 
-
-
-
-
-
 const applyCurrencyFormat = (ws: XLSX.WorkSheet) => {
   for (const key in ws) {
-    if (key[0] === '!') continue; 
-    if (ws[key].t === 'n') { 
+    if (key[0] === '!') continue;
+    if (ws[key].t === 'n') {
       ws[key].z = '#,##0.00" ₽"';
     }
   }
 };
-
 
 const geometryLocales: Record<string, string> = {
   floor_area: 'Площадь пола',
@@ -43,7 +36,6 @@ const geometryLocales: Record<string, string> = {
   openings_area: 'Площадь проемов'
 };
 
-
 export const exportXlsx = (data: EstimateExportData) => {
   const wb = XLSX.utils.book_new();
 
@@ -52,7 +44,7 @@ export const exportXlsx = (data: EstimateExportData) => {
       'Наименование': m.name,
       'Количество': m.quantity,
       'Ед. изм.': m.unit,
-      'Цена за ед.': m.price_avg, // Теперь передаем числа, а не строки!
+      'Цена за ед.': m.price_avg,
       'Итого': m.total_avg,
     }))
   );
@@ -89,7 +81,6 @@ export const exportXlsx = (data: EstimateExportData) => {
   XLSX.writeFile(wb, 'Смета.xlsx');
 };
 
-
 export const exportPdf = async (data: EstimateExportData, city: string, repairType: string) => {
   const doc = new jsPDF();
 
@@ -111,7 +102,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
   } catch (err) {
     console.error('Ошибка загрузки шрифта', err);
     alert('Не удалось загрузить кириллический шрифт. Выгрузка PDF отменена.');
-    return; 
+    return;
   }
 
   doc.setFontSize(16);
@@ -127,10 +118,10 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
     doc.text('Геометрия помещений:', 14, currentY);
     doc.setFontSize(10);
     const geomText = Object.entries(data.geometry)
-      .map(([k, v]) => `${geometryLocales[k] || k}: ${v}`) 
+      .map(([k, v]) => `${geometryLocales[k] || k}: ${v}`)
       .join(' | ');
     doc.text(geomText, 14, currentY + 6);
-    currentY += 15; 
+    currentY += 15;
     doc.setFontSize(12);
   }
 
@@ -144,15 +135,14 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
     styles: { font: 'Roboto' },
     headStyles: { halign: 'center' },
     columnStyles: {
-      0: { halign: 'left', cellWidth: 'auto' }, 
-      1: { halign: 'right', cellWidth: 20 },    
-      2: { halign: 'center', cellWidth: 15 },   
-      3: { halign: 'right', cellWidth: 35 },    
-      4: { halign: 'right', cellWidth: 35 }     
+      0: { halign: 'left', cellWidth: 77 },
+      1: { halign: 'right', cellWidth: 20 },
+      2: { halign: 'center', cellWidth: 15 },
+      3: { halign: 'right', cellWidth: 35 },
+      4: { halign: 'right', cellWidth: 35 }
     }
   });
 
-  
   currentY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 15;
   doc.text('Работы:', 14, currentY);
   autoTable(doc, {
@@ -164,16 +154,15 @@ export const exportPdf = async (data: EstimateExportData, city: string, repairTy
     styles: { font: 'Roboto' },
     headStyles: { halign: 'center' },
     columnStyles: {
-      0: { halign: 'left', cellWidth: 'auto' }, 
-      1: { halign: 'left', cellWidth: 35 },     
-      2: { halign: 'right', cellWidth: 20 },    
-      3: { halign: 'center', cellWidth: 15 },  
-      4: { halign: 'right', cellWidth: 30 },    
-      5: { halign: 'right', cellWidth: 30 }     
+      0: { halign: 'left', cellWidth: 52 },
+      1: { halign: 'left', cellWidth: 35 },
+      2: { halign: 'right', cellWidth: 20 },
+      3: { halign: 'center', cellWidth: 15 },
+      4: { halign: 'right', cellWidth: 30 },
+      5: { halign: 'right', cellWidth: 30 }
     }
   });
 
-  
   currentY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 15;
   doc.setFontSize(12);
   doc.text(`Итого (Мин): ${formatPricePDF(data.summary.total_min)}`, 14, currentY);

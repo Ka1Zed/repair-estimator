@@ -128,7 +128,7 @@ def calculate_estimate(
     # Аккумуляторы для блока скрытых работ (#239): флаги сценария и объёмы, не
     # входящие в summary — считаются отдельно, поверх основной сметы.
     hidden = {'has_floor': False, 'has_walls': False, 'has_electric': False,
-              'has_wet': False, 'cable_m': Decimal(0)}
+              'cable_m': Decimal(0), 'wet_floor': Decimal(0)}
 
     for room in request.rooms:
         try:
@@ -173,8 +173,10 @@ def calculate_estimate(
         if cable_m > 0:
             hidden['has_electric'] = True
             hidden['cable_m'] += cable_m
+        # Гидроизоляция всплывает только по мокрой зоне — копим площадь пола
+        # именно мокрых комнат, а не общий метраж (иначе вилка завышена).
         if points > 0 or room.room_type in WET_ROOM_TYPES:
-            hidden['has_wet'] = True
+            hidden['wet_floor'] += Decimal(str(geometry['floor_area']))
         all_materials.extend(calculate_engineering_materials(
             sockets=sockets, lights=lights, cable_m=cable_m, pipe_m=pipe_m, db=db
         ))
@@ -341,7 +343,7 @@ def calculate_estimate(
         has_floor=hidden['has_floor'],
         has_walls=hidden['has_walls'],
         has_electric=hidden['has_electric'],
-        has_wet=hidden['has_wet'],
+        wet_floor_area=hidden['wet_floor'],
         city=request.city,
         db=db,
     )

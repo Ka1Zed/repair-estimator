@@ -612,6 +612,38 @@ def test_hidden_works_scenario_driven():
     assert waterproof["volume"] == pytest.approx(4.0)
 
 
+def test_hidden_works_waterproof_only_wet_floor():
+    """Гидроизоляция считается по площади пола мокрых комнат, а не по общей (#239).
+
+    Квартира: жилая 4×3=12 м² (сухая) + санузел 2×2=4 м² (мокрая). Гидроизоляция
+    должна идти только по 4 м² санузла, а не по 16 м² всего пола.
+    """
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Комната", "height": 2.7,
+                "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0},
+                           {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+                "room_type": "living", "openings": [], "works": W(),
+            },
+            {
+                "name": "Санузел", "height": 2.7,
+                "points": [{"x": 0, "y": 0}, {"x": 2, "y": 0},
+                           {"x": 2, "y": 2}, {"x": 0, "y": 2}],
+                "room_type": "bathroom",
+                "openings": [{"type": "door", "width": 0.8, "height": 2.0}],
+                "works": W(floor="tile", walls="tile", ceiling=None,
+                           electric=True, plumbing=True),
+            },
+        ],
+    }
+    data = client.post("/api/estimates/calculate", json=payload).json()
+    items = data["hidden_works"]["items"]
+    waterproof = next(x for x in items if x["service"] == "Гидроизоляция")
+    assert waterproof["volume"] == pytest.approx(4.0)  # только санузел, не 16
+
+
 def test_hidden_works_independent_of_scope():
     """Блок скрытых работ одинаков при finish_only и rough_and_finish (#239).
 

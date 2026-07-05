@@ -86,7 +86,7 @@ def calculate_hidden_works(
     has_floor: bool,
     has_walls: bool,
     has_electric: bool,
-    has_wet: bool,
+    wet_floor_area: Decimal,
     city: str,
     db: Session,
 ) -> Dict[str, Any]:
@@ -97,7 +97,7 @@ def calculate_hidden_works(
       - замена стяжки — если выбрана отделка пола;
       - доп. выравнивание стен — если выбрана отделка стен;
       - штробление в бетоне — если включена электрика (по метражу кабеля);
-      - гидроизоляция — мокрая зона или включённая сантехника.
+      - гидроизоляция — по площади пола мокрых комнат (сантехника/санузел).
 
     Суммы блока (total_*) справочные и НЕ входят в summary основной сметы.
     """
@@ -110,8 +110,8 @@ def calculate_hidden_works(
          "Реальная кривизна стен вскрывается после демонтажа — возможен доп. слой", wall_area),
         (has_electric, _S_CHASING,
          "Штробы под кабель в бетоне/кирпиче — объём ясен только на месте", cable_m),
-        (has_wet, _S_WATERPROOF,
-         "Старая/повреждённая гидроизоляция под замену в мокрой зоне", floor_area),
+        (wet_floor_area > 0, _S_WATERPROOF,
+         "Старая/повреждённая гидроизоляция под замену в мокрой зоне", wet_floor_area),
     ]
 
     items: List[Dict[str, Any]] = []

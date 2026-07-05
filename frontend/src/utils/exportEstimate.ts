@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable, { type CellHookData } from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 
 import type { SummaryData } from '../components/EstimateSummary';
 import type { MaterialItem, LaborItem } from '../types/estimate';
@@ -19,14 +19,79 @@ export interface EstimateExportData {
 
 const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
 
-const applyCurrencyFormat = (ws: XLSX.WorkSheet) => {
-  for (const key in ws) {
-    if (key[0] === '!') continue;
-    if (ws[key].t === 'n') {
-      ws[key].z = '#,##0.00" ₽"';
+// Палитра Excel (те же цвета, что в PDF из index.css). xlsx-js-style пишет
+// заливки/шрифты/рамки ячеек через свойство cell.s — обычный xlsx это не умеет.
+const XLS = {
+  accent: 'B07B5E',
+  heading: '2A2A2A',
+  muted: '6B6363',
+  border: 'E5E5E5',
+  zebra: 'FAF6F3',
+  white: 'FFFFFF',
+  link: '0563C1',
+};
+const MONEY_FMT = '#,##0.00" ₽"';
+const thin = { style: 'thin', color: { rgb: XLS.border } };
+const allBorders = { top: thin, bottom: thin, left: thin, right: thin };
+
+const titleStyle = { font: { bold: true, sz: 16, color: { rgb: XLS.heading } } };
+const metaStyle = { font: { sz: 10, italic: true, color: { rgb: XLS.muted } } };
+const sectionStyle = { font: { bold: true, sz: 12, color: { rgb: XLS.heading } } };
+const noteStyle = { font: { sz: 9, italic: true, color: { rgb: XLS.muted } } };
+const headStyle = {
+  font: { bold: true, color: { rgb: XLS.white } },
+  fill: { patternType: 'solid', fgColor: { rgb: XLS.accent } },
+  alignment: { horizontal: 'center', vertical: 'center' },
+  border: allBorders,
+};
+const bodyStyle = { border: allBorders, alignment: { vertical: 'center' } };
+const zebraStyle = { ...bodyStyle, fill: { patternType: 'solid', fgColor: { rgb: XLS.zebra } } };
+const totalStyle = {
+  font: { bold: true, color: { rgb: XLS.white } },
+  fill: { patternType: 'solid', fgColor: { rgb: XLS.accent } },
+  border: allBorders,
+};
+
+const cellAt = (ws: XLSX.WorkSheet, r: number, c: number) => {
+  const ref = XLSX.utils.encode_cell({ r, c });
+  if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+  return ws[ref];
+};
+
+// Оформление таблицы: акцентная шапка, зебра, рамки, денежный формат
+// на money-колонках, синие подчёркнутые ячейки-ссылки на link-колонке.
+const styleTable = (
+  ws: XLSX.WorkSheet,
+  cfg: {
+    headerRow: number;
+    firstData: number;
+    lastData: number;
+    firstCol: number;
+    lastCol: number;
+    moneyCols?: number[];
+    linkCol?: number;
+    isLink?: (dataIdx: number) => boolean;
+  },
+) => {
+  for (let c = cfg.firstCol; c <= cfg.lastCol; c++) {
+    cellAt(ws, cfg.headerRow, c).s = headStyle;
+  }
+  for (let r = cfg.firstData; r <= cfg.lastData; r++) {
+    for (let c = cfg.firstCol; c <= cfg.lastCol; c++) {
+      const cell = cellAt(ws, r, c);
+      let st: Record<string, unknown> = (r - cfg.firstData) % 2 ? { ...zebraStyle } : { ...bodyStyle };
+      if (cfg.moneyCols?.includes(c)) {
+        st = { ...st, numFmt: MONEY_FMT, alignment: { horizontal: 'right', vertical: 'center' } };
+      }
+      if (cfg.linkCol === c && cfg.isLink?.(r - cfg.firstData)) {
+        st = { ...st, font: { color: { rgb: XLS.link }, underline: true } };
+      }
+      cell.s = st;
     }
   }
 };
+
+const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('ru-RU') : '');
 
 const geometryLocales: Record<string, string> = {
   floor_area: 'Площадь пола',
@@ -36,47 +101,169 @@ const geometryLocales: Record<string, string> = {
   openings_area: 'Площадь проемов'
 };
 
-export const exportXlsx = (data: EstimateExportData) => {
+const geometryUnits: Record<string, string> = {
+  floor_area: 'м²',
+  wall_area: 'м²',
+  ceiling_area: 'м²',
+  openings_area: 'м²',
+  perimeter: 'м'
+};
+
+// Excel-версия сметы в одном стиле с PDF: акцентная шапка, зебра, рамки,
+// город/дата, геометрия, кликабельные источники (синие подчёркнутые ячейки),
+// детализация количества и запаса. Оформление ячеек даёт xlsx-js-style.
+export const exportXlsx = (data: EstimateExportData, city: string) => {
   const wb = XLSX.utils.book_new();
+  const today = new Date().toLocaleDateString('ru-RU');
+  const metaLine = `Город: ${city}    ·    Дата: ${today}`;
+  const s = data.summary;
 
-  const materialsSheet = XLSX.utils.json_to_sheet(
-    data.materials.map(m => ({
-      'Наименование': m.name,
-      'Количество': m.quantity,
-      'Ед. изм.': m.unit,
-      'Цена за ед.': m.price_avg,
-      'Итого': m.total_avg,
-    }))
-  );
-  applyCurrencyFormat(materialsSheet);
-  XLSX.utils.book_append_sheet(wb, materialsSheet, 'Материалы');
+  // ---------- Сводка: город/дата, геометрия, итоги min/avg/max ----------
+  const summaryAoa: (string | number)[][] = [
+    ['Смета на ремонт'],
+    [metaLine],
+    [],
+  ];
+  const geomEntries = data.geometry ? Object.entries(data.geometry) : [];
+  if (geomEntries.length) {
+    summaryAoa.push(['Геометрия помещений']);
+    for (const [k, v] of geomEntries) {
+      summaryAoa.push([geometryLocales[k] ?? k, `${v} ${geometryUnits[k] ?? ''}`.trim()]);
+    }
+    summaryAoa.push([]);
+  }
+  summaryAoa.push(['Итоговая стоимость']);
+  summaryAoa.push(['', 'Минимум', 'Средняя', 'Максимум']);
+  const costFirst = summaryAoa.length;
+  summaryAoa.push(['Материалы', s.materials_min, s.materials_avg, s.materials_max]);
+  summaryAoa.push(['Работы', s.labor_min, s.labor_avg, s.labor_max]);
+  summaryAoa.push(['ИТОГО', s.total_min, s.total_avg, s.total_max]);
+  const costLast = summaryAoa.length - 1;
+  summaryAoa.push([]);
+  summaryAoa.push(['Предварительный расчёт · итоговая стоимость уточняется при замере']);
 
-  const laborSheet = XLSX.utils.json_to_sheet(
-    data.labor.map(l => ({
-      'Услуга': l.service,
-      'Специалист': l.specialist,
-      'Объем': l.volume,
-      'Ед. изм.': l.unit,
-      'Цена за ед.': l.price_avg,
-      'Итого': l.total_avg,
-    }))
-  );
-  applyCurrencyFormat(laborSheet);
-  XLSX.utils.book_append_sheet(wb, laborSheet, 'Работы');
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryAoa);
+  summarySheet['!cols'] = [{ wch: 26 }, { wch: 18 }, { wch: 18 }, { wch: 18 }];
+  summarySheet['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+  ];
+  cellAt(summarySheet, 0, 0).s = titleStyle;
+  cellAt(summarySheet, 1, 0).s = metaStyle;
+  if (geomEntries.length) cellAt(summarySheet, 3, 0).s = sectionStyle;
+  cellAt(summarySheet, costFirst - 2, 0).s = sectionStyle; // «Итоговая стоимость»
+  styleTable(summarySheet, {
+    headerRow: costFirst - 1,
+    firstData: costFirst,
+    lastData: costLast,
+    firstCol: 0,
+    lastCol: 3,
+    moneyCols: [1, 2, 3],
+  });
+  for (let c = 0; c <= 3; c++) cellAt(summarySheet, costLast, c).s = { ...totalStyle, ...(c ? { numFmt: MONEY_FMT, alignment: { horizontal: 'right', vertical: 'center' } } : {}) };
+  XLSX.utils.book_append_sheet(wb, summarySheet, 'Сводка');
 
-  const summarySheet = XLSX.utils.json_to_sheet([
-    { 'Показатель': 'Материалы (Мин)', 'Сумма': data.summary.materials_min },
-    { 'Показатель': 'Материалы (Средняя)', 'Сумма': data.summary.materials_avg },
-    { 'Показатель': 'Материалы (Макс)', 'Сумма': data.summary.materials_max },
-    { 'Показатель': 'Работы (Мин)', 'Сумма': data.summary.labor_min },
-    { 'Показатель': 'Работы (Средняя)', 'Сумма': data.summary.labor_avg },
-    { 'Показатель': 'Работы (Макс)', 'Сумма': data.summary.labor_max },
-    { 'Показатель': 'ИТОГО (Мин)', 'Сумма': data.summary.total_min },
-    { 'Показатель': 'ИТОГО (Средняя)', 'Сумма': data.summary.total_avg },
-    { 'Показатель': 'ИТОГО (Макс)', 'Сумма': data.summary.total_max },
-  ]);
-  applyCurrencyFormat(summarySheet);
-  XLSX.utils.book_append_sheet(wb, summarySheet, 'Итого');
+  // ---------- Материалы ----------
+  const matAoa: (string | number)[][] = [
+    ['Материалы'],
+    [metaLine],
+    [],
+    ['Наименование', 'Кол-во', 'Ед. изм.', 'Цена за ед.', 'Итого', 'Источник', 'Дата цены'],
+    ...data.materials.map(m => [
+      m.name, m.quantity, m.unit, m.price_avg, m.total_avg,
+      sourceLabel(m.source, m.region), fmtDate(m.updated_at),
+    ]),
+  ];
+  const matSheet = XLSX.utils.aoa_to_sheet(matAoa);
+  const matFirst = 4;
+  const matLast = matFirst + data.materials.length - 1;
+  data.materials.forEach((m, i) => {
+    if (!m.source_url) return;
+    const ref = XLSX.utils.encode_cell({ r: matFirst + i, c: 5 });
+    matSheet[ref].l = { Target: m.source_url, Tooltip: 'Открыть источник цены' };
+  });
+  matSheet['!cols'] = [{ wch: 38 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 14 }];
+  matSheet['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+  ];
+  cellAt(matSheet, 0, 0).s = titleStyle;
+  cellAt(matSheet, 1, 0).s = metaStyle;
+  if (data.materials.length) {
+    styleTable(matSheet, {
+      headerRow: 3, firstData: matFirst, lastData: matLast, firstCol: 0, lastCol: 6,
+      moneyCols: [3, 4], linkCol: 5, isLink: (i) => !!data.materials[i].source_url,
+    });
+    matSheet['!autofilter'] = { ref: `${XLSX.utils.encode_cell({ r: 3, c: 0 })}:${XLSX.utils.encode_cell({ r: matLast, c: 6 })}` };
+  }
+  XLSX.utils.book_append_sheet(wb, matSheet, 'Материалы');
+
+  // ---------- Работы ----------
+  const labAoa: (string | number)[][] = [
+    ['Работы'],
+    [metaLine],
+    [],
+    ['Услуга', 'Специалист', 'Объём', 'Ед. изм.', 'Цена за ед.', 'Итого', 'Источник'],
+    ...data.labor.map(l => [
+      l.service, l.specialist, l.volume, l.unit, l.price_avg, l.total_avg,
+      sourceLabel(l.source, l.region),
+    ]),
+  ];
+  const labSheet = XLSX.utils.aoa_to_sheet(labAoa);
+  const labFirst = 4;
+  const labLast = labFirst + data.labor.length - 1;
+  data.labor.forEach((l, i) => {
+    if (!l.source_url) return;
+    const ref = XLSX.utils.encode_cell({ r: labFirst + i, c: 6 });
+    labSheet[ref].l = { Target: l.source_url, Tooltip: 'Открыть источник цены' };
+  });
+  labSheet['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 24 }];
+  labSheet['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+  ];
+  cellAt(labSheet, 0, 0).s = titleStyle;
+  cellAt(labSheet, 1, 0).s = metaStyle;
+  if (data.labor.length) {
+    styleTable(labSheet, {
+      headerRow: 3, firstData: labFirst, lastData: labLast, firstCol: 0, lastCol: 6,
+      moneyCols: [4, 5], linkCol: 6, isLink: (i) => !!data.labor[i].source_url,
+    });
+    labSheet['!autofilter'] = { ref: `${XLSX.utils.encode_cell({ r: 3, c: 0 })}:${XLSX.utils.encode_cell({ r: labLast, c: 6 })}` };
+  }
+  XLSX.utils.book_append_sheet(wb, labSheet, 'Работы');
+
+  // ---------- Детализация количества: из чего сложилось «Кол-во» ----------
+  const detAoa: (string | number)[][] = [
+    ['Детализация количества материалов'],
+    ['Количество = базовый расход × запас, округлённое вверх до целых упаковок'],
+    [],
+    ['Материал', 'Базовый расход', 'Запас', 'Фасовка', 'Упаковок', 'Итого'],
+    ...data.materials.map(m => [
+      m.name,
+      `${fmtQty(m.base_quantity)} ${m.unit}`,
+      wastePct(m.waste_factor),
+      `${fmtQty(m.package_size)} ${m.unit}`,
+      m.packs,
+      `${fmtQty(m.quantity)} ${m.unit}`,
+    ]),
+  ];
+  const detSheet = XLSX.utils.aoa_to_sheet(detAoa);
+  detSheet['!cols'] = [{ wch: 38 }, { wch: 18 }, { wch: 10 }, { wch: 16 }, { wch: 12 }, { wch: 16 }];
+  detSheet['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
+  ];
+  cellAt(detSheet, 0, 0).s = titleStyle;
+  cellAt(detSheet, 1, 0).s = noteStyle;
+  if (data.materials.length) {
+    const detLast = 3 + data.materials.length;
+    styleTable(detSheet, {
+      headerRow: 3, firstData: 4, lastData: detLast, firstCol: 0, lastCol: 5,
+    });
+    detSheet['!autofilter'] = { ref: `${XLSX.utils.encode_cell({ r: 3, c: 0 })}:${XLSX.utils.encode_cell({ r: detLast, c: 5 })}` };
+  }
+  XLSX.utils.book_append_sheet(wb, detSheet, 'Детализация');
 
   XLSX.writeFile(wb, 'Смета.xlsx');
 };

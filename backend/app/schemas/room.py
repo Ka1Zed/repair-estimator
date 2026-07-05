@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import List
+from typing import List, Optional
 
 class Point(BaseModel):
     x: float
@@ -9,6 +9,7 @@ class Opening(BaseModel):
     type: str = Field(..., description="Тип проёма: door / window")
     width: float = Field(..., gt=0, description="Ширина в метрах")
     height: float = Field(..., gt=0, description="Высота в метрах")
+    reveal_depth: Optional[float] = Field(None, description="Глубина откоса в метрах (для окон/дверей)")
 
     @field_validator('type')
     def validate_type(cls, v):

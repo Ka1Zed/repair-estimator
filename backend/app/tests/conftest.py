@@ -105,22 +105,14 @@ def seed_test_data(session):
         {"name": "Краска для стен", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9},
         {"name": "Краска потолочная", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9},
         {"name": "Грунтовка", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10},
-        {"name": "Шпаклевка стартовая", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30},
-        {"name": "Шпаклевка финишная", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
-        {"name": "Ламинат", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
+        {"name": "Шпаклевка", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
+        {"name": "Ламинат", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.08, "package_size": 2.0},
         {"name": "Плинтус", "category": "floor", "unit": "м", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
-        {"name": "Плитка", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 1.2},
+        {"name": "Плитка", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 1.2},
         {"name": "Плиточный клей", "category": "tile", "unit": "кг", "consumption_per_m2": 4.5, "waste_factor": 1.1, "package_size": 25},
         {"name": "Затирка", "category": "tile", "unit": "кг", "consumption_per_m2": 0.4, "waste_factor": 1.1, "package_size": 2},
         {"name": "Обои", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1},
         {"name": "Линолеум", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
-        {"name": "Паркетная доска", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
-        {"name": "Краска влагостойкая", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9},
-        # Инженерка (works.electric / works.plumbing) — количество из запроса, не по норме.
-        {"name": "Кабель электрический", "category": "electric", "unit": "м", "waste_factor": 1.1, "package_size": 1.0},
-        {"name": "Розетка", "category": "electric", "unit": "шт", "package_size": 1},
-        {"name": "Светильник", "category": "electric", "unit": "шт", "package_size": 1},
-        {"name": "Труба водопроводная", "category": "plumbing", "unit": "м", "waste_factor": 1.1, "package_size": 2.0},
     ]
     for m in materials_data:
         mat = Material(**m)
@@ -144,26 +136,11 @@ def seed_test_data(session):
         {"name": "Покраска стен", "specialist_type": "Маляр", "unit": "м²"},
         {"name": "Шпаклевка стен", "specialist_type": "Маляр", "unit": "м²"},
         {"name": "Покраска потолка", "specialist_type": "Маляр", "unit": "м²"},
-        {"name": "Поклейка обоев", "specialist_type": "Маляр", "unit": "м²"},
         {"name": "Укладка ламината", "specialist_type": "Укладчик", "unit": "м²"},
-        {"name": "Укладка линолеума", "specialist_type": "Укладчик", "unit": "м²"},
-        {"name": "Укладка паркета", "specialist_type": "Паркетчик", "unit": "м²"},
         {"name": "Укладка плитки", "specialist_type": "Плиточник", "unit": "м²"},
-        {"name": "Монтаж натяжного потолка", "specialist_type": "Потолочник", "unit": "м²"},
         {"name": "Электромонтаж", "specialist_type": "Электрик", "unit": "точка"},
-        {"name": "Штробление", "specialist_type": "Электрик", "unit": "м"},
         {"name": "Сантехнические работы", "specialist_type": "Сантехник", "unit": "точка"},
-        # Гранулярная инженерка works (#222).
-        {"name": "Прокладка кабеля", "specialist_type": "Электрик", "unit": "м"},
-        {"name": "Монтаж розетки", "specialist_type": "Электрик", "unit": "шт"},
-        {"name": "Монтаж светильника", "specialist_type": "Электрик", "unit": "шт"},
-        {"name": "Монтаж труб", "specialist_type": "Сантехник", "unit": "м"},
-        # Черновые работы (#190).
-        {"name": "Демонтаж", "specialist_type": "Разнорабочий", "unit": "м²"},
-        {"name": "Выравнивание стен", "specialist_type": "Штукатур", "unit": "м²"},
-        {"name": "Стяжка пола", "specialist_type": "Стяжечник", "unit": "м²"},
-        {"name": "Гидроизоляция", "specialist_type": "Гидроизолировщик", "unit": "м²"},
-        {"name": "Грунтование", "specialist_type": "Маляр", "unit": "м²"},
+        {"name": "Отделка откосов", "specialist_type": "Отделочник", "unit": "пог.м"},
     ]
     for s in services_data:
         svc = LaborService(**s)
@@ -180,6 +157,18 @@ def seed_test_data(session):
         labor_service_id=paint_walls.id, source_id=src.id,
         price_min=600, price_avg=700, price_max=800, region="Москва",
     ))
+
+    # В блоке LaborPrice после создания услуг
+    reveal_service = session.query(LaborService).filter(LaborService.name == "Отделка откосов").first()
+    if reveal_service:
+        lp = LaborPrice(
+            labor_service_id=reveal_service.id,
+            source_id=src.id,
+            price_min=300,
+            price_avg=500,
+            price_max=800
+        )
+        session.add(lp)
 
     session.commit()
 
@@ -213,23 +202,6 @@ def db_session(setup_test_db):
         yield db
     finally:
         db.close()
-
-
-@pytest.fixture
-def isolated_seeded_db(setup_test_db):
-    """Изолированная копия стандартного посева для тестов, которые МУТИРУЮТ БД
-    (удаляют/добавляют строки, пишут цены). Пересобирает каноничное состояние
-    до и после теста, чтобы не поехали другие тесты на общей session-scoped БД."""
-    def _rebuild():
-        Base.metadata.drop_all(bind=test_engine)
-        Base.metadata.create_all(bind=test_engine)
-        session = TestingSessionLocal()
-        seed_test_data(session)
-        session.close()
-
-    _rebuild()
-    yield
-    _rebuild()
 
 
 # --- Герметизация эндпоинт-тестов от сети (#174) ---

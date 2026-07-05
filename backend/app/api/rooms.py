@@ -4,35 +4,27 @@ from app.services.geometry_service import floor_area, perimeter, wall_area
 
 router = APIRouter(prefix="/api/rooms", tags=["rooms"])
 
+
 @router.post("/calculate", response_model=RoomCalculateResponse)
 async def calculate_room_geometry(request: RoomCalculateRequest):
-    """
-    Рассчитывает геометрию помещения по точкам пола и высоте.
-    """
     points = [(p.x, p.y) for p in request.points]
     height = request.height
-    # geometry_service ждёт проёмы как dict/tuple, а не pydantic-модели Opening:
-    # для не-dict он делает распаковку op_type, w, h = op, и на модели Opening это
-    # ломается → любой запрос с проёмами отдавал 422. Приводим к dict.
-    openings = [
-        {"type": o.type, "width": o.width, "height": o.height}
-        for o in request.openings
-    ]
+
+    openings = []
+    for o in request.openings:
+        if o.reveal_depth is not None:
+            openings.append((o.type, o.width, o.height, o.reveal_depth))
+        else:
+            openings.append((o.type, o.width, o.height))
 
     try:
-        floor = floor_area(points)
-        perim = perimeter(points)
-        walls = wall_area(points, height, openings)
+        result = calculate_room_geometry(points, height, openings)
     except ValueError as e:
-        # Преобразуем доменное исключение в HTTP 422 с тем же сообщением
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
 
     return RoomCalculateResponse(
-        floor_area=floor,
-        ceiling_area=floor,
-        perimeter=perim,
-        wall_area=walls
+        floor_area=result['floor_area'],
+        ceiling_area=result['ceiling_area'],
+        perimeter=result['perimeter'],
+        wall_area=result['wall_area']
     )

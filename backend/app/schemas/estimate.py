@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -10,62 +10,27 @@ class Opening(BaseModel):
     type: str
     width: float
     height: float
-
-
-class SurfaceWork(BaseModel):
-    """Отделка поверхности (пол/стены/потолок). См. works в docs/api.md."""
-    enabled: bool = False
-    # Ключ отделки из finishOptions.<группа> в room-types.json; null — поверхность
-    # включена, но отделка ещё не выбрана.
-    finish: Optional[str] = None
-    # Обои под рисунок (раппорт): +30% к расходу рулонов на подгонку (только стены).
-    # См. estimation-rules.md.
-    wallpaper_pattern: Optional[bool] = False
-    # Пористое/сильно впитывающее основание: грунтовка в 2 слоя вместо 1.
-    # См. estimation-rules.md.
-    primer_two_coats: Optional[bool] = False
-    # Состояние/кривизна основания под выравнивание (even/normal/uneven):
-    # масштабирует расход только стартовой шпаклёвки. См. estimation-rules.md.
-    wall_condition: Optional[str] = None
-
-class ElectricWork(BaseModel):
-    """Электрика комнаты. Числа опциональны: при null бэкенд ставит дефолт от площади."""
-    enabled: bool = False
-    sockets: Optional[int] = None
-    lights: Optional[int] = None
-    cable_m: Optional[float] = None
-
-class PlumbingWork(BaseModel):
-    """Сантехника комнаты. Числа опциональны: при null бэкенд ставит дефолт от типа/площади."""
-    enabled: bool = False
-    points: Optional[int] = None
-    pipe_m: Optional[float] = None
-
-class Works(BaseModel):
-    """Работы и их настройки на уровне комнаты (см. docs/api.md)."""
-    floor: SurfaceWork = Field(default_factory=SurfaceWork)
-    walls: SurfaceWork = Field(default_factory=SurfaceWork)
-    ceiling: SurfaceWork = Field(default_factory=SurfaceWork)
-    electric: ElectricWork = Field(default_factory=ElectricWork)
-    plumbing: PlumbingWork = Field(default_factory=PlumbingWork)
+    reveal_depth: Optional[float] = Field(None, description="Глубина откоса в метрах (для окон/дверей)")
 
 class RoomInput(BaseModel):
     name: str
     height: float = Field(gt=0)
     points: List[Point] = Field(min_length=3)
-    # room_type — пресет дефолтов, не констрейнт (бэкенд works не валидирует по нему).
     room_type: str
     openings: List[Opening] = []
-    works: Works = Field(default_factory=Works)
+
+class RepairOptions(BaseModel):
+    floor: Optional[str] = None
+    walls: Optional[str] = None
+    ceiling: Optional[str] = None
+    electric: Optional[str] = None
+    plumbing: Optional[bool] = False
 
 class EstimateRequest(BaseModel):
     city: str
     rooms: List[RoomInput]
-    # Стадийность сметы (#190). finish_only (дефолт) — только чистовая отделка;
-    # rough_and_finish — добавить черновые работы (демонтаж, выравнивание, стяжка,
-    # гидроизоляция, грунт). Класса ремонта в контракте нет (#222) — объём задаётся
-    # составом works, а глубину (черновая+чистовая vs только финиш) задаёт scope.
-    scope: Literal["finish_only", "rough_and_finish"] = "finish_only"
+    repair_type: str = Field(..., pattern="^(cosmetic|base|extended)$")
+    repair_options: RepairOptions
 
 
 class GeometrySummary(BaseModel):
@@ -77,15 +42,6 @@ class GeometrySummary(BaseModel):
 class MaterialItem(BaseModel):
     name: str
     quantity: float
-    # Из чего складывается quantity (#176): base_quantity — площадь/длина × норма
-    # расхода, ДО запаса; waste_factor — применённый коэффициент запаса
-    # (совмещает waste_factor материала и, для обоев под рисунок, раппорт);
-    # base_quantity × waste_factor == quantity ДО округления до упаковок.
-    base_quantity: float
-    waste_factor: float
-    package_size: float
-    # Число упаковок, до которого округлили: packs × package_size == quantity.
-    packs: int
     unit: str
     price_avg: float
     total_avg: float
@@ -101,10 +57,6 @@ class MaterialItem(BaseModel):
 class LaborItem(BaseModel):
     service: str
     specialist: str
-    # Стадия работы (#190): rough (черновая) / pre_finish (предчистовая) /
-    # finish (чистовая). Классифицирует строку по этапу ремонта, чтобы фронт
-    # мог сгруппировать смету и пользователь не принял финиш за полную смету.
-    stage: Literal["rough", "pre_finish", "finish"]
     volume: float
     unit: str
     price_avg: float
@@ -130,10 +82,6 @@ class Summary(BaseModel):
     total_max: float
 
 class EstimateResponse(BaseModel):
-    # Эхо запрошенной стадийности (#190). finish_only — смета покрывает только
-    # чистовую отделку (без черновых работ); это ЯВНО помечено, чтобы пользователь
-    # не принял финиш за полную смету капремонта (черновые = 40–60% сметы).
-    scope: str
     summary: Summary
     geometry: GeometrySummary
     materials: List[MaterialItem]

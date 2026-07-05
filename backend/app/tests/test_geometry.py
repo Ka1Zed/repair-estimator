@@ -1,5 +1,63 @@
 from decimal import Decimal
 from app.services.geometry_service import floor_area, perimeter, wall_area
+from decimal import Decimal
+from app.services.geometry_service import calculate_room_geometry
+
+class TestReveal:
+    """Тесты для расчёта откосов."""
+
+    def test_reveal_defaults(self):
+        """Проверка площади откосов с дефолтными глубинами."""
+        points = [(0,0), (4,0), (4,3), (0,3)]
+        height = 2.7
+        openings = [
+            {"type": "window", "width": 1.4, "height": 1.5},   # дефолт 0.20
+            {"type": "door", "width": 0.9, "height": 2.1}      # дефолт 0.15
+        ]
+        result = calculate_room_geometry(points, height, openings)
+
+        # Ожидаемая площадь откосов для окна: 0.20 * (2*1.5 + 1.4) = 0.20 * 4.4 = 0.88
+        # Для двери: 0.15 * (2*2.1 + 0.9) = 0.15 * 5.1 = 0.765
+        # Сумма = 1.645
+        expected_reveal_area = Decimal('1.645')
+        assert result['reveal_area'] == expected_reveal_area
+
+        # Погонаж: для окна (2*1.5 + 1.4) = 4.4; для двери (2*2.1 + 0.9) = 5.1; сумма = 9.5
+        expected_reveal_length = Decimal('9.5')
+        assert result['reveal_length'] == expected_reveal_length
+
+    def test_reveal_custom_depth(self):
+        """Проверка с явно заданной глубиной откоса."""
+        points = [(0,0), (5,0), (5,4), (0,4)]
+        height = 2.8
+        openings = [
+            {"type": "window", "width": 1.2, "height": 1.4, "reveal_depth": 0.3}
+        ]
+        result = calculate_room_geometry(points, height, openings)
+
+        # Площадь: 0.3 * (2*1.4 + 1.2) = 0.3 * 4.0 = 1.2
+        assert result['reveal_area'] == Decimal('1.2')
+        # Погонаж: 2*1.4 + 1.2 = 4.0
+        assert result['reveal_length'] == Decimal('4.0')
+
+    def test_reveal_no_openings(self):
+        """При отсутствии проёмов откосы должны быть нулевыми."""
+        points = [(0,0), (3,0), (3,2), (0,2)]
+        height = 2.5
+        result = calculate_room_geometry(points, height, [])
+        assert result['reveal_area'] == Decimal('0')
+        assert result['reveal_length'] == Decimal('0')
+
+    def test_wall_area_unchanged_by_reveal(self):
+        """Наличие откосов не должно менять wall_area."""
+        points = [(0,0), (4,0), (4,3), (0,3)]
+        height = 2.7
+        openings = [{"type": "window", "width": 1.4, "height": 1.5}]
+        result_without = calculate_room_geometry(points, height, [])
+        result_with = calculate_room_geometry(points, height, openings)
+        assert result_with['wall_area'] == result_without['wall_area'] - Decimal('2.1')  # 1.4*1.5
+
+
 
 
 class TestGeometry:

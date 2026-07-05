@@ -39,6 +39,7 @@ const geometryLocales: Record<string, string> = {
 export const exportXlsx = (data: EstimateExportData) => {
   const wb = XLSX.utils.book_new();
 
+  
   const materialsSheet = XLSX.utils.json_to_sheet(
     data.materials.map(m => ({
       'Наименование': m.name,
@@ -46,9 +47,20 @@ export const exportXlsx = (data: EstimateExportData) => {
       'Ед. изм.': m.unit,
       'Цена за ед.': m.price_avg,
       'Итого': m.total_avg,
+      'Источник': m.source_url ? 'Ссылка' : '',
     }))
   );
   applyCurrencyFormat(materialsSheet);
+
+  data.materials.forEach((m, idx) => {
+    if (m.source_url) {
+      const cellRef = `F${idx + 2}`;
+      if (materialsSheet[cellRef]) {
+        materialsSheet[cellRef].l = { Target: m.source_url };
+      }
+    }
+  });
+  
   XLSX.utils.book_append_sheet(wb, materialsSheet, 'Материалы');
 
   const laborSheet = XLSX.utils.json_to_sheet(
@@ -59,11 +71,23 @@ export const exportXlsx = (data: EstimateExportData) => {
       'Ед. изм.': l.unit,
       'Цена за ед.': l.price_avg,
       'Итого': l.total_avg,
+      'Источник': l.source_url ? 'Ссылка' : '',
     }))
   );
   applyCurrencyFormat(laborSheet);
+
+  data.labor.forEach((l, idx) => {
+    if (l.source_url) {
+      const cellRef = `G${idx + 2}`;
+      if (laborSheet[cellRef]) {
+        laborSheet[cellRef].l = { Target: l.source_url };
+      }
+    }
+  });
+
   XLSX.utils.book_append_sheet(wb, laborSheet, 'Работы');
 
+  
   const summarySheet = XLSX.utils.json_to_sheet([
     { 'Показатель': 'Материалы (Мин)', 'Сумма': data.summary.materials_min },
     { 'Показатель': 'Материалы (Средняя)', 'Сумма': data.summary.materials_avg },

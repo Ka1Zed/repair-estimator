@@ -573,6 +573,64 @@ def test_rough_scope_adds_rough_works():
     assert labor["Гидроизоляция"]["volume"] == pytest.approx(4.0)
 
 
+def test_hidden_works_block_present_and_not_in_summary():
+    """Блок скрытых работ есть, помечен, но НЕ влияет на summary основной сметы (#239)."""
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    data = response.json()
+
+    hidden = data["hidden_works"]
+    assert hidden["note"]  # явная пометка «может всплыть доплатой»
+    services = {x["service"] for x in hidden["items"]}
+    # Жилая комната с отделкой пола/стен и электрикой: демонтаж всегда, плюс стяжка,
+    # выравнивание стен, штробы под кабель. Гидроизоляции в сухой комнате нет.
+    assert {"Демонтаж", "Стяжка пола", "Выравнивание стен", "Штробление"} <= services
+    assert "Гидроизоляция" not in services
+    assert hidden["total_avg"] > 0
+
+    for item in hidden["items"]:
+        assert item["reason"]
+        assert item["total_min"] <= item["total_avg"] <= item["total_max"]
+
+    # Ключевой инвариант: суммы блока не попадают в summary. Сумма строк labor[]
+    # (где скрытых работ нет) по-прежнему равна summary.labor_avg.
+    labor_sum = sum(lab["total_avg"] for lab in data["labor"])
+    assert labor_sum == pytest.approx(data["summary"]["labor_avg"], rel=1e-6)
+    hidden_services = {x["service"] for x in hidden["items"]}
+    assert hidden_services.isdisjoint({lab["service"] for lab in data["labor"]})
+
+
+def test_hidden_works_scenario_driven():
+    """Гидроизоляция всплывает только в мокрой зоне; штробы — при электрике (#239)."""
+    bath = client.post("/api/estimates/calculate", json=_bathroom_payload()).json()
+    bath_services = {x["service"] for x in bath["hidden_works"]["items"]}
+    assert "Гидроизоляция" in bath_services
+
+    hidden = bath["hidden_works"]["items"]
+    waterproof = next(x for x in hidden if x["service"] == "Гидроизоляция")
+    # Санузел 2×2 → площадь пола 4 м², объём гидроизоляции по полу.
+    assert waterproof["volume"] == pytest.approx(4.0)
+
+
+def test_hidden_works_independent_of_scope():
+    """Блок скрытых работ одинаков при finish_only и rough_and_finish (#239).
+
+    Скрытые работы — риск неизвестного основания, ортогональный глубине сметы:
+    в summary они не входят ни при каком scope, состав от scope не зависит.
+    """
+    finish = client.post("/api/estimates/calculate",
+                         json=_bathroom_payload("finish_only")).json()
+    rough = client.post("/api/estimates/calculate",
+                        json=_bathroom_payload("rough_and_finish")).json()
+
+    def services(d):
+        return {x["service"] for x in d["hidden_works"]["items"]}
+
+    assert services(finish) == services(rough)
+    assert finish["hidden_works"]["total_avg"] == pytest.approx(
+        rough["hidden_works"]["total_avg"])
+
+
 def test_invalid_scope_rejected():
     """Неизвестный scope отклоняется валидацией (422)."""
     response = client.post("/api/estimates/calculate",

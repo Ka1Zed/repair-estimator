@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.db.models import PriceSource
 from app.schemas.estimate import (
     EstimateRequest, EstimateResponse, Summary, GeometrySummary,
-    MaterialItem, LaborItem, RoomInput,
+    MaterialItem, LaborItem, HiddenWorks, HiddenWorkItem, RoomInput,
 )
 from app.services.geometry_service import calculate_room_geometry
 from app.services.material_calc_service import (
@@ -18,9 +18,11 @@ from app.services.material_calc_service import (
 )
 from app.services.labor_calc_service import (
     calculate_labor, calculate_engineering_labor, calculate_rough_labor,
+    WET_ROOM_TYPES,
 )
 from app.services.repair_coeffs_service import CONTINGENCY
 from app.services.price_aggregator_service import get_price, get_labor_price
+from app.services.hidden_works_service import calculate_hidden_works
 from app.parsers.base import BaseParser
 from app.parsers.megastroy_parser import MegastroyParser
 
@@ -123,6 +125,10 @@ def calculate_estimate(
         'wall_area': Decimal(0),
         'perimeter': Decimal(0),
     }
+    # Аккумуляторы для блока скрытых работ (#239): флаги сценария и объёмы, не
+    # входящие в summary — считаются отдельно, поверх основной сметы.
+    hidden = {'has_floor': False, 'has_walls': False, 'has_electric': False,
+              'has_wet': False, 'cable_m': Decimal(0)}
 
     for room in request.rooms:
         try:
@@ -139,6 +145,12 @@ def calculate_estimate(
 
         # --- отделка (finish) по works комнаты ---
         finish_options = _finish_options(room)
+
+        # Флаги сценария для скрытых работ (#239): по фактически выбранной отделке.
+        if finish_options["floor"]:
+            hidden['has_floor'] = True
+        if finish_options["walls"]:
+            hidden['has_walls'] = True
         all_materials.extend(calculate_materials(
             geometry=geometry, repair_options=finish_options, db=db
         ))
@@ -156,6 +168,13 @@ def calculate_estimate(
         # --- инженерка по явным числам works (дефолты от типа/площади) ---
         sockets, lights, cable_m = _resolve_electric(room, geometry['floor_area'])
         points, pipe_m = _resolve_plumbing(room)
+
+        # Накопить драйверы скрытых работ (#239): штробы под кабель, мокрая зона.
+        if cable_m > 0:
+            hidden['has_electric'] = True
+            hidden['cable_m'] += cable_m
+        if points > 0 or room.room_type in WET_ROOM_TYPES:
+            hidden['has_wet'] = True
         all_materials.extend(calculate_engineering_materials(
             sockets=sockets, lights=lights, cable_m=cable_m, pipe_m=pipe_m, db=db
         ))
@@ -313,6 +332,27 @@ def calculate_estimate(
         total_max=float(mat_final['max'] + lab_final['max']),
     )
 
+    # Блок «может всплыть доплатой» (#239): считается поверх основной сметы и
+    # НЕ входит в summary. Объёмы — суммарная геометрия сценария, цены — seed-работы.
+    hidden_raw = calculate_hidden_works(
+        floor_area=total_geometry['floor_area'],
+        wall_area=total_geometry['wall_area'],
+        cable_m=hidden['cable_m'],
+        has_floor=hidden['has_floor'],
+        has_walls=hidden['has_walls'],
+        has_electric=hidden['has_electric'],
+        has_wet=hidden['has_wet'],
+        city=request.city,
+        db=db,
+    )
+    hidden_works = HiddenWorks(
+        note=hidden_raw['note'],
+        total_min=hidden_raw['total_min'],
+        total_avg=hidden_raw['total_avg'],
+        total_max=hidden_raw['total_max'],
+        items=[HiddenWorkItem(**it) for it in hidden_raw['items']],
+    )
+
     geometry_summary = GeometrySummary(
         floor_area=float(total_geometry['floor_area']),
         ceiling_area=float(total_geometry['ceiling_area']),
@@ -325,5 +365,6 @@ def calculate_estimate(
         summary=summary,
         geometry=geometry_summary,
         materials=materials_response,
-        labor=labor_response
+        labor=labor_response,
+        hidden_works=hidden_works,
     )

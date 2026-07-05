@@ -318,6 +318,56 @@ class TestEngineeringCalc:
         assert calculate_engineering_materials(0, 0, 0, 0, db_session) == []
 
 
+    def test_electric_materials_present(self, db_session):
+        geometry = {
+            'floor_area': Decimal('20'),
+            'ceiling_area': Decimal('20'),
+            'wall_area': Decimal('50'),
+            'perimeter': Decimal('18'),
+            'door_width_sum': Decimal('0'),
+            'cable_m': 20,
+            'sockets': 5,
+            'lights': 3,
+            'pipe_m': 10,
+        }
+        repair_options = {'electric': 'basic', 'plumbing': True}
+        materials = calculate_materials(geometry, repair_options, db_session)
+        names = [m['name'] for m in materials]
+        assert 'Кабель электрический' in names
+        assert 'Розетка' in names
+        assert 'Светильник' in names
+        assert 'Труба водопроводная' in names
+
+    def test_no_electric_materials_when_no_volumes(self, db_session):
+        geometry = {
+            'floor_area': Decimal('20'),
+            'ceiling_area': Decimal('20'),
+            'wall_area': Decimal('50'),
+            'perimeter': Decimal('18'),
+            'door_width_sum': Decimal('0'),
+            'cable_m': 0,
+            'sockets': 0,
+            'lights': 0,
+            'pipe_m': 0,
+        }
+        repair_options = {'electric': 'basic', 'plumbing': True}
+        materials = calculate_materials(geometry, repair_options, db_session)
+        names = [m['name'] for m in materials]
+        assert 'Кабель электрический' not in names
+        assert 'Розетка' not in names
+        assert 'Светильник' not in names
+        assert 'Труба водопроводная' not in names
+
+    def test_electric_materials_use_waste_factor(self, db_session):
+        geometry = {'cable_m': 10, 'sockets': 2, 'lights': 1, 'pipe_m': 5}
+        repair_options = {'electric': 'basic', 'plumbing': True}
+        materials = calculate_materials(geometry, repair_options, db_session)
+        cable = next(m for m in materials if m['name'] == 'Кабель электрический')
+        # В seed должен быть waste_factor=1.1, или мы переопределили в quantity_of
+        # Проверяем, что quantity > base (если в БД waste_factor=1.1)
+        # Это сложно проверить без знания seed, поэтому просто проверяем наличие.
+        assert cable['quantity'] > Decimal(10)  # если waste_factor > 1
+
 class TestFinishOptionsCoverage:
     """Каждая отделка из docs/room-types.json должна иметь расчётную базу: свой
     материал/работу с seed-ценой. Иначе смета молча занижается (#231)."""

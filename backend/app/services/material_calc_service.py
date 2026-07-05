@@ -123,6 +123,25 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
         sel.append((M_ADHESIVE, tiled))
         sel.append((M_GROUT, tiled))
 
+        # --- электрика ---
+    electric = repair_options.get("electric")
+    if electric in ("basic", "extended"):
+        cable_m = D(geom.get("cable_m", 0))
+        if cable_m > 0:
+            sel.append((M_CABLE, cable_m))
+        sockets = D(geom.get("sockets", 0))
+        if sockets > 0:
+            sel.append((M_SOCKET, sockets))
+        lights = D(geom.get("lights", 0))
+        if lights > 0:
+            sel.append((M_LIGHT, lights))
+
+    # --- сантехника ---
+    if repair_options.get("plumbing"):
+        pipe_m = D(geom.get("pipe_m", 0))
+        if pipe_m > 0:
+            sel.append((M_PIPE, pipe_m))
+
     return sel
 
 
@@ -154,6 +173,17 @@ def quantity_of(
     unit = material.unit
     c = D(material.consumption_per_m2)
     w = D(material.waste_factor) or Decimal(1)
+
+        # --- материалы электрики и сантехники (количество берётся напрямую из works) ---
+    if material.name in (M_CABLE, M_PIPE, M_SOCKET, M_LIGHT):
+        base = area
+        # Для кабеля и трубы запас 10% (waste_factor из БД, но можно переопределить)
+        # Если в БД waste_factor не задан, используем 1.1.
+        if material.name in (M_CABLE, M_PIPE):
+            w = D(material.waste_factor) or Decimal('1.1')
+        else:
+            w = D(material.waste_factor) or Decimal('1.0')
+        return base * w, base
 
     if unit == "л":
         layers = D(LAYERS.get(material.name, 1))

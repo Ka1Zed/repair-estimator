@@ -134,6 +134,21 @@ def calculate_estimate(
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
 
+            # Передаём объёмы электрики и сантехники из works в geometry
+        if room.works.electric:
+            geometry['cable_m'] = Decimal(getattr(room.works.electric, 'cable_m', 0) or 0)
+            geometry['sockets'] = Decimal(getattr(room.works.electric, 'sockets', 0) or 0)
+            geometry['lights'] = Decimal(getattr(room.works.electric, 'lights', 0) or 0)
+        else:
+            geometry['cable_m'] = Decimal(0)
+            geometry['sockets'] = Decimal(0)
+            geometry['lights'] = Decimal(0)
+
+        if room.works.plumbing:
+            geometry['pipe_m'] = Decimal(getattr(room.works.plumbing, 'pipe_m', 0) or 0)
+        else:
+            geometry['pipe_m'] = Decimal(0)
+
         for key in total_geometry:
             total_geometry[key] += Decimal(str(geometry[key]))
 

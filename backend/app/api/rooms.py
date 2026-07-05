@@ -11,7 +11,12 @@ async def calculate_room_geometry(request: RoomCalculateRequest):
     """
     points = [(p.x, p.y) for p in request.points]
     height = request.height
-    openings = request.openings
+    # geometry_service ждёт проёмы как dict/tuple, а не pydantic-модели Opening —
+    # иначе wall_area падает на распаковке (op_type, w, h = op) и эндпоинт даёт 422.
+    openings = [
+        {"type": o.type, "width": o.width, "height": o.height}
+        for o in request.openings
+    ]
 
     try:
         floor = floor_area(points)

@@ -76,6 +76,40 @@ def test_rooms_calculate_rectangle():
     assert data["wall_area"] == pytest.approx(37.8, 0.01)
 
 
+def test_rooms_calculate_subtracts_openings():
+    '''Проёмы (Opening-модели) вычитаются из площади стен: эндпоинт конвертирует
+    их в dict для geometry_service, иначе wall_area падал 422 (op_type,w,h = op).'''
+    payload = {
+        "height": 2.7,
+        "points": [
+            {"x": 0, "y": 0}, {"x": 4, "y": 0},
+            {"x": 4, "y": 3}, {"x": 0, "y": 3},
+        ],
+        "openings": [
+            {"type": "door", "width": 0.8, "height": 2.0},
+            {"type": "window", "width": 1.5, "height": 1.4},
+        ],
+    }
+    resp = client.post("/api/rooms/calculate", json=payload)
+    assert resp.status_code == 200
+    # wall_area = 14*2.7 - (0.8*2.0 + 1.5*1.4) = 37.8 - 3.7 = 34.1
+    assert resp.json()["wall_area"] == pytest.approx(34.1, 0.01)
+
+
+def test_rooms_calculate_invalid_opening_rejected():
+    '''Дверь выше комнаты → доменная ошибка geometry_service отдаётся как 422.'''
+    payload = {
+        "height": 2.7,
+        "points": [
+            {"x": 0, "y": 0}, {"x": 4, "y": 0},
+            {"x": 4, "y": 3}, {"x": 0, "y": 3},
+        ],
+        "openings": [{"type": "door", "width": 0.8, "height": 3.0}],
+    }
+    resp = client.post("/api/rooms/calculate", json=payload)
+    assert resp.status_code == 422
+
+
 def test_rooms_calculate_too_few_points_rejected():
     '''Меньше 3 точек — 422 (валидация схемы).'''
     payload = {"height": 2.7, "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}]}

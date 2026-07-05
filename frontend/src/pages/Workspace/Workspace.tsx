@@ -464,7 +464,7 @@ export function Workspace() {
                 className={styles.exportBtn}
                 onClick={() =>
                   data &&
-                  import("../../utils/exportEstimate").then((m) => m.exportXlsx(data))
+                  import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city))
                 }
                 disabled={!data}
               >

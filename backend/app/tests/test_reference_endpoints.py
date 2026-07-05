@@ -1,0 +1,83 @@
+# app/tests/test_reference_endpoints.py
+# Смоук справочных эндпоинтов (200 + форма ответа) и HTTP-теста геометрии
+# POST /api/rooms/calculate. Справочники материалов/работ/регионов ходят в БД
+# через get_db → берём тестовую БД фикстурой override_get_db (см. conftest #174).
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+client = TestClient(app)
+
+
+@pytest.mark.usefixtures("override_get_db")
+def test_room_types_shape():
+    resp = client.get("/api/room-types")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data["roomTypes"], dict)
+    assert isinstance(data["finishOptions"], dict)
+
+
+@pytest.mark.usefixtures("override_get_db")
+def test_materials_shape():
+    resp = client.get("/api/materials")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) > 0
+    for field in ("id", "name", "category", "unit", "package_size"):
+        assert field in data[0]
+
+
+@pytest.mark.usefixtures("override_get_db")
+def test_labor_services_shape():
+    resp = client.get("/api/labor-services")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) > 0
+    for field in ("id", "name", "specialist_type", "unit"):
+        assert field in data[0]
+
+
+@pytest.mark.usefixtures("override_get_db")
+def test_regions_shape():
+    resp = client.get("/api/regions")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["default"] == "Казань"
+    assert isinstance(data["regions"], list)
+    # Город по умолчанию всегда в списке; сид добавляет региональные цены Москвы.
+    assert "Казань" in data["regions"]
+    assert "Москва" in data["regions"]
+
+
+# --- POST /api/rooms/calculate: геометрия по контуру (сервис покрыт, эндпоинт — нет) ---
+
+
+def test_rooms_calculate_rectangle():
+    '''Прямоугольник 4×3, высота 2.7: геометрия совпадает с ручным счётом.'''
+    payload = {
+        "height": 2.7,
+        "points": [
+            {"x": 0, "y": 0}, {"x": 4, "y": 0},
+            {"x": 4, "y": 3}, {"x": 0, "y": 3},
+        ],
+    }
+    resp = client.post("/api/rooms/calculate", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["floor_area"] == pytest.approx(12.0)
+    assert data["ceiling_area"] == pytest.approx(12.0)
+    assert data["perimeter"] == pytest.approx(14.0)
+    # wall_area = 14 * 2.7 = 37.8 (без проёмов)
+    assert data["wall_area"] == pytest.approx(37.8, 0.01)
+
+
+def test_rooms_calculate_too_few_points_rejected():
+    '''Меньше 3 точек — 422 (валидация схемы).'''
+    payload = {"height": 2.7, "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}]}
+    resp = client.post("/api/rooms/calculate", json=payload)
+    assert resp.status_code == 422

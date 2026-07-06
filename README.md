@@ -88,7 +88,8 @@ npm run dev                            # http://localhost:5173
 ## Документация
 
 - [Локальная разработка](docs/development.md) — запуск, окружение, тесты, миграции
-- [Развёртывание](docs/deployment.md) — деплой на сервер через Docker Compose
+- [Развёртывание](docs/deployment.md) — деплой на сервер через Docker Compose,
+  [резервные копии БД и восстановление](docs/deployment.md#резервные-копии-бд)
 - [Как мы работаем с репозиторием](docs/contributing.md) — ветки, PR, коммиты, роли
 - [API-контракт](docs/api.md) — формат запросов и ответов frontend ↔ backend
 - [Архитектура](docs/architecture.md)

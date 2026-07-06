@@ -95,3 +95,67 @@ docker compose logs -f backend             # логи backend
 docker compose ps                          # статус контейнеров
 docker compose down                        # остановить (данные БД в volume сохранятся)
 ```
+
+## Резервные копии БД
+
+Кэш парсерных цен (`update_prices`) и правки региональных цен живут только в
+docker-volume `postgres_data`. Потеря диска e2-micro = потеря всего собранного —
+поэтому нужен регулярный дамп.
+
+`backup.sh` (в корне репозитория, рядом с `deploy.sh`) делает сжатый дамп через
+`pg_dump` **внутри** контейнера и стримит его в gzip на хост — без промежуточных
+файлов и тяжёлых инструментов, чтобы уложиться в 1 ГБ RAM. БД при этом только
+читается.
+
+```bash
+./backup.sh                 # дамп в ./backups/, ротация — 7 суток
+KEEP_DAYS=14 ./backup.sh    # хранить дольше
+BACKUP_DIR=/mnt/x ./backup.sh
+```
+
+Имя файла — `repair_estimator-YYYYmmdd-HHMMSS.sql.gz`. Каталог `backups/` в
+`.gitignore` — дампы в репозиторий не попадают. Битый или пустой архив скрипт
+удаляет и завершает с ошибкой, так что «зелёный» выход = валидная копия.
+
+### Ежедневный запуск (cron)
+
+Дамп раз в сутки в 03:30. Открыть `crontab -e` и добавить строку (путь — под свой
+логин; `>>` копит лог, куда пишутся и ошибки):
+
+```cron
+30 3 * * * cd /home/<логин>/repair-estimator && ./backup.sh >> /home/<логин>/backup.log 2>&1
+```
+
+Проверить, что задание на месте: `crontab -l`. Первый прогон лучше сделать руками
+(`./backup.sh`) и убедиться, что в `backups/` появился непустой `.sql.gz`.
+
+> Дампы лежат на том же диске, что и БД. Для защиты от потери самого инстанса
+> периодически забирайте свежий файл с сервера, например:
+> `scp <логин>@<адрес-сервера>:~/repair-estimator/backups/<файл>.sql.gz .`
+> (или `gsutil cp` в GCS-бакет).
+
+### Восстановление
+
+Дамп — это обычный SQL (плюс gzip), заливается через `psql` в контейнере.
+`.sql.gz` от `pg_dump` содержит только данные и схему, но **не** пересоздаёт саму
+БД, поэтому таблицы перед заливкой надо очистить.
+
+```bash
+# 1. Остановить backend, чтобы никто не писал в БД во время восстановления.
+docker compose stop backend
+
+# 2. Пересоздать пустую схему (сотрёт текущие данные БД!).
+docker compose exec -T postgres psql -U repair -d repair_estimator \
+  -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+
+# 3. Залить дамп (подставь нужный файл).
+gunzip -c backups/repair_estimator-YYYYmmdd-HHMMSS.sql.gz \
+  | docker compose exec -T postgres psql -U repair -d repair_estimator
+
+# 4. Поднять backend обратно.
+docker compose start backend
+```
+
+Имя пользователя/БД (`repair` / `repair_estimator`) — из `.env`
+(`POSTGRES_USER` / `POSTGRES_DB`). После восстановления проверить health:
+`curl http://localhost:8000/health`.

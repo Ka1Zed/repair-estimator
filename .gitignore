@@ -20,3 +20,6 @@ venv/
 
 # beta blueprint eval output
 backend/scripts/eval_out/
+
+# beta headless-parser: кэш clearance-cookie DDoS-Guard
+backend/.cache/

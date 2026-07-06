@@ -1,0 +1,95 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.group {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.check {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.check:disabled {
+  cursor: default;
+}
+
+.groupName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+.required {
+  font-weight: 400;
+  font-size: 12px;
+  color: #9a9a9a;
+}
+
+.fields {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modifier {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #6b6b6b;
+  user-select: none;
+}
+
+.numRow {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.numLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+}
+
+.numInput {
+  width: 72px;
+  padding: 4px 6px;
+  font-size: 14px;
+  color: var(--text-h);
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid var(--border);
+  outline: none;
+}
+
+.numInput:focus {
+  border-bottom-color: var(--accent);
+}
+
+.numInput::placeholder {
+  color: #c0c0c0;
+}

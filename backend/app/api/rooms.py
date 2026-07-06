@@ -11,7 +11,13 @@ async def calculate_room_geometry(request: RoomCalculateRequest):
     """
     points = [(p.x, p.y) for p in request.points]
     height = request.height
-    openings = request.openings
+    # geometry_service ждёт проёмы как dict/tuple, а не pydantic-модели Opening:
+    # для не-dict он делает распаковку op_type, w, h = op, и на модели Opening это
+    # ломается → любой запрос с проёмами отдавал 422. Приводим к dict.
+    openings = [
+        {"type": o.type, "width": o.width, "height": o.height}
+        for o in request.openings
+    ]
 
     try:
         floor = floor_area(points)

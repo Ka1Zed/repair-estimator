@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useProjectStore } from "../store/projectStore";
+import { getSelfIntersectingEdges } from "../utils/polygonValidation";
 
 export default function RoomPolygonEditor() {
   const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
@@ -87,9 +88,11 @@ export default function RoomPolygonEditor() {
     </div>
   );
 
+  const badEdges = useMemo(() => getSelfIntersectingEdges(points), [points]);
+
   if (points.length < 3) {
     return (
-      <div style={{ marginTop: "20px", width: "100%", maxWidth: "450px" }}>
+      <div style={{ marginTop: "20px", width: "100%" }}>
         <div style={{ color: "#888", marginBottom: "15px" }}>
           Добавьте минимум 3 точки для отображения плана или загрузите готовый
           пример.
@@ -158,6 +161,8 @@ export default function RoomPolygonEditor() {
   const pointsString = safePoints
     .map((p) => `${(p.x - activeOffsetX) * activeScale},${(p.y - activeOffsetY) * activeScale}`)
     .join(" ");
+
+  const hasBadEdges = badEdges.size > 0;
 
   const handlePointerDown = (index: number) => {
     setDragSnapshot({ scale, offsetX, offsetY, svgWidth, svgHeight });
@@ -278,7 +283,7 @@ export default function RoomPolygonEditor() {
   };
 
   return (
-    <div style={{ marginTop: "20px", width: "100%", maxWidth: "450px" }}>
+    <div style={{ marginTop: "20px", width: "100%" }}>
       <div
         style={{
           display: "flex",
@@ -394,17 +399,34 @@ export default function RoomPolygonEditor() {
 
           <polygon
             points={pointsString}
-            fill="rgba(176,123,94,0.06)"
-            stroke="var(--accent)"
-            strokeWidth="1.5"
+            fill={hasBadEdges ? "rgba(176,70,70,0.05)" : "rgba(176,123,94,0.06)"}
+            stroke="none"
           />
+
+          {safePoints.map((p, i) => {
+            const nextIndex = (i + 1) % safePoints.length;
+            const nextP = safePoints[nextIndex];
+            const isBad = badEdges.has(i);
+            return (
+              <line
+                key={`edge-stroke-${i}`}
+                x1={(p.x - activeOffsetX) * activeScale}
+                y1={(p.y - activeOffsetY) * activeScale}
+                x2={(nextP.x - activeOffsetX) * activeScale}
+                y2={(nextP.y - activeOffsetY) * activeScale}
+                stroke={isBad ? "var(--error)" : "var(--accent)"}
+                strokeWidth={isBad ? "2.5" : "1.5"}
+                strokeDasharray={isBad ? "5 3" : undefined}
+              />
+            );
+          })}
 
           {safePoints.map((p, i) => {
             const nextIndex = (i + 1) % safePoints.length;
             const nextP = safePoints[nextIndex];
             return (
               <line
-                key={`edge-${i}`}
+                key={`edge-hit-${i}`}
                 x1={(p.x - activeOffsetX) * activeScale}
                 y1={(p.y - activeOffsetY) * activeScale}
                 x2={(nextP.x - activeOffsetX) * activeScale}
@@ -522,6 +544,22 @@ export default function RoomPolygonEditor() {
           ))}
         </svg>
       </div>
+
+      {hasBadEdges && (
+        <div
+          style={{
+            marginTop: "10px",
+            padding: "8px 12px",
+            background: "var(--error-bg)",
+            border: "1px solid var(--error-border)",
+            borderRadius: "4px",
+            color: "var(--error)",
+            fontSize: "13px",
+          }}
+        >
+          Контур самопересекается — площадь будет неверной. Исправьте форму комнаты.
+        </div>
+      )}
 
       {controlButtonsJSX}
     </div>

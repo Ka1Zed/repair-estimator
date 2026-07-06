@@ -8,27 +8,44 @@ os.environ.setdefault("POSTGRES_PASSWORD", "repair")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 
-# --- Изоляция тестовой БД (#169) ---
+# --- Изоляция тестовой БД (#169, per-process — #263) ---
 # Тесты НИКОГДА не должны писать в dev-базу repair_estimator: фикстуры дропают
 # таблицы и заливают тестовые цены (avg=120), что раньше затирало боевой seed.
-# Поднимаем отдельную БД (по умолчанию repair_estimator_test) и направляем туда
-# ВЕСЬ engine приложения — env выставляем ДО импорта app.*, иначе SessionLocal
-# в сервисах (price_aggregator, admin, room_types) свяжется с боевым engine.
-os.environ["POSTGRES_DB"] = os.environ.get("POSTGRES_TEST_DB", "repair_estimator_test")
+# Поднимаем отдельную БД и направляем туда ВЕСЬ engine приложения — env выставляем
+# ДО импорта app.*, иначе SessionLocal в сервисах (price_aggregator, admin,
+# room_types) свяжется с боевым engine.
+#
+# Имя БД делаем УНИКАЛЬНЫМ на процесс: два одновременных прогона pytest (два
+# терминала / локалка + CI на том же Postgres / xdist-воркеры) иначе бьют в одну
+# базу и ловят ложные падения, пока сосед выполняет drop_all→create_all→seed на
+# полусозданной схеме (#263). Суффикс берём из PYTEST_XDIST_WORKER (при -n), иначе
+# из PID. POSTGRES_TEST_DB, если задан явно, перекрывает генерацию (для отладки на
+# фиксированной базе — тогда межпроцессной изоляции нет, это осознанный выбор).
+_worker_tag = os.environ.get("PYTEST_XDIST_WORKER") or f"pid{os.getpid()}"
+_explicit_test_db = "POSTGRES_TEST_DB" in os.environ
+os.environ["POSTGRES_DB"] = os.environ.get(
+    "POSTGRES_TEST_DB", f"repair_estimator_test_{_worker_tag}"
+)
 
 from app.core.config import settings  # noqa: E402 — читает уже тестовый POSTGRES_DB
 
 
-def _ensure_test_database() -> None:
-    """Создаёт тестовую БД, если её ещё нет.
+# Дропаем в session-teardown только per-process базу, ИМЯ которой сгенерировали мы
+# сами (repair_estimator_test_<worker|pid>). Явную фиксированную POSTGRES_TEST_DB не
+# трогаем — она может быть общей/отладочной, снести её значило бы задеть соседа. Владение
+# по имени, а не по факту создания: так подчищаем и stale-базу от упавшего прогона с тем же PID.
+_owns_test_db = not _explicit_test_db
 
-    CREATE DATABASE нельзя выполнить внутри транзакции, поэтому подключаемся к
-    служебной базе postgres в autocommit. Учётные данные берём из settings —
-    из того же источника, что и боевой engine, чтобы не разъехаться по паролю.
-    """
+
+def _service_conn():
+    """Autocommit-подключение к служебной БД postgres для DDL над тест-базой.
+
+    CREATE/DROP DATABASE нельзя выполнить внутри транзакции. Учётные данные берём
+    из settings — из того же источника, что и боевой engine, чтобы не разъехаться
+    по паролю."""
     import psycopg
 
-    conn = psycopg.connect(
+    return psycopg.connect(
         host=settings.POSTGRES_HOST,
         port=settings.POSTGRES_PORT,
         user=settings.POSTGRES_USER,
@@ -36,6 +53,11 @@ def _ensure_test_database() -> None:
         dbname="postgres",
         autocommit=True,
     )
+
+
+def _ensure_test_database() -> None:
+    """Создаёт тестовую БД, если её ещё нет."""
+    conn = _service_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (settings.POSTGRES_DB,))
@@ -45,7 +67,37 @@ def _ensure_test_database() -> None:
         conn.close()
 
 
+def _drop_test_database() -> None:
+    """Убирает per-process тест-базу в конце сессии, чтобы не копить
+    repair_estimator_test_* на Postgres (#263).
+
+    Сначала гасим свои же соединения (engine.dispose закрывает пул, но подстрахуемся
+    pg_terminate_backend), потом DROP DATABASE — иначе Postgres не отдаст занятую базу."""
+    # engine мог не успеть импортироваться, если app.* упал при импорте после CREATE
+    # DATABASE — берём осторожно, чтобы teardown не замаскировал исходную ошибку NameError.
+    _eng = globals().get("engine")
+    if _eng is not None:
+        _eng.dispose()
+    conn = _service_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                (settings.POSTGRES_DB,),
+            )
+            cur.execute(f'DROP DATABASE IF EXISTS "{settings.POSTGRES_DB}"')
+    finally:
+        conn.close()
+
+
 _ensure_test_database()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Прибираем per-process тест-базу после сессии (только если имя сгенерировали сами)."""
+    if _owns_test_db:
+        _drop_test_database()
 
 from app.db.models import Base  # noqa: E402 — импорт только после настройки тестовой БД
 from app.db.session import engine  # noqa: E402
@@ -105,14 +157,22 @@ def seed_test_data(session):
         {"name": "Краска для стен", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9},
         {"name": "Краска потолочная", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9},
         {"name": "Грунтовка", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10},
-        {"name": "Шпаклевка", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
-        {"name": "Ламинат", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.08, "package_size": 2.0},
+        {"name": "Шпаклевка стартовая", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30},
+        {"name": "Шпаклевка финишная", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
+        {"name": "Ламинат", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
         {"name": "Плинтус", "category": "floor", "unit": "м", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
-        {"name": "Плитка", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 1.2},
+        {"name": "Плитка", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 1.2},
         {"name": "Плиточный клей", "category": "tile", "unit": "кг", "consumption_per_m2": 4.5, "waste_factor": 1.1, "package_size": 25},
         {"name": "Затирка", "category": "tile", "unit": "кг", "consumption_per_m2": 0.4, "waste_factor": 1.1, "package_size": 2},
         {"name": "Обои", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1},
         {"name": "Линолеум", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
+        {"name": "Паркетная доска", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
+        {"name": "Краска влагостойкая", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9},
+        # Инженерка (works.electric / works.plumbing) — количество из запроса, не по норме.
+        {"name": "Кабель электрический", "category": "electric", "unit": "м", "waste_factor": 1.1, "package_size": 1.0},
+        {"name": "Розетка", "category": "electric", "unit": "шт", "package_size": 1},
+        {"name": "Светильник", "category": "electric", "unit": "шт", "package_size": 1},
+        {"name": "Труба водопроводная", "category": "plumbing", "unit": "м", "waste_factor": 1.1, "package_size": 2.0},
     ]
     for m in materials_data:
         mat = Material(**m)
@@ -136,10 +196,30 @@ def seed_test_data(session):
         {"name": "Покраска стен", "specialist_type": "Маляр", "unit": "м²"},
         {"name": "Шпаклевка стен", "specialist_type": "Маляр", "unit": "м²"},
         {"name": "Покраска потолка", "specialist_type": "Маляр", "unit": "м²"},
+        {"name": "Поклейка обоев", "specialist_type": "Маляр", "unit": "м²"},
         {"name": "Укладка ламината", "specialist_type": "Укладчик", "unit": "м²"},
+        {"name": "Укладка линолеума", "specialist_type": "Укладчик", "unit": "м²"},
+        {"name": "Укладка паркета", "specialist_type": "Паркетчик", "unit": "м²"},
         {"name": "Укладка плитки", "specialist_type": "Плиточник", "unit": "м²"},
+        {"name": "Монтаж натяжного потолка", "specialist_type": "Потолочник", "unit": "м²"},
+        # Натяжной потолок блоком + откосы (#191).
+        {"name": "Закладная под светильник", "specialist_type": "Потолочник", "unit": "шт"},
+        {"name": "Ниша под карниз", "specialist_type": "Потолочник", "unit": "м"},
+        {"name": "Отделка откосов", "specialist_type": "Штукатур", "unit": "м²"},
         {"name": "Электромонтаж", "specialist_type": "Электрик", "unit": "точка"},
+        {"name": "Штробление", "specialist_type": "Электрик", "unit": "м"},
         {"name": "Сантехнические работы", "specialist_type": "Сантехник", "unit": "точка"},
+        # Гранулярная инженерка works (#222).
+        {"name": "Прокладка кабеля", "specialist_type": "Электрик", "unit": "м"},
+        {"name": "Монтаж розетки", "specialist_type": "Электрик", "unit": "шт"},
+        {"name": "Монтаж светильника", "specialist_type": "Электрик", "unit": "шт"},
+        {"name": "Монтаж труб", "specialist_type": "Сантехник", "unit": "м"},
+        # Черновые работы (#190).
+        {"name": "Демонтаж", "specialist_type": "Разнорабочий", "unit": "м²"},
+        {"name": "Выравнивание стен", "specialist_type": "Штукатур", "unit": "м²"},
+        {"name": "Стяжка пола", "specialist_type": "Стяжечник", "unit": "м²"},
+        {"name": "Гидроизоляция", "specialist_type": "Гидроизолировщик", "unit": "м²"},
+        {"name": "Грунтование", "specialist_type": "Маляр", "unit": "м²"},
     ]
     for s in services_data:
         svc = LaborService(**s)
@@ -189,6 +269,23 @@ def db_session(setup_test_db):
         yield db
     finally:
         db.close()
+
+
+@pytest.fixture
+def isolated_seeded_db(setup_test_db):
+    """Изолированная копия стандартного посева для тестов, которые МУТИРУЮТ БД
+    (удаляют/добавляют строки, пишут цены). Пересобирает каноничное состояние
+    до и после теста, чтобы не поехали другие тесты на общей session-scoped БД."""
+    def _rebuild():
+        Base.metadata.drop_all(bind=test_engine)
+        Base.metadata.create_all(bind=test_engine)
+        session = TestingSessionLocal()
+        seed_test_data(session)
+        session.close()
+
+    _rebuild()
+    yield
+    _rebuild()
 
 
 # --- Герметизация эндпоинт-тестов от сети (#174) ---

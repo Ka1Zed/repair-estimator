@@ -55,29 +55,28 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
               </span>
             </button>
 
-            {isOpen && (
-              <div className={styles.details}>
-                {row.details.map((d, j) => (
-                  <div key={j} className={styles.detailItem}>
-                    <span className={styles.detailLabel}>{d.label}</span>
-                    <span className={styles.detailValue}>
-                      {d.url ? (
-                        <a
-                          className={styles.sourceLink}
-                          href={d.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {d.value} ↗
-                        </a>
-                      ) : (
-                        d.value
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {/* Теперь мы рендерим детали всегда, но прячем закрытые через CSS класс hiddenOnScreen */}
+            <div className={`${styles.details} ${!isOpen ? styles.hiddenOnScreen : ""}`}>
+              {row.details.map((d, j) => (
+                <div key={j} className={styles.detailItem}>
+                  <span className={styles.detailLabel}>{d.label}</span>
+                  <span className={styles.detailValue}>
+                    {d.url ? (
+                      <a
+                        className={styles.sourceLink}
+                        href={d.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {d.value} ↗
+                      </a>
+                    ) : (
+                      d.value
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         );
       })}

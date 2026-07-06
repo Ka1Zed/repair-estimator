@@ -83,13 +83,15 @@ def _payload(city: str) -> dict:
                 ],
                 "room_type": "living",
                 "openings": [],
+                "works": {
+                    "floor": {"enabled": True, "finish": "laminate"},
+                    "walls": {"enabled": True, "finish": "paint"},
+                    "ceiling": {"enabled": True, "finish": "paint"},
+                    "electric": {"enabled": True},
+                    "plumbing": {"enabled": False},
+                },
             }
         ],
-        "repair_type": "cosmetic",
-        "repair_options": {
-            "floor": "laminate", "walls": "paint", "ceiling": "paint",
-            "electric": "basic", "plumbing": False,
-        },
     }
 
 

@@ -14,6 +14,7 @@ import type { SummaryData } from "../../components/EstimateSummary";
 import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/EstimateLedger";
 
 import { useProjectStore } from "../../store/projectStore";
+import { useBackendStatus } from "../../store/backendStatus";
 import { roomHasInvalidOpenings } from "../../utils/openingValidation";
 import { hasSelfIntersection, validateHeight } from "../../utils/polygonValidation";
 import { calculateEstimate } from "../../api/estimates";
@@ -76,7 +77,11 @@ export function Workspace() {
     apiClient
       .fetchRegions()
       .then((res) => setRegions(res.regions))
-      .catch((err) => console.error("Не удалось загрузить список городов:", err));
+      .catch((err) => {
+        console.error("Не удалось загрузить список городов:", err);
+        // fetchRegions падает первым при мёртвом бэке — поднимаем баннер.
+        useBackendStatus.getState().setBackendDown(true);
+      });
   }, []);
 
   const cityOptions = useMemo(

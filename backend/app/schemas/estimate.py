@@ -118,6 +118,40 @@ class LaborItem(BaseModel):
     # сайт (его средняя ближе к итоговой), а sources — полный список через запятую.
     sources: Optional[List[str]] = None
 
+class HiddenWorkItem(BaseModel):
+    """Строка блока «может всплыть доплатой» (#239).
+
+    Скрытая работа — типовой сюрприз под старой отделкой (доп. демонтаж, замена
+    стяжки, штробы в бетоне и т.п.), который заранее не оценить. Вилка ориентировочная
+    и НЕ входит в summary основной сметы — см. HiddenWorks.note.
+    """
+    service: str
+    specialist: str
+    # Почему работа может всплыть — короткое пояснение для пользователя.
+    reason: str
+    # Ориентировочный объём (по геометрии сценария); цены за единицу — из seed-работ.
+    volume: float
+    unit: str
+    price_avg: float
+    # Ориентировочная вилка по строке (volume × цена min/avg/max), справочно.
+    total_min: float
+    total_avg: float
+    total_max: float
+    source: str
+
+class HiddenWorks(BaseModel):
+    """Блок скрытых работ (#239): возможные доплаты, НЕ входящие в summary.
+
+    Отдаётся всегда; items пуст, если для сценария нет типовых скрытых работ.
+    Суммы блока (total_*) — справочные и намеренно не смешиваются с summary основной сметы.
+    """
+    # Явная пометка для фронта/пользователя, что блок вне итоговой сметы.
+    note: str
+    total_min: float
+    total_avg: float
+    total_max: float
+    items: List[HiddenWorkItem]
+
 class Summary(BaseModel):
     materials_min: float
     materials_avg: float
@@ -138,3 +172,6 @@ class EstimateResponse(BaseModel):
     geometry: GeometrySummary
     materials: List[MaterialItem]
     labor: List[LaborItem]
+    # Блок «может всплыть доплатой» (#239): типовые скрытые работы сценария с
+    # ориентировочной вилкой. НЕ входит в summary — см. HiddenWorks.note.
+    hidden_works: HiddenWorks

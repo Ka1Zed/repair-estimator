@@ -52,8 +52,10 @@ git pull --ff-only origin "${BRANCH}"
 echo "  Текущий коммит: $(git log -1 --oneline)"
 
 # 5. Пересборка и запуск. --build обязателен: VITE_API_URL зашивается в бандл фронта.
+#    --remove-orphans убирает контейнеры от прежних топологий (напр. старый caddy,
+#    державший 80/443 после отката), иначе новый стек не займёт порты.
 echo "→ Пересобираю и поднимаю контейнеры…"
-docker compose up -d --build
+docker compose up -d --build --remove-orphans
 
 # 6. Дождаться зелёного health backend.
 echo "→ Жду health backend (${HEALTH_URL})…"

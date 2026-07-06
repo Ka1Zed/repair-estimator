@@ -13,7 +13,7 @@ class Opening(BaseModel):
     # Глубина откоса (толщина стены в проёме), м. null → дефолт по типу проёма
     # (дверь/окно, см. geometry_service.OTKOS_DEPTH_DEFAULT). Влияет на площадь
     # откосов, не на wall_area. См. docs/estimation-rules.md.
-    depth: Optional[float] = None
+    depth: Optional[float] = Field(None, gt=0)
 
 
 class SurfaceWork(BaseModel):
@@ -33,9 +33,9 @@ class SurfaceWork(BaseModel):
     wall_condition: Optional[str] = None
     # Натяжной потолок (#191, только ceiling.finish="stretch"): число закладных
     # под светильники (точки потолочника). null → дефолт светильников типа комнаты.
-    light_points: Optional[int] = None
+    light_points: Optional[int] = Field(None, ge=0)
     # Натяжной потолок: погонаж ниши под карниз/штору, м. null/0 → ниши нет.
-    curtain_niche_m: Optional[float] = None
+    curtain_niche_m: Optional[float] = Field(None, ge=0)
 
 class ElectricWork(BaseModel):
     """Электрика комнаты. Числа опциональны: при null бэкенд ставит дефолт от площади."""

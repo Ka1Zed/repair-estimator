@@ -813,3 +813,21 @@ def test_stretch_ceiling_gives_block_not_floor_multiplier():
     assert by_service["Монтаж натяжного потолка"]["volume"] == pytest.approx(12.0)
     assert by_service["Закладная под светильник"]["volume"] == pytest.approx(4.0)
     assert by_service["Ниша под карниз"]["volume"] == pytest.approx(3.0)
+
+
+def test_non_positive_opening_depth_rejected():
+    """#191: глубина откоса должна быть > 0 (как ширина/высота) — ≤0 отдаёт 422."""
+    def _payload(depth):
+        return {
+            "city": "Казань",
+            "rooms": [{
+                "name": "Спальня", "height": 2.7,
+                "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+                "room_type": "living",
+                "openings": [{"type": "door", "width": 0.8, "height": 2.0, "depth": depth}],
+                "works": W(),
+            }],
+        }
+
+    assert client.post("/api/estimates/calculate", json=_payload(0)).status_code == 422
+    assert client.post("/api/estimates/calculate", json=_payload(-0.1)).status_code == 422

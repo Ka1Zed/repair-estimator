@@ -140,15 +140,16 @@
     grid-template-columns: 1fr;
   }
 }
+
 .hiddenOnScreen {
   display: none;
 }
 
 @media print {
   .hiddenOnScreen {
-    display: block !important;
+    display: grid !important;
   }
-  
+
   .colArrow {
     display: none !important;
   }

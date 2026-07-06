@@ -22,6 +22,7 @@ os.environ.setdefault("POSTGRES_PORT", "5432")
 # из PID. POSTGRES_TEST_DB, если задан явно, перекрывает генерацию (для отладки на
 # фиксированной базе — тогда межпроцессной изоляции нет, это осознанный выбор).
 _worker_tag = os.environ.get("PYTEST_XDIST_WORKER") or f"pid{os.getpid()}"
+_explicit_test_db = "POSTGRES_TEST_DB" in os.environ
 os.environ["POSTGRES_DB"] = os.environ.get(
     "POSTGRES_TEST_DB", f"repair_estimator_test_{_worker_tag}"
 )
@@ -29,9 +30,11 @@ os.environ["POSTGRES_DB"] = os.environ.get(
 from app.core.config import settings  # noqa: E402 — читает уже тестовый POSTGRES_DB
 
 
-# Дропаем в session-teardown только БД, которую создал ИМЕННО этот процесс — не
-# трогаем чужую/фиксированную (POSTGRES_TEST_DB), чтобы не снести данные соседа.
-_created_test_db = False
+# Дропаем в session-teardown только per-process базу, ИМЯ которой сгенерировали мы
+# сами (repair_estimator_test_<worker|pid>). Явную фиксированную POSTGRES_TEST_DB не
+# трогаем — она может быть общей/отладочной, снести её значило бы задеть соседа. Владение
+# по имени, а не по факту создания: так подчищаем и stale-базу от упавшего прогона с тем же PID.
+_owns_test_db = not _explicit_test_db
 
 
 def _service_conn():
@@ -53,15 +56,13 @@ def _service_conn():
 
 
 def _ensure_test_database() -> None:
-    """Создаёт тестовую БД, если её ещё нет; помечает факт создания для teardown."""
-    global _created_test_db
+    """Создаёт тестовую БД, если её ещё нет."""
     conn = _service_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (settings.POSTGRES_DB,))
             if cur.fetchone() is None:
                 cur.execute(f'CREATE DATABASE "{settings.POSTGRES_DB}"')
-                _created_test_db = True
     finally:
         conn.close()
 
@@ -72,7 +73,11 @@ def _drop_test_database() -> None:
 
     Сначала гасим свои же соединения (engine.dispose закрывает пул, но подстрахуемся
     pg_terminate_backend), потом DROP DATABASE — иначе Postgres не отдаст занятую базу."""
-    engine.dispose()
+    # engine мог не успеть импортироваться, если app.* упал при импорте после CREATE
+    # DATABASE — берём осторожно, чтобы teardown не замаскировал исходную ошибку NameError.
+    _eng = globals().get("engine")
+    if _eng is not None:
+        _eng.dispose()
     conn = _service_conn()
     try:
         with conn.cursor() as cur:
@@ -90,8 +95,8 @@ _ensure_test_database()
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Прибираем per-process тест-базу после сессии (только если сами её создали)."""
-    if _created_test_db:
+    """Прибираем per-process тест-базу после сессии (только если имя сгенерировали сами)."""
+    if _owns_test_db:
         _drop_test_database()
 
 from app.db.models import Base  # noqa: E402 — импорт только после настройки тестовой БД

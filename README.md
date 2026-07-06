@@ -83,7 +83,8 @@ npm run dev                            # http://localhost:5173
 
 Подробности (Apple Silicon, poppler, переменные окружения, тесты, миграции) —
 в [docs/development.md](docs/development.md). Деплой на сервер одной командой —
-в [docs/deployment.md](docs/deployment.md).
+в [docs/deployment.md](docs/deployment.md); там же — как доставить пере-калиброванные
+seed-цены на прод (`python -m app.db.seed --refresh-seed-prices`).
 
 ## Документация
 

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from sqlalchemy import func
+
 from app.db.session import SessionLocal
 from app.db.models import Material, PriceSource, LaborService, MaterialPrice, LaborPrice, RoomType
 
@@ -204,6 +206,87 @@ def seed_missing() -> dict:
     return added
 
 
+def refresh_seed_prices() -> dict:
+    """Доставляет пере-калиброванные seed-цены на непустую БД (#282).
+
+    Механизм пересида: раньше на прод не было способа обновить УЖЕ засеянные
+    seed-цены — `--if-empty` непустую БД не трогает, `--missing` цены не апдейтит.
+    Из-за этого прод жил на ценах до рекалибровки #213 (клей 500 ₽/кг вместо 25).
+
+    Что делает:
+    - UPDATE price_min/avg/max у существующих строк с source='seed' значениями из
+      seed_data/*.json (ключ строки — материал/услуга + source='seed' + region);
+    - цены ДРУГИХ источников (кэш парсеров, региональные не-seed) НЕ трогает;
+    - позиции/строки, которых в БД ещё нет, дозасевает как --missing (новые
+      материалы/услуги/источники + недостающие seed-строки, в т.ч. новый регион).
+
+    Возвращает счётчик: сколько справочников дозасеяно, сколько seed-строк добавлено
+    и сколько обновлено. Идемпотентно: повторный прогон на тех же seed_data — no-op
+    (все счётчики нулевые), updated_at не дёргается, если цена не изменилась.
+    """
+    # Сначала дозасев (как --missing): добавит новые материалы/услуги/источники и
+    # seed-цены позиций, у которых цен ещё не было. Существующие цены не трогает —
+    # их пере-калибровку делает второй проход ниже.
+    added = seed_missing()
+    loaded = _load_seed_data()
+
+    session = SessionLocal()
+    result = {
+        "sources": added["sources"],
+        "materials": added["materials"],
+        "services": added["services"],
+        "prices_added": added["material_prices"] + added["labor_prices"],
+        "prices_updated": 0,
+    }
+    try:
+        seed_source = session.query(PriceSource).filter_by(name="seed").first()
+        if seed_source is None:
+            return result  # seed-источника нет и дозасев его не создал — обновлять нечего
+
+        def _refresh(items, price_model, owner_model, owner_fk, owner_ref):
+            owners_by_name = {o.name: o for o in session.query(owner_model).all()}
+            for item in items:
+                owner = owners_by_name.get(item[owner_ref])
+                if owner is None:
+                    continue  # такого материала/услуги нет даже после дозасева — пропускаем
+                new = (
+                    Decimal(item["price_min"]),
+                    Decimal(item["price_avg"]),
+                    Decimal(item["price_max"]),
+                )
+                row = session.query(price_model).filter_by(
+                    **{owner_fk: owner.id},
+                    source_id=seed_source.id,
+                    region=item.get("region"),
+                ).first()
+                if row is None:
+                    # Строки нет (напр. новый регион у уже ценованной позиции —
+                    # такую --missing пропускает) → дозасеваем недостающую seed-строку.
+                    session.add(price_model(**{
+                        owner_fk: owner.id,
+                        "source_id": seed_source.id,
+                        "price_min": new[0],
+                        "price_avg": new[1],
+                        "price_max": new[2],
+                        "region": item.get("region"),
+                    }))
+                    result["prices_added"] += 1
+                    continue
+                if (row.price_min, row.price_avg, row.price_max) != new:
+                    row.price_min, row.price_avg, row.price_max = new
+                    row.updated_at = func.now()  # отметить свежесть только при реальной правке
+                    result["prices_updated"] += 1
+
+        _refresh(loaded["material_prices"], MaterialPrice, Material, "material_id", "material")
+        _refresh(loaded["labor_prices"], LaborPrice, LaborService, "labor_service_id", "service")
+
+        session.commit()
+    finally:
+        session.close()
+
+    return result
+
+
 def _already_seeded() -> bool:
     """Есть ли уже справочные данные (значит, БД не пустая)."""
     session = SessionLocal()
@@ -223,6 +306,13 @@ if __name__ == "__main__":
     if "--missing" in sys.argv:
         added = seed_missing()
         print(f"Seed (дозасев): добавлено {added}.")
+    # --refresh-seed-prices: пере-калибровка seed-цен на непустой БД (#282).
+    # UPDATE строк с source='seed' из seed_data + дозасев недостающих; кэш
+    # парсеров и региональные не-seed цены не трогает. Прогонять на проде после
+    # выкатки, когда seed_data/*.json изменили (напр. рекалибровка цен #213).
+    elif "--refresh-seed-prices" in sys.argv:
+        stats = refresh_seed_prices()
+        print(f"Seed (пере-калибровка цен): {stats}.")
     # --if-empty: режим деплоя — засеять только пустую БД и не перетирать
     # данные (в т.ч. правки цен) при каждом рестарте контейнера.
     # Без флага (тесты/dev) seed всегда делает полный сброс, как и раньше.

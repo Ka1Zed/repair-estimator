@@ -750,3 +750,84 @@ def test_door_full_wall():
     data = response.json()
     # Периметр = 14, стены до вычета = 14*2.7=37.8, дверь = 4*2.7=10.8, остаётся 27.0
     assert data["geometry"]["wall_area"] == pytest.approx(27.0, 0.01)
+
+
+def test_otkosy_line_present_and_grows_with_depth():
+    """#191: смета с окном и дверью содержит строку «Отделка откосов» (>0),
+    и площадь растёт при увеличении глубины откоса."""
+    def _payload(depth=None):
+        door = {"type": "door", "width": 0.8, "height": 2.0}
+        window = {"type": "window", "width": 1.5, "height": 1.4}
+        if depth is not None:
+            door["depth"] = depth
+            window["depth"] = depth
+        return {
+            "city": "Казань",
+            "rooms": [{
+                "name": "Спальня", "height": 2.7,
+                "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+                "room_type": "living",
+                "openings": [door, window],
+                "works": W(),
+            }],
+        }
+
+    data = client.post("/api/estimates/calculate", json=_payload()).json()
+    otkos = next((lab for lab in data["labor"] if lab["service"] == "Отделка откосов"), None)
+    assert otkos is not None
+    assert otkos["volume"] > 0
+    assert otkos["specialist"] == "Штукатур"
+
+    deep = client.post("/api/estimates/calculate", json=_payload(depth=0.4)).json()
+    otkos_deep = next(lab for lab in deep["labor"] if lab["service"] == "Отделка откосов")
+    assert otkos_deep["volume"] > otkos["volume"]
+
+
+def test_stretch_ceiling_gives_block_not_floor_multiplier():
+    """#191: натяжной потолок отдаёт отдельные строки (полотно + закладные + ниша),
+    а не скрытый множитель площади пола."""
+    payload = {
+        "city": "Казань",
+        "rooms": [{
+            "name": "Гостиная", "height": 2.7,
+            "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+            "room_type": "living",
+            "openings": [],
+            "works": {
+                "floor": {"enabled": False, "finish": None},
+                "walls": {"enabled": False, "finish": None},
+                "ceiling": {"enabled": True, "finish": "stretch",
+                            "light_points": 4, "curtain_niche_m": 3.0},
+                "electric": {"enabled": False},
+                "plumbing": {"enabled": False},
+            },
+        }],
+    }
+    data = client.post("/api/estimates/calculate", json=payload).json()
+    by_service = {lab["service"]: lab for lab in data["labor"]}
+
+    assert "Монтаж натяжного потолка" in by_service
+    assert "Закладная под светильник" in by_service
+    assert "Ниша под карниз" in by_service
+    # Полотно — по площади потолка (=12), не множитель площади пола.
+    assert by_service["Монтаж натяжного потолка"]["volume"] == pytest.approx(12.0)
+    assert by_service["Закладная под светильник"]["volume"] == pytest.approx(4.0)
+    assert by_service["Ниша под карниз"]["volume"] == pytest.approx(3.0)
+
+
+def test_non_positive_opening_depth_rejected():
+    """#191: глубина откоса должна быть > 0 (как ширина/высота) — ≤0 отдаёт 422."""
+    def _payload(depth):
+        return {
+            "city": "Казань",
+            "rooms": [{
+                "name": "Спальня", "height": 2.7,
+                "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+                "room_type": "living",
+                "openings": [{"type": "door", "width": 0.8, "height": 2.0, "depth": depth}],
+                "works": W(),
+            }],
+        }
+
+    assert client.post("/api/estimates/calculate", json=_payload(0)).status_code == 422
+    assert client.post("/api/estimates/calculate", json=_payload(-0.1)).status_code == 422

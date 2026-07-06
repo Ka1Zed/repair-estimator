@@ -20,6 +20,9 @@
   {"service": "Укладка линолеума", "source": "seed", "price_min": "250.00", "price_avg": "400.00", "price_max": "600.00", "region": null},
   {"service": "Укладка паркета", "source": "seed", "price_min": "800.00", "price_avg": "1300.00", "price_max": "2000.00", "region": null},
   {"service": "Монтаж натяжного потолка", "source": "seed", "price_min": "800.00", "price_avg": "1200.00", "price_max": "2000.00", "region": null},
+  {"service": "Закладная под светильник", "source": "seed", "price_min": "300.00", "price_avg": "450.00", "price_max": "700.00", "region": null},
+  {"service": "Ниша под карниз", "source": "seed", "price_min": "500.00", "price_avg": "800.00", "price_max": "1200.00", "region": null},
+  {"service": "Отделка откосов", "source": "seed", "price_min": "400.00", "price_avg": "600.00", "price_max": "900.00", "region": null},
 
   {"service": "Покраска стен", "source": "seed", "price_min": "280.00", "price_avg": "350.00", "price_max": "480.00", "region": "Москва"},
   {"service": "Демонтаж", "source": "seed", "price_min": "280.00", "price_avg": "450.00", "price_max": "700.00", "region": "Москва"},

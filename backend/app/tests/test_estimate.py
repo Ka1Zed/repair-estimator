@@ -225,6 +225,74 @@ class TestLaborCalc:
         assert by_service['Покраска стен']['stage'] == 'finish'
         assert by_service['Шпаклевка стен']['stage'] == 'pre_finish'
 
+    def test_stretch_ceiling_is_block_not_multiplier(self, db_session):
+        """Натяжной потолок (#191) — блок потолочника: полотно + закладные + ниша.
+
+        Полотно считается по ceiling_area (12), а не множителем к floor_area;
+        закладные — по числу точек, ниша — по погонажу, отдельными строками.
+        """
+        geometry = {
+            'floor_area': Decimal('12.0'),
+            'ceiling_area': Decimal('12.0'),
+            'wall_area': Decimal('34.1'),
+            'perimeter': Decimal('14.0'),
+        }
+        finish_options = {
+            'ceiling': 'stretch',
+            'ceiling_light_points': 3,
+            'ceiling_curtain_niche_m': Decimal('2.0'),
+        }
+        labor = calculate_labor(geometry, finish_options, db_session)
+        by_service = {item['service']: item for item in labor}
+
+        assert {'Монтаж натяжного потолка', 'Закладная под светильник',
+                'Ниша под карниз'}.issubset(set(by_service))
+        # Полотно — по площади потолка, не скрытый множитель площади пола.
+        assert by_service['Монтаж натяжного потолка']['volume'] == Decimal('12.0')
+        assert by_service['Закладная под светильник']['volume'] == Decimal('3')
+        assert by_service['Ниша под карниз']['volume'] == Decimal('2.0')
+        # Все строки блока — у потолочника.
+        for name in ('Монтаж натяжного потолка', 'Закладная под светильник', 'Ниша под карниз'):
+            assert by_service[name]['specialist'] == 'Потолочник'
+
+    def test_stretch_ceiling_without_niche_skips_niche_line(self, db_session):
+        """Ниша под карниз считается только при погонаже > 0."""
+        geometry = {'floor_area': Decimal('12.0'), 'ceiling_area': Decimal('12.0'),
+                    'wall_area': Decimal('34.1'), 'perimeter': Decimal('14.0')}
+        labor = calculate_labor(
+            geometry, {'ceiling': 'stretch', 'ceiling_light_points': 2}, db_session
+        )
+        services = {item['service'] for item in labor}
+        assert 'Ниша под карниз' not in services
+        assert 'Закладная под светильник' in services
+
+    def test_otkos_line_when_walls_finished(self, db_session):
+        """Откосы (#191) — отдельная строка при отделке стен и наличии проёмов."""
+        geometry = {
+            'floor_area': Decimal('12.0'),
+            'ceiling_area': Decimal('12.0'),
+            'wall_area': Decimal('34.1'),
+            'perimeter': Decimal('14.0'),
+            'otkos_area': Decimal('1.795'),
+        }
+        labor = calculate_labor(geometry, {'walls': 'paint'}, db_session)
+        by_service = {item['service']: item for item in labor}
+        assert 'Отделка откосов' in by_service
+        assert by_service['Отделка откосов']['volume'] == Decimal('1.795')
+        assert by_service['Отделка откосов']['stage'] == 'finish'
+
+    def test_otkos_skipped_without_wall_finish(self, db_session):
+        """Без отделки стен откосы не считаются, даже если проёмы есть."""
+        geometry = {
+            'floor_area': Decimal('12.0'),
+            'ceiling_area': Decimal('12.0'),
+            'wall_area': Decimal('34.1'),
+            'perimeter': Decimal('14.0'),
+            'otkos_area': Decimal('1.795'),
+        }
+        labor = calculate_labor(geometry, {'floor': 'laminate'}, db_session)
+        assert 'Отделка откосов' not in {item['service'] for item in labor}
+
 
 class TestRoughLabor:
     """Черновые работы при scope=rough_and_finish (#190)."""

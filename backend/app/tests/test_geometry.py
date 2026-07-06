@@ -1,5 +1,7 @@
 from decimal import Decimal
-from app.services.geometry_service import floor_area, perimeter, wall_area
+from app.services.geometry_service import (
+    floor_area, perimeter, wall_area, calculate_room_geometry,
+)
 
 
 class TestGeometry:
@@ -75,3 +77,40 @@ class TestGeometry:
         walls = wall_area(points, height, [])
         expected = perimeter(points) * height
         assert walls == expected
+
+
+class TestOtkosArea:
+    """Площадь откосов проёмов (#191). Откос = (ширина + 2×высота) × глубина."""
+
+    POINTS = [(0, 0), (4, 0), (4, 3), (0, 3)]
+    HEIGHT = 2.7
+
+    def test_default_depth_door_and_window(self):
+        """Дефолтная глубина: дверь 0.15 м, окно 0.25 м.
+
+        Дверь 0.8×2.0: (0.8 + 2×2.0)×0.15 = 4.8×0.15 = 0.72
+        Окно 1.5×1.4: (1.5 + 2×1.4)×0.25 = 4.3×0.25 = 1.075
+        Итого 1.795 м². В wall_area откос не входит — стены как раньше (34.1).
+        """
+        openings = [
+            {'type': 'door', 'width': 0.8, 'height': 2.0},
+            {'type': 'window', 'width': 1.5, 'height': 1.4},
+        ]
+        geom = calculate_room_geometry(self.POINTS, self.HEIGHT, openings)
+        assert geom['otkos_area'] == Decimal('1.795')
+        # Инвариант: откос не трогает площадь стен (полный проём вычтен как раньше).
+        assert geom['wall_area'] == Decimal('34.1')
+
+    def test_area_grows_with_depth(self):
+        """При увеличении глубины откоса площадь откосов растёт."""
+        base = [{'type': 'door', 'width': 0.8, 'height': 2.0}]
+        deep = [{'type': 'door', 'width': 0.8, 'height': 2.0, 'depth': 0.30}]
+        a_base = calculate_room_geometry(self.POINTS, self.HEIGHT, base)['otkos_area']
+        a_deep = calculate_room_geometry(self.POINTS, self.HEIGHT, deep)['otkos_area']
+        assert a_deep > a_base
+        assert a_deep == Decimal('1.44')   # 4.8 × 0.30
+
+    def test_no_openings_zero_otkos(self):
+        """Без проёмов площадь откосов = 0."""
+        geom = calculate_room_geometry(self.POINTS, self.HEIGHT, [])
+        assert geom['otkos_area'] == Decimal('0')

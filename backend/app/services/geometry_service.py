@@ -10,6 +10,15 @@ OPENING_TYPE_RU = {
     'unknown': 'проёма'
 }
 
+# Глубина откоса (толщина стены в проёме) по умолчанию, м — если проём не задал
+# её явно (поле depth). Откосы отделываются отдельно и дороже стен (см. #191,
+# docs/estimation-rules.md), поэтому в wall_area НЕ входят.
+OTKOS_DEPTH_DEFAULT = {
+    'door': Decimal('0.15'),
+    'window': Decimal('0.25'),
+    'unknown': Decimal('0.20'),
+}
+
 def to_decimal(value: Union[int, float, str, Decimal]) -> Decimal:
     """Преобразует значение в Decimal, избегая ошибок float."""
     if isinstance(value, Decimal):
@@ -121,8 +130,10 @@ def calculate_room_geometry(
         if isinstance(op, dict):
             openings_dict.append(op)
         else:
-            op_type, w, h = op
-            openings_dict.append({'type': op_type, 'width': w, 'height': h})
+            # (type, width, height) или (type, width, height, depth)
+            op_type, w, h = op[0], op[1], op[2]
+            depth = op[3] if len(op) > 3 else None
+            openings_dict.append({'type': op_type, 'width': w, 'height': h, 'depth': depth})
 
     total_opening_area = Decimal('0.0')
     for op in openings_dict:
@@ -150,12 +161,28 @@ def calculate_room_geometry(
         if op.get('type') == 'door':
             door_width_sum += to_decimal(op.get('width', 0))
 
+    # Площадь откосов проёмов (#191): отделываемая поверхность по периметру проёма
+    # на глубину стены. Периметр откоса = ширина + 2×высота (верхняя грань + две
+    # боковые; низ — подоконник/порог, в откос не входит). Глубина берётся из поля
+    # depth проёма или дефолта по типу. Считается ОТДЕЛЬНО, в wall_area не входит.
+    otkos_area = Decimal('0.0')
+    for op in openings_dict:
+        op_type = op.get('type', 'unknown')
+        w = to_decimal(op.get('width', 0))
+        h = to_decimal(op.get('height', 0))
+        depth = op.get('depth')
+        depth = to_decimal(depth) if depth is not None else OTKOS_DEPTH_DEFAULT.get(
+            op_type, OTKOS_DEPTH_DEFAULT['unknown']
+        )
+        otkos_area += (w + 2 * h) * depth
+
     return {
         'floor_area': floor,
         'ceiling_area': floor,
         'wall_area': wall,
         'perimeter': perim,
         'door_width_sum': door_width_sum,
+        'otkos_area': otkos_area,
     }
 
 def wall_area(

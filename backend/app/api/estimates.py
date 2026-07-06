@@ -80,6 +80,19 @@ def _resolve_electric(room: RoomInput, floor_area: Decimal) -> Tuple[int, int, D
     return sockets, lights, cable_m
 
 
+def _resolve_stretch_ceiling(room: RoomInput, floor_area: Decimal) -> Tuple[int, Decimal]:
+    """Параметры натяжного потолка (#191): закладные под светильники и ниша под штору.
+
+    light_points по умолчанию = дефолтное число светильников типа комнаты (натяжной
+    самодостаточен, число НЕ берётся из блока electric). curtain_niche_m по умолчанию 0.
+    """
+    c = room.works.ceiling
+    _, def_lights = _default_electric(room.room_type, floor_area)
+    light_points = c.light_points if c.light_points is not None else def_lights
+    niche = Decimal(str(c.curtain_niche_m)) if c.curtain_niche_m is not None else Decimal(0)
+    return light_points, niche
+
+
 def _resolve_plumbing(room: RoomInput) -> Tuple[int, Decimal]:
     """Явные числа works.plumbing или дефолты (точки, метраж труб)."""
     p = room.works.plumbing
@@ -135,7 +148,7 @@ def calculate_estimate(
             geometry = calculate_room_geometry(
                 points=[(p.x, p.y) for p in room.points],
                 height=room.height,
-                openings=[(o.type, o.width, o.height) for o in room.openings]
+                openings=[(o.type, o.width, o.height, o.depth) for o in room.openings]
             )
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
@@ -145,6 +158,16 @@ def calculate_estimate(
 
         # --- отделка (finish) по works комнаты ---
         finish_options = _finish_options(room)
+
+        # Натяжной потолок (#191): закладные под светильники и ниша под штору —
+        # отдельные строки потолочника, а не множитель площади. Считаем параметры
+        # тут (нужна floor_area для дефолта светильников) и кладём в finish_options.
+        if finish_options["ceiling"] == "stretch":
+            light_points, curtain_niche_m = _resolve_stretch_ceiling(
+                room, geometry['floor_area']
+            )
+            finish_options["ceiling_light_points"] = light_points
+            finish_options["ceiling_curtain_niche_m"] = curtain_niche_m
 
         # Флаги сценария для скрытых работ (#239): по фактически выбранной отделке.
         if finish_options["floor"]:

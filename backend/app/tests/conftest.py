@@ -150,6 +150,10 @@ def seed_test_data(session):
         {"name": "Укладка паркета", "specialist_type": "Паркетчик", "unit": "м²"},
         {"name": "Укладка плитки", "specialist_type": "Плиточник", "unit": "м²"},
         {"name": "Монтаж натяжного потолка", "specialist_type": "Потолочник", "unit": "м²"},
+        # Натяжной потолок блоком + откосы (#191).
+        {"name": "Закладная под светильник", "specialist_type": "Потолочник", "unit": "шт"},
+        {"name": "Ниша под карниз", "specialist_type": "Потолочник", "unit": "м"},
+        {"name": "Отделка откосов", "specialist_type": "Штукатур", "unit": "м²"},
         {"name": "Электромонтаж", "specialist_type": "Электрик", "unit": "точка"},
         {"name": "Штробление", "specialist_type": "Электрик", "unit": "м"},
         {"name": "Сантехнические работы", "specialist_type": "Сантехник", "unit": "точка"},

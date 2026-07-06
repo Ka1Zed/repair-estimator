@@ -35,7 +35,10 @@ S_LAY_LAMINATE  = "Укладка ламината"
 S_LAY_LINOLEUM  = "Укладка линолеума"
 S_LAY_PARQUET   = "Укладка паркета"
 S_LAY_TILE      = "Укладка плитки"
-S_STRETCH_CEIL  = "Монтаж натяжного потолка"  # цена за м², материал в цене работы
+S_STRETCH_CEIL  = "Монтаж натяжного потолка"  # полотно, цена за м², материал в цене работы
+S_CEIL_EMBED    = "Закладная под светильник"  # закладные потолочника под точки света, шт
+S_CURTAIN_NICHE = "Ниша под карниз"           # ниша под гардину/штору в натяжном, пог. м
+S_OTKOS         = "Отделка откосов"           # откосы проёмов, м², дороже стен (×1.5–2)
 # Инженерка (works.electric / works.plumbing) — гранулярные операции по явным числам.
 S_CABLE_LAY     = "Прокладка кабеля"
 S_SOCKET_MOUNT  = "Монтаж розетки"
@@ -73,6 +76,9 @@ STAGE_BY_SERVICE = {
     S_LAY_PARQUET:   "finish",
     S_LAY_TILE:      "finish",
     S_STRETCH_CEIL:  "finish",
+    S_CEIL_EMBED:    "finish",
+    S_CURTAIN_NICHE: "finish",
+    S_OTKOS:         "finish",
     S_SOCKET_MOUNT:  "finish",
     S_LIGHT_MOUNT:   "finish",
     S_PLUMBING:      "finish",
@@ -98,6 +104,7 @@ def _labor_selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> L
     wall_area    = D(geom.get("wall_area"))
     ceiling_area = D(geom.get("ceiling_area"))
     floor_area   = D(geom.get("floor_area"))
+    otkos_area   = D(geom.get("otkos_area"))
 
     sel: List[tuple] = []
 
@@ -111,11 +118,24 @@ def _labor_selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> L
         sel.append((S_PUTTY_WALLS, wall_area))   # подготовка под обои
         sel.append((S_WALLPAPER, wall_area))     # поклейка
 
+    # --- откосы проёмов (#191) ---
+    # Отделываются вместе со стенами и дороже них; отдельная строка, не в wall_area.
+    if walls is not None and otkos_area > 0:
+        sel.append((S_OTKOS, otkos_area))
+
     # --- потолок ---
     if ceiling in ("paint", "moisture_paint"):
         sel.append((S_PAINT_CEILING, ceiling_area))
     elif ceiling == "stretch":
-        sel.append((S_STRETCH_CEIL, ceiling_area))  # монтаж натяжного (материал в цене)
+        # Натяжной потолок — блок потолочника (#191): полотно (м²) + закладные под
+        # светильники (точки) + ниша под карниз/штору (пог. м), а не множитель площади.
+        sel.append((S_STRETCH_CEIL, ceiling_area))   # полотно, материал в цене
+        light_points = D(repair_options.get("ceiling_light_points"))
+        if light_points > 0:
+            sel.append((S_CEIL_EMBED, light_points))
+        curtain_niche_m = D(repair_options.get("ceiling_curtain_niche_m"))
+        if curtain_niche_m > 0:
+            sel.append((S_CURTAIN_NICHE, curtain_niche_m))
 
     # --- пол ---
     if floor == "laminate":

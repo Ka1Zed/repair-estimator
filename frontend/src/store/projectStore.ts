@@ -30,9 +30,12 @@ export interface FloorWorks {
   finish: FloorFinish | null;
 }
 
+export type WallCondition = "even" | "normal" | "uneven";
+
 export interface WallsWorks {
   enabled: boolean;
   finish: WallFinish | null;
+  wall_condition: WallCondition;
   wallpaper_pattern: boolean;
   primer_two_coats: boolean;
 }
@@ -68,7 +71,7 @@ export function defaultWorksForRoomType(rt: RoomTypeKey): RoomWorks {
   const rule = roomTypes[rt];
   return {
     floor: { enabled: true, finish: rule.floor[0] ?? null },
-    walls: { enabled: true, finish: rule.walls[0] ?? null, wallpaper_pattern: false, primer_two_coats: false },
+    walls: { enabled: true, finish: rule.walls[0] ?? null, wall_condition: "normal", wallpaper_pattern: false, primer_two_coats: false },
     ceiling: { enabled: true, finish: rule.ceiling[0] ?? null, primer_two_coats: false },
     electric: { enabled: true, sockets: 4, lights: 2, cable_m: null },
     plumbing: { enabled: rule.plumbing.required, points: rule.plumbing.required ? 2 : null, pipe_m: null },
@@ -308,7 +311,7 @@ export const useProjectStore = create<ProjectState>()(
     }),
     {
       name: "repair-estimator-draft",
-      version: 3,
+      version: 4,
       migrate: (persisted: unknown, version: number) => {
         let s = persisted as Record<string, unknown>;
 
@@ -336,6 +339,21 @@ export const useProjectStore = create<ProjectState>()(
               if (room.works) return room;
               const rt = (room.room_type as RoomTypeKey) ?? "living";
               return { ...room, works: defaultWorksForRoomType(rt) };
+            }),
+          };
+        }
+
+        if (version < 4) {
+          // v3 → v4: walls.wall_condition добавлен; подставляем "normal" для старых записей
+          const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
+          s = {
+            ...s,
+            rooms: rooms.map((room) => {
+              const works = room.works as Record<string, unknown> | undefined;
+              if (!works) return room;
+              const walls = works.walls as Record<string, unknown> | undefined;
+              if (!walls || walls.wall_condition) return room;
+              return { ...room, works: { ...works, walls: { ...walls, wall_condition: "normal" } } };
             }),
           };
         }

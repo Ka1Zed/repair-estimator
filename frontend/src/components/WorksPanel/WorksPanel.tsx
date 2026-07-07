@@ -4,6 +4,7 @@ import {
   defaultWorksForRoomType,
   type FloorWorks,
   type WallsWorks,
+  type WallCondition,
   type CeilingWorks,
   type ElectricWorks,
   type PlumbingWorks,
@@ -12,6 +13,12 @@ import { allowedWorks } from "../../types/roomTypes";
 import type { FloorFinish, WallFinish, CeilingFinish } from "../../types/roomTypes";
 import { Select } from "../ui/Select";
 import styles from "./WorksPanel.module.css";
+
+const WALL_CONDITION_OPTIONS: { value: WallCondition; label: string }[] = [
+  { value: "even", label: "Ровные (−40% шпаклёвки)" },
+  { value: "normal", label: "Нормальные" },
+  { value: "uneven", label: "Кривые (+60% шпаклёвки)" },
+];
 
 export const WorksPanel: React.FC = () => {
   const rooms = useProjectStore((s) => s.rooms);
@@ -99,6 +106,13 @@ export const WorksPanel: React.FC = () => {
               value={works.walls.finish ?? allowed.walls[0]?.key ?? ""}
               options={allowed.walls.map((o) => ({ value: o.key, label: o.label }))}
               onChange={(v) => setWalls({ finish: v as WallFinish })}
+            />
+            <Select
+              variant="box"
+              ariaLabel="Кривизна стен"
+              value={works.walls.wall_condition}
+              options={WALL_CONDITION_OPTIONS}
+              onChange={(v) => setWalls({ wall_condition: v as WallCondition })}
             />
             {works.walls.finish === "wallpaper" && (
               <label className={styles.modifier}>

@@ -50,7 +50,7 @@ export const roomTypes: Record<RoomTypeKey, RoomTypeRule> = {
     walls: ["paint", "wallpaper"],
     ceiling: ["paint", "stretch"],
     electric: ["basic", "extended"],
-    plumbing: { available: false, required: false },
+    plumbing: { available: true, required: false },
   },
   kitchen: {
     label: "Кухня",
@@ -74,7 +74,7 @@ export const roomTypes: Record<RoomTypeKey, RoomTypeRule> = {
     walls: ["paint", "wallpaper"],
     ceiling: ["paint", "stretch"],
     electric: ["basic", "extended"],
-    plumbing: { available: false, required: false },
+    plumbing: { available: true, required: false },
   },
 };
 
@@ -86,26 +86,26 @@ export const roomTypeOptions = ROOM_TYPE_KEYS.map((key) => ({
   label: roomTypes[key].label,
 }));
 
-// Готовые опции работ для активного типа комнаты (ключ + подпись) — для дропдаунов/чекбоксов
+// Тип комнаты — только пресет дефолтов, не ограничение: возвращаем все доступные варианты.
 export function allowedWorks(rt: RoomTypeKey) {
   const rule = roomTypes[rt];
   return {
-    floor: rule.floor.map((k) => ({ key: k, label: finishOptions.floor[k] })),
-    walls: rule.walls.map((k) => ({ key: k, label: finishOptions.walls[k] })),
-    ceiling: rule.ceiling.map((k) => ({
+    floor: (Object.keys(finishOptions.floor) as FloorFinish[]).map((k) => ({
+      key: k,
+      label: finishOptions.floor[k],
+    })),
+    walls: (Object.keys(finishOptions.walls) as WallFinish[]).map((k) => ({
+      key: k,
+      label: finishOptions.walls[k],
+    })),
+    ceiling: (Object.keys(finishOptions.ceiling) as CeilingFinish[]).map((k) => ({
       key: k,
       label: finishOptions.ceiling[k],
     })),
-    electric: rule.electric.map((k) => ({
+    electric: (Object.keys(finishOptions.electric) as ElectricOption[]).map((k) => ({
       key: k,
       label: finishOptions.electric[k],
     })),
     plumbing: rule.plumbing,
   };
 }
-
-// Точечные проверки
-export const isPlumbingAvailable = (rt: RoomTypeKey) =>
-  roomTypes[rt].plumbing.available;
-export const isPlumbingRequired = (rt: RoomTypeKey) =>
-  roomTypes[rt].plumbing.required;

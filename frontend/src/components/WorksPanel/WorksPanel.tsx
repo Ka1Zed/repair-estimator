@@ -206,40 +206,37 @@ export const WorksPanel: React.FC = () => {
         )}
       </div>
 
-      {/* Сантехника (только если доступна для типа комнаты) */}
-      {allowed.plumbing.available && (
-        <div className={styles.group}>
-          <label className={styles.checkRow}>
-            <input
-              type="checkbox"
-              className={styles.check}
-              checked={works.plumbing.enabled}
-              onChange={(e) => setPlumbing({ enabled: e.target.checked })}
-              disabled={allowed.plumbing.required}
-            />
-            <span className={styles.groupName}>
-              Сантехника
-              {allowed.plumbing.required && (
-                <span className={styles.required}> · обязательно</span>
-              )}
-            </span>
-          </label>
-          {works.plumbing.enabled && (
-            <div className={styles.fields}>
-              <div className={styles.numRow}>
-                <label className={styles.numLabel}>
-                  Точки подключения
-                  {numInput(works.plumbing.points, (v) => setPlumbing({ points: v }), "0")}
-                </label>
-                <label className={styles.numLabel}>
-                  Трубы, м
-                  {numInput(works.plumbing.pipe_m, (v) => setPlumbing({ pipe_m: v }), "авто")}
-                </label>
-              </div>
+      {/* Сантехника */}
+      <div className={styles.group}>
+        <label className={styles.checkRow}>
+          <input
+            type="checkbox"
+            className={styles.check}
+            checked={works.plumbing.enabled}
+            onChange={(e) => setPlumbing({ enabled: e.target.checked })}
+          />
+          <span className={styles.groupName}>
+            Сантехника
+            {allowed.plumbing.required && (
+              <span className={styles.required}> · обязательно</span>
+            )}
+          </span>
+        </label>
+        {works.plumbing.enabled && (
+          <div className={styles.fields}>
+            <div className={styles.numRow}>
+              <label className={styles.numLabel}>
+                Точки подключения
+                {numInput(works.plumbing.points, (v) => setPlumbing({ points: v }), "0")}
+              </label>
+              <label className={styles.numLabel}>
+                Трубы, м
+                {numInput(works.plumbing.pipe_m, (v) => setPlumbing({ pipe_m: v }), "авто")}
+              </label>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

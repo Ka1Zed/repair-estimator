@@ -109,8 +109,3 @@ export function allowedWorks(rt: RoomTypeKey) {
   };
 }
 
-// Точечные проверки
-export const isPlumbingAvailable = (rt: RoomTypeKey) =>
-  roomTypes[rt].plumbing.available;
-export const isPlumbingRequired = (rt: RoomTypeKey) =>
-  roomTypes[rt].plumbing.required;

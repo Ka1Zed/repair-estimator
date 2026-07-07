@@ -199,7 +199,8 @@ export const useProjectStore = create<ProjectState>()(
           const room = newRooms[index];
           const oldLabel = roomTypes[room.room_type].label;
           const wasAutoNamed =
-            room.name === oldLabel || /^.+\s\d+$/.test(room.name) && room.name.startsWith(oldLabel);
+            room.name === oldLabel ||
+            new RegExp(`^${oldLabel}\\s\\d+$`).test(room.name);
           const otherRooms = newRooms.filter((_, i) => i !== index);
           const newName = wasAutoNamed
             ? getDefaultRoomName(room_type, otherRooms)

@@ -14,6 +14,8 @@ export interface MaterialItem {
   source_url?: string | null;
 }
 
+export type LaborStage = "rough" | "pre_finish" | "finish";
+
 export interface LaborItem {
   service: string;
   specialist: string;
@@ -24,4 +26,5 @@ export interface LaborItem {
   source: string;
   region?: string | null;
   source_url?: string | null;
+  stage?: LaborStage;
 }

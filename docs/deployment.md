@@ -153,21 +153,25 @@ BACKUP_DIR=/mnt/x ./backup.sh
 БД, поэтому таблицы перед заливкой надо очистить.
 
 ```bash
+# 0. Взять имя пользователя/БД из .env (как это делает backup.sh),
+#    чтобы не хардкодить их в командах ниже.
+set -a && . ./.env && set +a
+
 # 1. Остановить backend, чтобы никто не писал в БД во время восстановления.
 docker compose stop backend
 
 # 2. Пересоздать пустую схему (сотрёт текущие данные БД!).
-docker compose exec -T postgres psql -U repair -d repair_estimator \
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 
 # 3. Залить дамп (подставь нужный файл).
-gunzip -c backups/repair_estimator-YYYYmmdd-HHMMSS.sql.gz \
-  | docker compose exec -T postgres psql -U repair -d repair_estimator
+gunzip -c backups/"$POSTGRES_DB"-YYYYmmdd-HHMMSS.sql.gz \
+  | docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 
 # 4. Поднять backend обратно.
 docker compose start backend
 ```
 
-Имя пользователя/БД (`repair` / `repair_estimator`) — из `.env`
-(`POSTGRES_USER` / `POSTGRES_DB`). После восстановления проверить health:
+Значения `POSTGRES_USER` / `POSTGRES_DB` берутся из `.env` (по умолчанию
+`repair` / `repair_estimator`). После восстановления проверить health:
 `curl http://localhost:8000/health`.

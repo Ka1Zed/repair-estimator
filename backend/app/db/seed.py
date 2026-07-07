@@ -213,12 +213,14 @@ def refresh_seed_prices() -> dict:
     seed-цены — `--if-empty` непустую БД не трогает, `--missing` цены не апдейтит.
     Из-за этого прод жил на ценах до рекалибровки #213 (клей 500 ₽/кг вместо 25).
 
-    Что делает:
+    Что делает (UPDATE + INSERT, без DELETE):
     - UPDATE price_min/avg/max у существующих строк с source='seed' значениями из
       seed_data/*.json (ключ строки — материал/услуга + source='seed' + region);
     - цены ДРУГИХ источников (кэш парсеров, региональные не-seed) НЕ трогает;
     - позиции/строки, которых в БД ещё нет, дозасевает как --missing (новые
-      материалы/услуги/источники + недостающие seed-строки, в т.ч. новый регион).
+      материалы/услуги/источники + недостающие seed-строки, в т.ч. новый регион);
+    - строки, удалённые из seed_data, в БД НЕ чистит — режим только доставляет
+      правки, синхронизацию-с-удалением делать вручную.
 
     Возвращает счётчик: сколько справочников дозасеяно, сколько seed-строк добавлено
     и сколько обновлено. Идемпотентно: повторный прогон на тех же seed_data — no-op
@@ -246,6 +248,8 @@ def refresh_seed_prices() -> dict:
         def _refresh(items, price_model, owner_model, owner_fk, owner_ref):
             owners_by_name = {o.name: o for o in session.query(owner_model).all()}
             for item in items:
+                if item.get("source", "seed") != "seed":
+                    continue  # режим трогает только source='seed'; чужие источники не наши
                 owner = owners_by_name.get(item[owner_ref])
                 if owner is None:
                     continue  # такого материала/услуги нет даже после дозасева — пропускаем

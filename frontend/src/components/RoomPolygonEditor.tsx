@@ -31,7 +31,10 @@ export default function RoomPolygonEditor() {
   // pan state stored in ref (only read inside event handlers, not during render)
   const panRef = useRef<{ startX: number; startY: number; vb: ViewBox; ctm: DOMMatrix } | null>(null);
 
-  const safePoints = points.map((p) => ({ x: Number(p.x) || 0, y: Number(p.y) || 0 }));
+  const safePoints = useMemo(
+    () => points.map((p) => ({ x: Number(p.x) || 0, y: Number(p.y) || 0 })),
+    [points],
+  );
 
   const autoViewBox = useMemo((): ViewBox => {
     if (safePoints.length < 3) return { x: -1, y: -1, w: 10, h: 8 };

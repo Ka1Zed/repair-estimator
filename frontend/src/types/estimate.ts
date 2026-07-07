@@ -28,3 +28,24 @@ export interface LaborItem {
   source_url?: string | null;
   stage?: LaborStage;
 }
+
+export interface HiddenWorkItem {
+  service: string;
+  specialist: string;
+  reason: string;
+  volume: number;
+  unit: string;
+  price_avg: number;
+  total_min: number;
+  total_avg: number;
+  total_max: number;
+  source: string;
+}
+
+export interface HiddenWorks {
+  note: string;
+  total_min: number;
+  total_avg: number;
+  total_max: number;
+  items: HiddenWorkItem[];
+}

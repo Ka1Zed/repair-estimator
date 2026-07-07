@@ -528,6 +528,79 @@
   color: var(--text-h);
 }
 
+.scopeNote {
+  font-size: 12px;
+  color: #9a9a9a;
+  margin: 8px 0 0;
+  font-style: italic;
+}
+
+/* скрытые работы */
+.hiddenSection {
+  margin-top: 36px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+}
+
+.hiddenNote {
+  font-size: 12px;
+  color: #9a9a9a;
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+.hiddenTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.hiddenTable th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: #9a9a9a;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.hiddenTable td {
+  padding: 10px 12px 10px 0;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.hiddenTable tr:last-child td {
+  border-bottom: none;
+}
+
+.hiddenReason {
+  color: #9a9a9a;
+  font-style: italic;
+}
+
+.hiddenVol {
+  white-space: nowrap;
+}
+
+.hiddenRange {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.hiddenTotal {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-h);
+}
+
 /* переключатель глубины сметы (scope) */
 .scopeToggle {
   display: flex;

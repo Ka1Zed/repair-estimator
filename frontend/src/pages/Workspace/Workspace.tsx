@@ -9,7 +9,7 @@ import OpeningsForm from "../../components/OpeningsForm";
 import { RoomTypeSelector } from "../../components/RoomTypeSelector";
 import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
-import type { MaterialItem, LaborItem, LaborStage } from "../../types/estimate";
+import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
 import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/EstimateLedger";
 
@@ -34,7 +34,14 @@ interface EstimateResponse {
   materials: MaterialItem[];
   labor: LaborItem[];
   scope?: EstimateScope;
+  hidden_works?: HiddenWorks;
 }
+
+const STAGE_LABELS: Record<LaborStage, string> = {
+  rough: "Черновые работы",
+  pre_finish: "Предчистовые работы",
+  finish: "Чистовые работы",
+};
 
 const formatPrice = (price: number) => `${Math.round(price).toLocaleString("ru-RU")} ₽`;
 const formatNum = (n: number) =>
@@ -326,12 +333,6 @@ export function Workspace() {
     [data, priceScale],
   );
 
-  const STAGE_LABELS: Record<LaborStage, string> = {
-    rough: "Черновые работы",
-    pre_finish: "Предчистовые работы",
-    finish: "Чистовые работы",
-  };
-
   const laborByStage = useMemo(() => {
     const labor = data?.labor ?? [];
     const groups = new Map<LaborStage, LaborItem[]>();
@@ -593,6 +594,12 @@ export function Workspace() {
                 </tbody>
               </table>
 
+              {(data.scope ?? scope) === "finish_only" && (
+                <p className={styles.scopeNote}>
+                  Смета охватывает только чистовую отделку — черновые работы не включены.
+                </p>
+              )}
+
               {/* переключатель режима цен — суммы в таблице выше, здесь только подписи */}
               <div className={styles.rangeRow}>
                 <div
@@ -690,6 +697,43 @@ export function Workspace() {
                 </span>
                 <span className={styles.sectionTotalValue}>{formatPrice(sectionTotal)}</span>
               </div>
+
+              {data.hidden_works && data.hidden_works.items.length > 0 && (
+                <div className={styles.hiddenSection}>
+                  <div className={styles.blockLabel}>Скрытые работы · возможные доплаты</div>
+                  <p className={styles.hiddenNote}>{data.hidden_works.note}</p>
+                  <table className={styles.hiddenTable}>
+                    <thead>
+                      <tr>
+                        <th>Работа</th>
+                        <th>Причина</th>
+                        <th>Объём</th>
+                        <th>Ориентировочная вилка</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.hidden_works.items.map((item, i) => (
+                        <tr key={i}>
+                          <td>{item.service}</td>
+                          <td className={styles.hiddenReason}>{item.reason}</td>
+                          <td className={styles.hiddenVol}>
+                            {formatQty(item.volume)} {item.unit}
+                          </td>
+                          <td className={styles.hiddenRange}>
+                            {formatPrice(item.total_min)} — {formatPrice(item.total_max)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className={styles.hiddenTotal}>
+                    <span>Итого возможных доплат</span>
+                    <span>
+                      {formatPrice(data.hidden_works.total_min)} — {formatPrice(data.hidden_works.total_max)}
+                    </span>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

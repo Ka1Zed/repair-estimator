@@ -85,6 +85,12 @@ export interface Room {
   works: RoomWorks;
 }
 
+export function getDefaultRoomName(room_type: RoomTypeKey, rooms: Room[]): string {
+  const label = roomTypes[room_type].label;
+  const count = rooms.filter((r) => r.room_type === room_type).length;
+  return count === 0 ? label : `${label} ${count + 1}`;
+}
+
 interface ProjectState {
   city: string;
   rooms: Room[];
@@ -120,9 +126,9 @@ const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
   plumbing: false,
 };
 
-const createDefaultRoom = (name: string): Room => ({
+const createDefaultRoom = (name?: string): Room => ({
   id: uid(),
-  name,
+  name: name ?? roomTypes["living"].label,
   height: 2.7,
   room_type: "living",
   points: [
@@ -141,7 +147,7 @@ const DEFAULT_CITY = "Казань";
 
 const initialState = {
   city: DEFAULT_CITY,
-  rooms: [createDefaultRoom("Комната 1")],
+  rooms: [createDefaultRoom()],
   activeRoomIndex: 0,
 };
 
@@ -154,7 +160,8 @@ export const useProjectStore = create<ProjectState>()(
 
       addRoom: () =>
         set((state) => {
-          const newRoom = createDefaultRoom(`Комната ${state.rooms.length + 1}`);
+          const name = getDefaultRoomName("living", state.rooms);
+          const newRoom = createDefaultRoom(name);
           return {
             rooms: [...state.rooms, newRoom],
             activeRoomIndex: state.rooms.length,
@@ -189,11 +196,15 @@ export const useProjectStore = create<ProjectState>()(
       updateActiveRoomType: (index, room_type) =>
         set((state) => {
           const newRooms = [...state.rooms];
-          newRooms[index] = {
-            ...newRooms[index],
-            room_type,
-            works: defaultWorksForRoomType(room_type),
-          };
+          const room = newRooms[index];
+          const oldLabel = roomTypes[room.room_type].label;
+          const wasAutoNamed =
+            room.name === oldLabel || /^.+\s\d+$/.test(room.name) && room.name.startsWith(oldLabel);
+          const otherRooms = newRooms.filter((_, i) => i !== index);
+          const newName = wasAutoNamed
+            ? getDefaultRoomName(room_type, otherRooms)
+            : room.name;
+          newRooms[index] = { ...room, room_type, name: newName };
           return { rooms: newRooms };
         }),
 

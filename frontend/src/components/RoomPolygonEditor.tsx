@@ -23,11 +23,12 @@ export default function RoomPolygonEditor() {
 
   // null = auto-fit, non-null = user has zoomed/panned
   const [userViewBox, setUserViewBox] = useState<ViewBox | null>(null);
+  // frozen viewBox during vertex drag to prevent coordinate feedback loop
+  const [dragVb, setDragVb] = useState<ViewBox | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
 
   const svgRef = useRef<SVGSVGElement>(null);
-  // frozen viewBox during vertex drag to prevent coordinate feedback loop
-  const dragVbRef = useRef<ViewBox | null>(null);
-  // pan state: frozen at pan start, cleared on pan end
+  // pan state stored in ref (only read inside event handlers, not during render)
   const panRef = useRef<{ startX: number; startY: number; vb: ViewBox; ctm: DOMMatrix } | null>(null);
 
   const safePoints = points.map((p) => ({ x: Number(p.x) || 0, y: Number(p.y) || 0 }));
@@ -45,10 +46,7 @@ export default function RoomPolygonEditor() {
   }, [safePoints]);
 
   // During vertex drag freeze viewBox so CTM stays stable
-  const vb: ViewBox =
-    draggingIdx !== null && dragVbRef.current
-      ? dragVbRef.current
-      : (userViewBox ?? autoViewBox);
+  const vb: ViewBox = (draggingIdx !== null && dragVb) ? dragVb : (userViewBox ?? autoViewBox);
 
   const viewBoxStr = `${vb.x} ${vb.y} ${vb.w} ${vb.h}`;
 
@@ -78,7 +76,7 @@ export default function RoomPolygonEditor() {
 
   // --- Vertex drag ---
   const handlePointerDown = (index: number) => {
-    dragVbRef.current = userViewBox ?? autoViewBox;
+    setDragVb(userViewBox ?? autoViewBox);
     setDraggingIdx(index);
     setEditingEdge(null);
   };
@@ -97,7 +95,7 @@ export default function RoomPolygonEditor() {
   };
 
   const handlePointerUp = () => {
-    dragVbRef.current = null;
+    setDragVb(null);
     setDraggingIdx(null);
   };
 
@@ -156,6 +154,7 @@ export default function RoomPolygonEditor() {
     if (!ctm) return;
     const { x, y } = screenToReal(e.clientX, e.clientY, ctm);
     panRef.current = { startX: x, startY: y, vb: userViewBox ?? autoViewBox, ctm };
+    setIsPanning(true);
   };
 
   const handleBgMove = (e: React.PointerEvent) => {
@@ -167,7 +166,10 @@ export default function RoomPolygonEditor() {
     setUserViewBox({ x: pv.x - dx, y: pv.y - dy, w: pv.w, h: pv.h });
   };
 
-  const handleBgUp = () => { panRef.current = null; };
+  const handleBgUp = () => {
+    panRef.current = null;
+    setIsPanning(false);
+  };
 
   // --- Zoom ---
   const handleWheel = (e: React.WheelEvent) => {
@@ -254,7 +256,7 @@ export default function RoomPolygonEditor() {
           border: "1px solid var(--border)",
           borderRadius: "4px",
           overflow: "hidden",
-          cursor: panRef.current ? "grabbing" : draggingIdx !== null ? "grabbing" : "default",
+          cursor: isPanning || draggingIdx !== null ? "grabbing" : "default",
         }}
       >
         <svg

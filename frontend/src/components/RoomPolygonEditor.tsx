@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useProjectStore } from "../store/projectStore";
 import { getSelfIntersectingEdges } from "../utils/polygonValidation";
 
@@ -174,18 +174,26 @@ export default function RoomPolygonEditor() {
     setIsPanning(false);
   };
 
-  // --- Zoom ---
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const cursor = screenToReal(e.clientX, e.clientY);
-    const cv = userViewBox ?? autoViewBox;
-    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-    const newW = Math.min(Math.max(cv.w * factor, 0.5), 500);
-    const newH = cv.h * (newW / cv.w);
-    const rx = (cursor.x - cv.x) / cv.w;
-    const ry = (cursor.y - cv.y) / cv.h;
-    setUserViewBox({ x: cursor.x - rx * newW, y: cursor.y - ry * newH, w: newW, h: newH });
-  };
+  // --- Zoom (нативный listener — React вешает onWheel пассивно, поэтому
+  //     preventDefault() в нём no-op и страница скроллится вместе с зумом) ---
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const cursor = screenToReal(e.clientX, e.clientY);
+      const cv = userViewBox ?? autoViewBox;
+      // Math.pow учитывает величину deltaY → плавный зум на трекпаде
+      const factor = Math.pow(1.0015, e.deltaY);
+      const newW = Math.min(Math.max(cv.w * factor, 0.5), 500);
+      const newH = cv.h * (newW / cv.w);
+      const rx = (cursor.x - cv.x) / cv.w;
+      const ry = (cursor.y - cv.y) / cv.h;
+      setUserViewBox({ x: cursor.x - rx * newW, y: cursor.y - ry * newH, w: newW, h: newH });
+    };
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, [userViewBox, autoViewBox]);
 
   // --- Fit to view ---
   const handleFitToView = () => setUserViewBox(null);
@@ -272,7 +280,6 @@ export default function RoomPolygonEditor() {
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
-          onWheel={handleWheel}
         >
           <defs>
             <pattern id="rpeg-grid" width={GRID_STEP} height={GRID_STEP} patternUnits="userSpaceOnUse">

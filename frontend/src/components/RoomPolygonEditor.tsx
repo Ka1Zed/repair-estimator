@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect } from "react";
+import { useState, useRef, useMemo, useEffect, useLayoutEffect } from "react";
 import { useProjectStore } from "../store/projectStore";
 import { getSelfIntersectingEdges } from "../utils/polygonValidation";
 
@@ -53,7 +53,7 @@ export default function RoomPolygonEditor() {
 
   // Ref for wheel handler — keeps listener stable (no re-add on every pan/drag frame)
   const vbRef = useRef<ViewBox>(vb);
-  vbRef.current = vb;
+  useLayoutEffect(() => { vbRef.current = vb; });
 
   const viewBoxStr = `${vb.x} ${vb.y} ${vb.w} ${vb.h}`;
 

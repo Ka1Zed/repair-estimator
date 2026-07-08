@@ -63,6 +63,10 @@ STAGE_BY_SERVICE = {
     S_SCREED_FLOOR: "rough",
     S_WATERPROOF:   "rough",
     S_PRIMER:       "rough",
+    # NB: stage="rough" здесь — только классификация для группировки в UI. В отличие
+    # от S_DEMOLITION/S_LEVEL_WALLS/S_SCREED_FLOOR/S_WATERPROOF/S_PRIMER, эти две строки
+    # НЕ гейтятся флагом scope — считаются в calculate_engineering_labor всегда, по
+    # явным works.electric/works.plumbing (см. docs/estimation-rules.md, «Жёсткие связки»).
     S_CABLE_LAY:    "rough",   # разводка электрики — черновой этап
     S_PIPE_MOUNT:   "rough",   # разводка сантехники — черновой этап
     # предчистовая: подготовка основания под финиш

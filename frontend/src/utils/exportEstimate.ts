@@ -3,7 +3,7 @@ import autoTable, { type CellHookData } from 'jspdf-autotable';
 import * as XLSX from 'xlsx-js-style';
 
 import type { SummaryData } from '../components/EstimateSummary';
-import type { MaterialItem, LaborItem } from '../types/estimate';
+import type { MaterialItem, LaborItem, HiddenWorks } from '../types/estimate';
 import type { PriceMode } from '../pages/Workspace/Workspace';
 
 export interface EstimateExportData {
@@ -16,6 +16,7 @@ export interface EstimateExportData {
   };
   materials: MaterialItem[];
   labor: LaborItem[];
+  hidden_works?: HiddenWorks;
 }
 
 const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
@@ -270,6 +271,45 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
   }
   XLSX.utils.book_append_sheet(wb, detSheet, 'Детализация');
 
+  // ---------- Скрытые работы (справочно) ----------
+  if (data.hidden_works && data.hidden_works.items.length > 0) {
+    const hw = data.hidden_works;
+    const hwAoa: (string | number)[][] = [
+      ['Скрытые работы · возможные доплаты'],
+      [hw.note],
+      [],
+      ['Работа', 'Специалист', 'Причина', 'Объём', 'Ед.', 'Мин.', 'Ср.', 'Макс.'],
+      ...hw.items.map(item => [
+        item.service, item.specialist, item.reason,
+        item.volume, item.unit,
+        item.total_min, item.total_avg, item.total_max,
+      ]),
+      [],
+      ['Итого возможных доплат', '', '', '', '', hw.total_min, hw.total_avg, hw.total_max],
+    ];
+    const hwSheet = XLSX.utils.aoa_to_sheet(hwAoa);
+    const hwFirst = 4;
+    const hwLast = hwFirst + hw.items.length - 1;
+    hwSheet['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 8 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
+    hwSheet['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
+    ];
+    cellAt(hwSheet, 0, 0).s = titleStyle;
+    cellAt(hwSheet, 1, 0).s = noteStyle;
+    if (hw.items.length) {
+      styleTable(hwSheet, {
+        headerRow: 3, firstData: hwFirst, lastData: hwLast, firstCol: 0, lastCol: 7,
+        moneyCols: [5, 6, 7],
+      });
+    }
+    const totalRow = hwLast + 2;
+    for (let c = 0; c <= 7; c++) {
+      cellAt(hwSheet, totalRow, c).s = { ...totalStyle, ...(c >= 5 ? { numFmt: MONEY_FMT, alignment: { horizontal: 'right', vertical: 'center' } } : {}) };
+    }
+    XLSX.utils.book_append_sheet(wb, hwSheet, 'Скрытые работы');
+  }
+
   XLSX.writeFile(wb, 'Смета.xlsx');
 };
 
@@ -487,6 +527,50 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
     }
   });
 
+  // Скрытые работы (справочно, не входят в итоговую смету)
+  if (data.hidden_works && data.hidden_works.items.length > 0) {
+    const hw = data.hidden_works;
+    currentY = getFinalY(doc) + 14;
+    if (currentY > pageH - 45) {
+      doc.addPage();
+      currentY = 20;
+    }
+    sectionHeading('Скрытые работы · возможные доплаты', currentY);
+    doc.setFontSize(8);
+    doc.setTextColor(...PDF_MUTED);
+    const noteLines = doc.splitTextToSize(hw.note, pageW - marginX * 2);
+    doc.text(noteLines, marginX, currentY + 5);
+    autoTable(doc, {
+      ...tableBase,
+      startY: currentY + 5 + noteLines.length * 4,
+      head: [['Работа', 'Специалист', 'Причина', 'Объём', 'Мин.', 'Макс.']],
+      body: hw.items.map(item => [
+        item.service,
+        item.specialist,
+        item.reason,
+        `${fmtQty(item.volume)} ${item.unit}`,
+        formatPricePDF(item.total_min),
+        formatPricePDF(item.total_max),
+      ]),
+      foot: [['Итого возможных доплат', '', '', '', formatPricePDF(hw.total_min), formatPricePDF(hw.total_max)]],
+      footStyles: {
+        fillColor: PDF_BORDER,
+        textColor: PDF_HEADING,
+        fontStyle: 'normal' as const,
+        halign: 'right' as const,
+      },
+      columnStyles: {
+        0: { halign: 'left', cellWidth: 32 },
+        1: { halign: 'left', cellWidth: 24 },
+        2: { halign: 'left', cellWidth: 52 },
+        3: { halign: 'right', cellWidth: 18 },
+        4: { halign: 'right', cellWidth: 24 },
+        5: { halign: 'right', cellWidth: 32 },
+      },
+    });
+  }
+
+  // Футер: подпись слева, нумерация справа — на каждой странице
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);

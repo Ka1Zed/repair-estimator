@@ -30,9 +30,12 @@ export interface FloorWorks {
   finish: FloorFinish | null;
 }
 
+export type WallCondition = "even" | "normal" | "uneven";
+
 export interface WallsWorks {
   enabled: boolean;
   finish: WallFinish | null;
+  wall_condition: WallCondition;
   wallpaper_pattern: boolean;
   primer_two_coats: boolean;
 }
@@ -68,7 +71,7 @@ export function defaultWorksForRoomType(rt: RoomTypeKey): RoomWorks {
   const rule = roomTypes[rt];
   return {
     floor: { enabled: true, finish: rule.floor[0] ?? null },
-    walls: { enabled: true, finish: rule.walls[0] ?? null, wallpaper_pattern: false, primer_two_coats: false },
+    walls: { enabled: true, finish: rule.walls[0] ?? null, wall_condition: "normal", wallpaper_pattern: false, primer_two_coats: false },
     ceiling: { enabled: true, finish: rule.ceiling[0] ?? null, primer_two_coats: false },
     electric: { enabled: true, sockets: 4, lights: 2, cable_m: null },
     plumbing: { enabled: rule.plumbing.required, points: rule.plumbing.required ? 2 : null, pipe_m: null },
@@ -85,12 +88,29 @@ export interface Room {
   works: RoomWorks;
 }
 
+export type EstimateScope = "finish_only" | "rough_and_finish";
+
+export function getDefaultRoomName(room_type: RoomTypeKey, rooms: Room[]): string {
+  const label = roomTypes[room_type].label;
+  // Первое свободное имя: «label», затем «label 2», «label 3», ...
+  // Считаем по занятым именам, а не по количеству — иначе удаление первой
+  // из пронумерованной пары даёт дубликат, плюс учитываем ручные имена.
+  const taken = new Set(rooms.map((r) => r.name));
+  if (!taken.has(label)) return label;
+  for (let n = 2; ; n++) {
+    const candidate = `${label} ${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
 interface ProjectState {
   city: string;
+  scope: EstimateScope;
   rooms: Room[];
   activeRoomIndex: number;
 
   setCity: (city: string) => void;
+  setScope: (scope: EstimateScope) => void;
   addRoom: () => void;
   deleteRoom: (index: number) => void;
   setActiveRoom: (index: number) => void;
@@ -120,9 +140,9 @@ const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
   plumbing: false,
 };
 
-const createDefaultRoom = (name: string): Room => ({
+const createDefaultRoom = (name?: string): Room => ({
   id: uid(),
-  name,
+  name: name ?? roomTypes["living"].label,
   height: 2.7,
   room_type: "living",
   points: [
@@ -141,7 +161,8 @@ const DEFAULT_CITY = "Казань";
 
 const initialState = {
   city: DEFAULT_CITY,
-  rooms: [createDefaultRoom("Комната 1")],
+  scope: "finish_only" as EstimateScope,
+  rooms: [createDefaultRoom()],
   activeRoomIndex: 0,
 };
 
@@ -152,9 +173,12 @@ export const useProjectStore = create<ProjectState>()(
 
       setCity: (city) => set({ city }),
 
+      setScope: (scope) => set({ scope }),
+
       addRoom: () =>
         set((state) => {
-          const newRoom = createDefaultRoom(`Комната ${state.rooms.length + 1}`);
+          const name = getDefaultRoomName("living", state.rooms);
+          const newRoom = createDefaultRoom(name);
           return {
             rooms: [...state.rooms, newRoom],
             activeRoomIndex: state.rooms.length,
@@ -189,11 +213,16 @@ export const useProjectStore = create<ProjectState>()(
       updateActiveRoomType: (index, room_type) =>
         set((state) => {
           const newRooms = [...state.rooms];
-          newRooms[index] = {
-            ...newRooms[index],
-            room_type,
-            works: defaultWorksForRoomType(room_type),
-          };
+          const room = newRooms[index];
+          const oldLabel = roomTypes[room.room_type].label;
+          const wasAutoNamed =
+            room.name === oldLabel ||
+            new RegExp(`^${oldLabel}\\s\\d+$`).test(room.name);
+          const otherRooms = newRooms.filter((_, i) => i !== index);
+          const newName = wasAutoNamed
+            ? getDefaultRoomName(room_type, otherRooms)
+            : room.name;
+          newRooms[index] = { ...room, room_type, name: newName };
           return { rooms: newRooms };
         }),
 
@@ -308,7 +337,7 @@ export const useProjectStore = create<ProjectState>()(
     }),
     {
       name: "repair-estimator-draft",
-      version: 3,
+      version: 4,
       migrate: (persisted: unknown, version: number) => {
         let s = persisted as Record<string, unknown>;
 
@@ -336,6 +365,21 @@ export const useProjectStore = create<ProjectState>()(
               if (room.works) return room;
               const rt = (room.room_type as RoomTypeKey) ?? "living";
               return { ...room, works: defaultWorksForRoomType(rt) };
+            }),
+          };
+        }
+
+        if (version < 4) {
+          // v3 → v4: walls.wall_condition добавлен; подставляем "normal" для старых записей
+          const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
+          s = {
+            ...s,
+            rooms: rooms.map((room) => {
+              const works = room.works as Record<string, unknown> | undefined;
+              if (!works) return room;
+              const walls = works.walls as Record<string, unknown> | undefined;
+              if (!walls || walls.wall_condition) return room;
+              return { ...room, works: { ...works, walls: { ...walls, wall_condition: "normal" } } };
             }),
           };
         }

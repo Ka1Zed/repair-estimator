@@ -314,23 +314,26 @@ export function Workspace() {
     [data, priceScale],
   );
 
-  const toLedgerRow = (l: LaborItem): LedgerRow => ({
-    name: l.service,
-    subtitle: l.specialist,
-    volume: `${formatQty(l.volume)} ${l.unit}`,
-    price: rub(Math.round(l.price_avg * priceScale)),
-    details: [
-      { label: "Специалист", value: l.specialist },
-      { label: "Цена за единицу", value: rub(l.price_avg) },
-      { label: "Итог по позиции", value: rub(l.total_avg) },
-      { label: "Источник цены", value: l.source, url: l.source_url },
-      { label: "Регион", value: regionLabel(l.region) },
-    ],
-  });
+  const toLedgerRow = useCallback(
+    (l: LaborItem): LedgerRow => ({
+      name: l.service,
+      subtitle: l.specialist,
+      volume: `${formatQty(l.volume)} ${l.unit}`,
+      price: rub(Math.round(l.price_avg * priceScale)),
+      details: [
+        { label: "Специалист", value: l.specialist },
+        { label: "Цена за единицу", value: rub(l.price_avg) },
+        { label: "Итог по позиции", value: rub(l.total_avg) },
+        { label: "Источник цены", value: l.source, url: l.source_url },
+        { label: "Регион", value: regionLabel(l.region) },
+      ],
+    }),
+    [priceScale],
+  );
 
   const laborRows: LedgerRow[] = useMemo(
     () => (data?.labor ?? []).map(toLedgerRow),
-    [data, priceScale],
+    [data, toLedgerRow],
   );
 
   const laborByStage = useMemo(() => {
@@ -669,7 +672,7 @@ export function Workspace() {
                 </button>
               </div>
 
-              {tab === "materials" || scope === "finish_only" || laborByStage.size <= 1 ? (
+              {tab === "materials" || (data.scope ?? scope) === "finish_only" || laborByStage.size <= 1 ? (
                 <EstimateLedger rows={tab === "materials" ? materialRows : laborRows} />
               ) : (
                 <>

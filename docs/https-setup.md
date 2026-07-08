@@ -107,3 +107,7 @@ gh repo edit Ka1Zed/repair-estimator --homepage "https://35.254.13.119.sslip.io/
   цепочку; подожди и обнови логи `docker compose logs caddy`.
 - **Заход по голому IP не открывается / рвётся на редиректе** — задай `PUBLIC_IP`
   в `.env` (см. шаг 2) и перезапусти `docker compose up -d caddy`.
+- **`https://<голый IP>` не открывается** — это ожидаемо: Let's Encrypt не
+  выдаёт сертификаты на IP-адреса, только на доменные имена. `PUBLIC_IP`
+  решает только `http://<IP>` → редирект на `https://PUBLIC_HOST`; прямой
+  HTTPS-заход по IP принципиально невозможен без своего домена.

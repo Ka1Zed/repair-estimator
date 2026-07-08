@@ -1,16 +1,9 @@
 import sys
 import logging
 
-from app.parsers.megastroy_parser import MegastroyParser, CATEGORY_MAP
-from app.services.price_aggregator_service import get_price, update_labor_price
-
-from app.parsers.rembrigada_parser import RembrigadaParser
 from app.parsers.labor_table_parser import LABOR_SERVICE_MAP
-from app.parsers.garantstroikompleks_parser import GarantStroiParser
-from app.parsers.remont_uroven_parser import RemontUrovenParser
-from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
-from app.parsers.prorabneva_parser import ProrabnevaParser
-from app.parsers.kaz_stroyka_parser import KazStroykaParser
+from app.parsers.registry import BASE_LABOR_PARSER, MATERIAL_PARSERS, REGIONAL_LABOR_PARSERS
+from app.services.price_aggregator_service import get_price, update_labor_price
 
 # Настройка логирования — чтобы видеть прогресс в консоли
 logging.basicConfig(
@@ -27,37 +20,38 @@ def update_prices():
     Каждый материал обрабатывается отдельно: ошибка одного
     не прерывает обработку остальных.
     '''
-    parser = MegastroyParser()
-
-    # Берем список материалов, которые умеет парсить Мегастрой
-    material_names = list(CATEGORY_MAP.keys())
-
-    logger.info(f"Старт обновления цен. Материалов к обработке: {len(material_names)}")
-
     success = 0
     failed = 0
 
-    for name in material_names:
-        try:
-            price = get_price(name, parser=parser, force_refresh=True)
-            if price:
-                logger.info(f"  ✓ {name}: avg={price.price_avg}")
-                success += 1
-            else:
-                logger.warning(f"  ✗ {name}: цена не найдена (нет в БД)")
+    # Материалы: каждый зарегистрированный парсер обрабатывает свой список
+    # (parser.known_materials()) — добавление нового источника (напр. Леман,
+    # #276) не требует правок этой функции, только app/parsers/registry.py.
+    for parser in MATERIAL_PARSERS:
+        material_names = parser.known_materials()
+        logger.info(
+            f"Обновление цен материалов ({parser.source_name}): "
+            f"{len(material_names)} позиций"
+        )
+        for name in material_names:
+            try:
+                price = get_price(name, parser=parser, force_refresh=True)
+                if price:
+                    logger.info(f"  ✓ {name}: avg={price.price_avg}")
+                    success += 1
+                else:
+                    logger.warning(f"  ✗ {name}: цена не найдена (нет в БД)")
+                    failed += 1
+            except Exception as e:
+                # агрегатор и так глотает ошибки парсера, но на всякий случай
+                logger.error(f"  ✗ {name}: непредвиденная ошибка — {e}")
                 failed += 1
-        except Exception as e:
-            # агрегатор и так глотает ошибки парсера, но на всякий случай
-            logger.error(f"  ✗ {name}: непредвиденная ошибка — {e}")
-            failed += 1
 
     # услуги по прайсам ремонтных компаний
 
-    labor_parser = RembrigadaParser()
     logger.info(f"Обновление цен услуг: {len(LABOR_SERVICE_MAP)} позиций")
     for service in LABOR_SERVICE_MAP:
         try:
-            price = update_labor_price(service, parser=labor_parser)
+            price = update_labor_price(service, parser=BASE_LABOR_PARSER)
             if price:
                 logger.info(f"  ✓ {service}: avg={price.price_avg}")
                 success += 1
@@ -70,12 +64,7 @@ def update_prices():
 
     # Региональные прайсы отделочных работ: цены пишутся с region сайта.
     # Ошибка одного сайта/услуги не прерывает остальные.
-    regional_labor_parsers = [
-        GarantStroiParser(), RemontUrovenParser(),   # Москва
-        OtdelkaSpbParser(), ProrabnevaParser(),       # Санкт-Петербург
-        KazStroykaParser(), RembrigadaParser(),       # Казань
-    ]
-    for labor_parser in regional_labor_parsers:
+    for labor_parser in REGIONAL_LABOR_PARSERS:
         logger.info(
             f"Региональный прайс работ: {labor_parser.source_name} "
             f"({labor_parser.region}), {len(LABOR_SERVICE_MAP)} позиций"

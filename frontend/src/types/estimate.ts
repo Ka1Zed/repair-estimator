@@ -14,6 +14,8 @@ export interface MaterialItem {
   source_url?: string | null;
 }
 
+export type LaborStage = "rough" | "pre_finish" | "finish";
+
 export interface LaborItem {
   service: string;
   specialist: string;
@@ -24,4 +26,26 @@ export interface LaborItem {
   source: string;
   region?: string | null;
   source_url?: string | null;
+  stage?: LaborStage;
+}
+
+export interface HiddenWorkItem {
+  service: string;
+  specialist: string;
+  reason: string;
+  volume: number;
+  unit: string;
+  price_avg: number;
+  total_min: number;
+  total_avg: number;
+  total_max: number;
+  source: string;
+}
+
+export interface HiddenWorks {
+  note: string;
+  total_min: number;
+  total_avg: number;
+  total_max: number;
+  items: HiddenWorkItem[];
 }

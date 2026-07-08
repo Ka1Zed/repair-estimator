@@ -9,11 +9,11 @@ import OpeningsForm from "../../components/OpeningsForm";
 import { RoomTypeSelector } from "../../components/RoomTypeSelector";
 import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
-import type { MaterialItem, LaborItem } from "../../types/estimate";
+import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
 import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/EstimateLedger";
 
-import { useProjectStore } from "../../store/projectStore";
+import { useProjectStore, type EstimateScope } from "../../store/projectStore";
 import { useBackendStatus } from "../../store/backendStatus";
 import { roomHasInvalidOpenings } from "../../utils/openingValidation";
 import { hasSelfIntersection, validateHeight } from "../../utils/polygonValidation";
@@ -33,7 +33,15 @@ interface EstimateResponse {
   geometry: GeometryData;
   materials: MaterialItem[];
   labor: LaborItem[];
+  scope?: EstimateScope;
+  hidden_works?: HiddenWorks;
 }
+
+const STAGE_LABELS: Record<LaborStage, string> = {
+  rough: "Черновые работы",
+  pre_finish: "Предчистовые работы",
+  finish: "Чистовые работы",
+};
 
 const formatPrice = (price: number) => `${Math.round(price).toLocaleString("ru-RU")} ₽`;
 const formatNum = (n: number) =>
@@ -49,6 +57,8 @@ export function Workspace() {
   const rooms = useProjectStore((s) => s.rooms);
   const city = useProjectStore((s) => s.city);
   const setCity = useProjectStore((s) => s.setCity);
+  const scope = useProjectStore((s) => s.scope);
+  const setScope = useProjectStore((s) => s.setScope);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
@@ -133,6 +143,7 @@ export function Workspace() {
       try {
         const payload = {
           city,
+          scope,
           rooms: rooms.map((room) => ({
             name: room.name,
             room_type: room.room_type,
@@ -158,7 +169,7 @@ export function Workspace() {
         setIsLoading(false);
       }
     },
-    [rooms, city],
+    [rooms, city, scope],
   );
 
   // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
@@ -303,23 +314,38 @@ export function Workspace() {
     [data, priceScale],
   );
 
-  const laborRows: LedgerRow[] = useMemo(
-    () =>
-      (data?.labor ?? ([] as LaborItem[])).map((l) => ({
-        name: l.service,
-        subtitle: l.specialist,
-        volume: `${formatQty(l.volume)} ${l.unit}`,
-        price: rub(Math.round(l.price_avg * priceScale)),
-        details: [
-          { label: "Специалист", value: l.specialist },
-          { label: "Цена за единицу", value: rub(l.price_avg) },
-          { label: "Итог по позиции", value: rub(l.total_avg) },
-          { label: "Источник цены", value: l.source, url: l.source_url },
-          { label: "Регион", value: regionLabel(l.region) },
-        ],
-      })),
-    [data, priceScale],
+  const toLedgerRow = useCallback(
+    (l: LaborItem): LedgerRow => ({
+      name: l.service,
+      subtitle: l.specialist,
+      volume: `${formatQty(l.volume)} ${l.unit}`,
+      price: rub(Math.round(l.price_avg * priceScale)),
+      details: [
+        { label: "Специалист", value: l.specialist },
+        { label: "Цена за единицу", value: rub(l.price_avg) },
+        { label: "Итог по позиции", value: rub(l.total_avg) },
+        { label: "Источник цены", value: l.source, url: l.source_url },
+        { label: "Регион", value: regionLabel(l.region) },
+      ],
+    }),
+    [priceScale],
   );
+
+  const laborRows: LedgerRow[] = useMemo(
+    () => (data?.labor ?? []).map(toLedgerRow),
+    [data, toLedgerRow],
+  );
+
+  const laborByStage = useMemo(() => {
+    const labor = data?.labor ?? [];
+    const groups = new Map<LaborStage, LaborItem[]>();
+    for (const item of labor) {
+      const stage: LaborStage = item.stage ?? "finish";
+      if (!groups.has(stage)) groups.set(stage, []);
+      groups.get(stage)!.push(item);
+    }
+    return groups;
+  }, [data]);
 
   return (
     <div className={styles.page} ref={containerRef}>
@@ -371,6 +397,23 @@ export function Workspace() {
                 {heightError}
               </div>
             )}
+          </div>
+          <div>
+            <div className={styles.blockLabel}>Объём ремонта</div>
+            <div className={styles.scopeToggle}>
+              <button
+                className={`${styles.scopeBtn} ${scope === "finish_only" ? styles.scopeBtnActive : ""}`}
+                onClick={() => setScope("finish_only")}
+              >
+                Только чистовая
+              </button>
+              <button
+                className={`${styles.scopeBtn} ${scope === "rough_and_finish" ? styles.scopeBtnActive : ""}`}
+                onClick={() => setScope("rough_and_finish")}
+              >
+                Черновая + чистовая
+              </button>
+            </div>
           </div>
         </div>
 
@@ -554,6 +597,12 @@ export function Workspace() {
                 </tbody>
               </table>
 
+              {(data.scope ?? scope) === "finish_only" && (
+                <p className={styles.scopeNote}>
+                  Смета охватывает только чистовую отделку — черновые работы не включены.
+                </p>
+              )}
+
               {/* переключатель режима цен — суммы в таблице выше, здесь только подписи */}
               <div className={styles.rangeRow}>
                 <div
@@ -623,7 +672,27 @@ export function Workspace() {
                 </button>
               </div>
 
-              <EstimateLedger rows={tab === "materials" ? materialRows : laborRows} />
+              {tab === "materials" || (data.scope ?? scope) === "finish_only" || laborByStage.size <= 1 ? (
+                <EstimateLedger rows={tab === "materials" ? materialRows : laborRows} />
+              ) : (
+                <>
+                  {(["rough", "pre_finish", "finish"] as LaborStage[])
+                    .filter((stage) => laborByStage.has(stage))
+                    .map((stage) => {
+                      const items = laborByStage.get(stage)!;
+                      const stageTotalAvg = items.reduce((s, i) => s + i.total_avg, 0);
+                      return (
+                        <div key={stage}>
+                          <div className={styles.stageHeader}>{STAGE_LABELS[stage]}</div>
+                          <EstimateLedger rows={items.map(toLedgerRow)} />
+                          <div className={styles.stageSubtotal}>
+                            {rub(Math.round(stageTotalAvg * priceScale))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </>
+              )}
 
               <div className={styles.sectionTotal}>
                 <span className={styles.sectionTotalLabel}>
@@ -631,6 +700,43 @@ export function Workspace() {
                 </span>
                 <span className={styles.sectionTotalValue}>{formatPrice(sectionTotal)}</span>
               </div>
+
+              {data.hidden_works && data.hidden_works.items.length > 0 && (
+                <div className={styles.hiddenSection}>
+                  <div className={styles.blockLabel}>Скрытые работы · возможные доплаты</div>
+                  <p className={styles.hiddenNote}>{data.hidden_works.note}</p>
+                  <table className={styles.hiddenTable}>
+                    <thead>
+                      <tr>
+                        <th>Работа</th>
+                        <th>Причина</th>
+                        <th>Объём</th>
+                        <th>Ориентировочная вилка</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.hidden_works.items.map((item, i) => (
+                        <tr key={i}>
+                          <td>{item.service}</td>
+                          <td className={styles.hiddenReason}>{item.reason}</td>
+                          <td className={styles.hiddenVol}>
+                            {formatQty(item.volume)} {item.unit}
+                          </td>
+                          <td className={styles.hiddenRange}>
+                            {formatPrice(item.total_min)} — {formatPrice(item.total_max)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className={styles.hiddenTotal}>
+                    <span>Итого возможных доплат</span>
+                    <span>
+                      {formatPrice(data.hidden_works.total_min)} — {formatPrice(data.hidden_works.total_max)}
+                    </span>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

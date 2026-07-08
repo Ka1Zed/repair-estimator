@@ -24,7 +24,7 @@ from app.services.repair_coeffs_service import CONTINGENCY
 from app.services.price_aggregator_service import get_price, get_labor_price
 from app.services.hidden_works_service import calculate_hidden_works
 from app.parsers.base import BaseParser
-from app.parsers.megastroy_parser import MegastroyParser
+from app.parsers.registry import MATERIAL_PARSERS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
@@ -34,9 +34,12 @@ def get_material_parser() -> BaseParser:
     '''Парсер цен материалов для расчёта сметы.
 
     Вынесен в зависимость FastAPI, чтобы тесты могли подменить его заглушкой
-    (app.dependency_overrides) и не ходить в сеть. В проде — живой Мегастрой.
+    (app.dependency_overrides) и не ходить в сеть. В проде — живой Мегастрой
+    (первый источник в app.parsers.registry.MATERIAL_PARSERS). Когда появится
+    второй источник материалов (Леман, #276), выбор/комбинирование цен между
+    ними войдёт сюда — сам список источников уже вынесен в registry.py.
     '''
-    return MegastroyParser()
+    return MATERIAL_PARSERS[0]
 
 # Дефолты инженерки, когда группа works включена, а число не задано (null).
 # Явный 0 остаётся 0 (осознанный ноль). База — пресеты по типу комнаты; для типа

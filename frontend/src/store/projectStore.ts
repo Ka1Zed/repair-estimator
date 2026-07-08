@@ -88,6 +88,8 @@ export interface Room {
   works: RoomWorks;
 }
 
+export type EstimateScope = "finish_only" | "rough_and_finish";
+
 export function getDefaultRoomName(room_type: RoomTypeKey, rooms: Room[]): string {
   const label = roomTypes[room_type].label;
   // Первое свободное имя: «label», затем «label 2», «label 3», ...
@@ -103,10 +105,12 @@ export function getDefaultRoomName(room_type: RoomTypeKey, rooms: Room[]): strin
 
 interface ProjectState {
   city: string;
+  scope: EstimateScope;
   rooms: Room[];
   activeRoomIndex: number;
 
   setCity: (city: string) => void;
+  setScope: (scope: EstimateScope) => void;
   addRoom: () => void;
   deleteRoom: (index: number) => void;
   setActiveRoom: (index: number) => void;
@@ -157,6 +161,7 @@ const DEFAULT_CITY = "Казань";
 
 const initialState = {
   city: DEFAULT_CITY,
+  scope: "finish_only" as EstimateScope,
   rooms: [createDefaultRoom()],
   activeRoomIndex: 0,
 };
@@ -167,6 +172,8 @@ export const useProjectStore = create<ProjectState>()(
       ...initialState,
 
       setCity: (city) => set({ city }),
+
+      setScope: (scope) => set({ scope }),
 
       addRoom: () =>
         set((state) => {

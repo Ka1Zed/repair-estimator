@@ -51,6 +51,10 @@ export default function RoomPolygonEditor() {
   // During vertex drag freeze viewBox so CTM stays stable
   const vb: ViewBox = (draggingIdx !== null && dragVb) ? dragVb : (userViewBox ?? autoViewBox);
 
+  // Ref for wheel handler — keeps listener stable (no re-add on every pan/drag frame)
+  const vbRef = useRef<ViewBox>(vb);
+  vbRef.current = vb;
+
   const viewBoxStr = `${vb.x} ${vb.y} ${vb.w} ${vb.h}`;
 
   // Scale-invariant sizes (proportional to viewBox width)
@@ -175,14 +179,16 @@ export default function RoomPolygonEditor() {
   };
 
   // --- Zoom (нативный listener — React вешает onWheel пассивно, поэтому
-  //     preventDefault() в нём no-op и страница скроллится вместе с зумом) ---
+  //     preventDefault() в нём no-op и страница скроллится вместе с зумом)
+  //     Читаем vbRef.current вместо замыкания на state — listener стабилен,
+  //     не пересоздаётся на каждый pointermove при пане/драге. ---
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const cursor = screenToReal(e.clientX, e.clientY);
-      const cv = userViewBox ?? autoViewBox;
+      const cv = vbRef.current;
       // Math.pow учитывает величину deltaY → плавный зум на трекпаде
       const factor = Math.pow(1.0015, e.deltaY);
       const newW = Math.min(Math.max(cv.w * factor, 0.5), 500);
@@ -193,7 +199,7 @@ export default function RoomPolygonEditor() {
     };
     svg.addEventListener("wheel", onWheel, { passive: false });
     return () => svg.removeEventListener("wheel", onWheel);
-  }, [userViewBox, autoViewBox]);
+  }, []);
 
   // --- Fit to view ---
   const handleFitToView = () => setUserViewBox(null);
@@ -382,7 +388,7 @@ export default function RoomPolygonEditor() {
                 onClick={(e) => { e.stopPropagation(); setEditingEdge(i); setEdgeInputValue(displayLen); }}
               >
                 <rect x={mx - labelW / 2} y={my - labelH / 2} width={labelW} height={labelH} rx={vb.w * 0.008} fill="#FFFFFF" stroke="var(--border)" strokeWidth={vb.w * 0.003} />
-                <text x={mx} y={my} fill="#6B6B6B" fontSize={fontSize} textAnchor="middle" dominantBaseline="central">
+                <text x={mx} y={my} fill="#6B6B6B" fontSize={fontSize} textAnchor="middle" dominantBaseline="central" style={{ letterSpacing: "normal" }}>
                   {displayLen}м
                 </text>
               </g>

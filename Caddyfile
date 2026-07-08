@@ -15,3 +15,13 @@
 {$PUBLIC_HOST::80} {
 	reverse_proxy frontend:80
 }
+
+# Заход по голому IP сервера (PUBLIC_IP, см. .env). Без этого блока Caddy
+# автоматически редиректит любой :80-запрос на https с тем же Host (т.е. на
+# https://<IP>), а сертификат выпущен только на PUBLIC_HOST (sslip-имя) —
+# TLS падает. Здесь редирект явно ведёт на канонический HTTPS-домен.
+# off.invalid — зарезервированное несуществующее имя (RFC 2606): дефолт,
+# который никогда не матчится, если PUBLIC_IP не задан (локальный режим).
+http://{$PUBLIC_IP:off.invalid} {
+	redir https://{$PUBLIC_HOST}{uri}
+}

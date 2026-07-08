@@ -120,6 +120,9 @@ def _parse_page(html: str, page_url: str) -> list[tuple[Decimal, str | None]]:
 class MegastroyParser(BaseParser):
     source_name = "Мегастрой"
 
+    def known_materials(self) -> list[str]:
+        return list(CATEGORY_MAP.keys())
+
     def fetch_price(self, material_name: str) -> ParsedPrice:
         if material_name not in CATEGORY_MAP:
             raise ValueError(f"Нет категории Мегастроя для материала '{material_name}'")

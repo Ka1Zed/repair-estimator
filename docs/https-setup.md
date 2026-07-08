@@ -46,6 +46,7 @@ gcloud compute firewall-rules create allow-https \
 
 ```bash
 PUBLIC_HOST=35.254.13.119.sslip.io
+PUBLIC_IP=35.254.13.119
 VITE_API_URL=https://35.254.13.119.sslip.io
 FRONTEND_URL=https://35.254.13.119.sslip.io
 ```
@@ -53,6 +54,11 @@ FRONTEND_URL=https://35.254.13.119.sslip.io
 `VITE_API_URL` без порта и тем же доменом — фронт будет ходить на `/api` того же
 origin. После смены `VITE_API_URL` фронт обязательно пересобрать (он зашит в
 бандл).
+
+`PUBLIC_IP` нужен отдельно: без него заход по голому IP ловит автоматический
+редирект Caddy `http → https` с тем же Host (IP), а сертификат выпущен только на
+`PUBLIC_HOST` — TLS падает. С `PUBLIC_IP` Caddy явно редиректит `http://<IP>` на
+`https://<PUBLIC_HOST>`, где сертификат валиден.
 
 ### 3. Выкатить
 
@@ -99,3 +105,5 @@ gh repo edit Ka1Zed/repair-estimator --homepage "https://35.254.13.119.sslip.io/
   тот же https-домен (а не на `:8000`) и фронт пересобран (`--build`).
 - **Сертификат «недоверенный»** — обычно временно, пока Caddy не дополучил
   цепочку; подожди и обнови логи `docker compose logs caddy`.
+- **Заход по голому IP не открывается / рвётся на редиректе** — задай `PUBLIC_IP`
+  в `.env` (см. шаг 2) и перезапусти `docker compose up -d caddy`.

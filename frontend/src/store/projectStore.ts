@@ -87,8 +87,15 @@ export interface Room {
 
 export function getDefaultRoomName(room_type: RoomTypeKey, rooms: Room[]): string {
   const label = roomTypes[room_type].label;
-  const count = rooms.filter((r) => r.room_type === room_type).length;
-  return count === 0 ? label : `${label} ${count + 1}`;
+  // Первое свободное имя: «label», затем «label 2», «label 3», ...
+  // Считаем по занятым именам, а не по количеству — иначе удаление первой
+  // из пронумерованной пары даёт дубликат, плюс учитываем ручные имена.
+  const taken = new Set(rooms.map((r) => r.name));
+  if (!taken.has(label)) return label;
+  for (let n = 2; ; n++) {
+    const candidate = `${label} ${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
 }
 
 interface ProjectState {

@@ -215,12 +215,7 @@ export const WorksPanel: React.FC = () => {
             checked={works.plumbing.enabled}
             onChange={(e) => setPlumbing({ enabled: e.target.checked })}
           />
-          <span className={styles.groupName}>
-            Сантехника
-            {allowed.plumbing.required && (
-              <span className={styles.required}> · обязательно</span>
-            )}
-          </span>
+          <span className={styles.groupName}>Сантехника</span>
         </label>
         {works.plumbing.enabled && (
           <div className={styles.fields}>

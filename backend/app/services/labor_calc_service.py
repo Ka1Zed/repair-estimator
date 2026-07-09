@@ -168,8 +168,16 @@ def _seed_source_id(db: Session):
     return src.id if src else None
 
 
-def _labor_rows(selections: List[tuple], db: Session, seed_id) -> List[Dict[str, Any]]:
-    """Собрать строки сметы работ по списку (имя_операции, объём)."""
+def _labor_rows(
+    selections: List[tuple], db: Session, seed_id,
+    sources_by_id: Dict[int, str] | None = None,
+) -> List[Dict[str, Any]]:
+    """Собрать строки сметы работ по списку (имя_операции, объём).
+
+    sources_by_id — предзагруженный словарь id->name справочника PriceSource
+    (передаёт вызывающий, обычно estimates.py); без него на каждую строку шёл
+    отдельный запрос к price_sources (N+1, #278).
+    """
     result: List[Dict[str, Any]] = []
 
     for service_name, volume in selections:
@@ -184,15 +192,19 @@ def _labor_rows(selections: List[tuple], db: Session, seed_id) -> List[Dict[str,
         q = db.query(LaborPrice).filter(LaborPrice.labor_service_id == service.id)
         price = q.filter(LaborPrice.source_id == seed_id).first() if seed_id else None
         if price is None:
-            price = q.first()  # fallback на любой источник
+            # fallback на любой источник; сортировка по id — выбор детерминирован
+            price = q.order_by(LaborPrice.id).first()
         if price is None:
             continue
 
         source_name = "seed"
         if price.source_id:
-            src = db.query(PriceSource).filter(PriceSource.id == price.source_id).first()
-            if src:
-                source_name = src.name
+            if sources_by_id is not None:
+                source_name = sources_by_id.get(price.source_id, "seed")
+            else:
+                src = db.query(PriceSource).filter(PriceSource.id == price.source_id).first()
+                if src:
+                    source_name = src.name
 
         p_min, p_avg, p_max = D(price.price_min), D(price.price_avg), D(price.price_max)
 
@@ -218,6 +230,7 @@ def calculate_labor(
     geometry: Dict[str, Any],
     repair_options: Dict[str, Any],
     db: Session,
+    sources_by_id: Dict[int, str] | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Объём и стоимость отделочных работ для одной комнаты (пол/стены/потолок).
@@ -227,12 +240,16 @@ def calculate_labor(
 
     geometry: floor_area, ceiling_area, wall_area
     repair_options: {floor, walls, ceiling, ...}
+    sources_by_id: предзагруженный словарь PriceSource id->name (см. _labor_rows).
 
     Возвращает строки по контракту api.md:
         service, specialist, volume, unit,
         price_min/avg/max (за единицу), total_min/avg/max (= volume * price), source
     """
-    return _labor_rows(_labor_selections(repair_options, geometry), db, _seed_source_id(db))
+    return _labor_rows(
+        _labor_selections(repair_options, geometry), db, _seed_source_id(db),
+        sources_by_id=sources_by_id,
+    )
 
 
 def calculate_rough_labor(
@@ -240,6 +257,7 @@ def calculate_rough_labor(
     repair_options: Dict[str, Any],
     room_type: str,
     db: Session,
+    sources_by_id: Dict[int, str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Черновые работы одной комнаты (#190), только при scope=rough_and_finish.
 
@@ -268,7 +286,7 @@ def calculate_rough_labor(
     if room_type in WET_ROOM_TYPES:
         sel.append((S_WATERPROOF, floor_area))   # гидроизоляция обязательна в мокрой зоне
 
-    return _labor_rows(sel, db, _seed_source_id(db))
+    return _labor_rows(sel, db, _seed_source_id(db), sources_by_id=sources_by_id)
 
 
 def calculate_engineering_labor(
@@ -278,6 +296,7 @@ def calculate_engineering_labor(
     plumbing_points: Any,
     pipe_m: Any,
     db: Session,
+    sources_by_id: Dict[int, str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Работы электрики/сантехники по явным числам из works (#222).
 
@@ -293,4 +312,4 @@ def calculate_engineering_labor(
         (S_PIPE_MOUNT, pipe_m),
         (S_PLUMBING, plumbing_points),
     ]
-    return _labor_rows(selections, db, _seed_source_id(db))
+    return _labor_rows(selections, db, _seed_source_id(db), sources_by_id=sources_by_id)

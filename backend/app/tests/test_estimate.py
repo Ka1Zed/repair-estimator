@@ -421,10 +421,11 @@ class TestFinishOptionsCoverage:
                 for m in materials:
                     assert m["quantity"] > 0, f"нулевое количество {m['name']}: {ctx}"
                     # get_price → seed-цена; None означало бы source «нет цены» в смете.
-                    assert get_price(m["name"]) is not None, f"нет цены материала {m['name']}: {ctx}"
+                    assert get_price(m["name"], db=db_session) is not None, \
+                        f"нет цены материала {m['name']}: {ctx}"
                 for job in labor:
                     # Работа без цены молча выпадает из сметы (endpoint: continue).
-                    assert get_labor_price(job["service"]) is not None, \
+                    assert get_labor_price(job["service"], db=db_session) is not None, \
                         f"нет цены работы {job['service']}: {ctx}"
 
     def test_wallpaper_has_gluing_work(self, db_session):
@@ -432,7 +433,7 @@ class TestFinishOptionsCoverage:
         labor = calculate_labor(self.GEOM, {"walls": "wallpaper"}, db_session)
         services = {j["service"] for j in labor}
         assert "Поклейка обоев" in services
-        assert get_labor_price("Поклейка обоев") is not None
+        assert get_labor_price("Поклейка обоев", db=db_session) is not None
 
     def test_parquet_maps_to_own_material_and_work(self, db_session):
         """Паркет: отдельный материал «Паркетная доска» и работа «Укладка паркета»,
@@ -459,7 +460,7 @@ class TestFinishOptionsCoverage:
         by_service = {j["service"]: j for j in labor}
         assert "Монтаж натяжного потолка" in by_service
         assert by_service["Монтаж натяжного потолка"]["volume"] == Decimal("12.0")
-        price = get_labor_price("Монтаж натяжного потолка")
+        price = get_labor_price("Монтаж натяжного потолка", db=db_session)
         assert price is not None and price.price_avg > 0
         # Натяжной не даёт строки материала.
         assert calculate_materials(self.GEOM, opts, db_session) == []

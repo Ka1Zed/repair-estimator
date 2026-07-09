@@ -18,7 +18,7 @@ from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
-from app.db.models import LaborService, PriceSource
+from app.db.models import LaborService
 from app.services.price_aggregator_service import get_labor_price
 
 NOTE = (
@@ -43,19 +43,21 @@ def _D(value) -> Decimal:
     return Decimal(str(value))
 
 
-def _source_name(db: Session, source_id) -> str:
-    if not source_id:
+def _source_name(source_id, sources_by_id: Dict[int, str] | None) -> str:
+    if not source_id or not sources_by_id:
         return "seed"
-    src = db.query(PriceSource).filter(PriceSource.id == source_id).first()
-    return src.name if src else "seed"
+    return sources_by_id.get(source_id, "seed")
 
 
-def _priced_item(service: str, reason: str, volume: Decimal, city: str, db: Session):
+def _priced_item(
+    service: str, reason: str, volume: Decimal, city: str, db: Session,
+    sources_by_id: Dict[int, str] | None = None,
+):
     """Одна строка скрытых работ; None, если объём нулевой или нет seed-цены."""
     volume = _D(volume)
     if volume <= 0:
         return None
-    price = get_labor_price(service, region=city)
+    price = get_labor_price(service, db=db, region=city)
     if price is None:
         return None  # услуга/цена не засидована — молча пропускаем строку
     p_min, p_avg, p_max = _D(price.price_min), _D(price.price_avg), _D(price.price_max)
@@ -70,7 +72,7 @@ def _priced_item(service: str, reason: str, volume: Decimal, city: str, db: Sess
         "total_min": float(volume * p_min),
         "total_avg": float(volume * p_avg),
         "total_max": float(volume * p_max),
-        "source": _source_name(db, price.source_id),
+        "source": _source_name(price.source_id, sources_by_id),
     }
 
 
@@ -89,6 +91,7 @@ def calculate_hidden_works(
     wet_floor_area: Decimal,
     city: str,
     db: Session,
+    sources_by_id: Dict[int, str] | None = None,
 ) -> Dict[str, Any]:
     """Блок скрытых работ по сценарию (#239). Всегда возвращает note + items (может быть пуст).
 
@@ -119,7 +122,7 @@ def calculate_hidden_works(
     for applies, service, reason, volume in candidates:
         if not applies:
             continue
-        item = _priced_item(service, reason, volume, city, db)
+        item = _priced_item(service, reason, volume, city, db, sources_by_id=sources_by_id)
         if item is None:
             continue
         items.append(item)

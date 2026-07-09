@@ -425,6 +425,62 @@ def test_full_workset_has_electric_and_plumbing():
         assert row["source"] != "нет цены"
 
 
+def test_price_source_id_lookup_is_not_n_plus_one():
+    """Раньше estimates.py резолвил имя источника через db.query(PriceSource)
+    .filter(PriceSource.id == ...) на каждую строку материала/работы (N+1, #278).
+    Теперь источники грузятся один раз словарём — SQL с фильтром по
+    price_sources.id в запросе быть не должно вовсе (независимо от того, сколько
+    разных материалов/работ в смете)."""
+    import re
+
+    import sqlalchemy as sa
+
+    from app.db.session import engine
+
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Санузел",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0}, {"x": 2, "y": 0},
+                    {"x": 2, "y": 2}, {"x": 0, "y": 2}
+                ],
+                "room_type": "bathroom",
+                "openings": [
+                    {"type": "door", "width": 0.8, "height": 2.0}
+                ],
+                "works": W(floor="tile", walls="tile", ceiling="stretch",
+                           electric=True, plumbing=True)
+            }
+        ]
+    }
+
+    statements = []
+
+    def _capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    sa.event.listen(engine, "before_cursor_execute", _capture)
+    try:
+        response = client.post("/api/estimates/calculate", json=payload)
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", _capture)
+
+    assert response.status_code == 200
+
+    id_lookup_re = re.compile(r"price_sources\.id\s*=", re.IGNORECASE)
+    id_lookups = [s for s in statements if id_lookup_re.search(s)]
+    assert id_lookups == [], (
+        f"найден точечный запрос PriceSource по id (N+1): {id_lookups}"
+    )
+
+    # Ровно один запрос грузит весь справочник источников (без WHERE по id).
+    preload = [s for s in statements if "FROM price_sources" in s and "WHERE" not in s]
+    assert len(preload) == 1
+
+
 def test_explicit_zero_disables_default():
     """Явный 0 в числовом поле — осознанный ноль: дефолт не подставляется (#222)."""
     payload = {

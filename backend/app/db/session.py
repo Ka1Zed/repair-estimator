@@ -11,8 +11,8 @@ class Base(DeclarativeBase):
     pass
 
 # определяем зависимость
-db = SessionLocal()
 def get_db():
+    db = SessionLocal()
     try:
         yield db
     finally:

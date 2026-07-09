@@ -267,7 +267,7 @@ def _labor_row(db, service_name, source_name, region):
 @pytest.mark.usefixtures("setup_test_db")
 def test_update_labor_price_writes_region(db_session):
     '''update_labor_price(region=...) пишет цену с регионом и источником-сайтом.'''
-    price = update_labor_price("Укладка плитки", parser=_FixtureParser(), region="Москва")
+    price = update_labor_price("Укладка плитки", parser=_FixtureParser(), db=db_session, region="Москва")
     try:
         assert price is not None
         assert price.region == "Москва"
@@ -276,7 +276,7 @@ def test_update_labor_price_writes_region(db_session):
         row = _labor_row(db_session, "Укладка плитки", "garantstroikompleks.ru", "Москва")
         assert row is not None
         # И эту региональную цену предпочтёт lookup перед seed.
-        looked_up = get_labor_price("Укладка плитки", region="Москва")
+        looked_up = get_labor_price("Укладка плитки", db=db_session, region="Москва")
         assert looked_up.region == "Москва"
         assert looked_up.price_avg == Decimal("500")
     finally:
@@ -290,7 +290,7 @@ def test_update_labor_price_writes_region(db_session):
 def test_update_labor_price_zero_not_persisted(db_session):
     '''Нулевая цена не сохраняется, расчёт уходит на seed (#159).'''
     assert _labor_row(db_session, "Укладка плитки", "garantstroikompleks.ru", "Москва") is None
-    result = update_labor_price("Укладка плитки", parser=_ZeroLaborParser(), region="Москва")
+    result = update_labor_price("Укладка плитки", parser=_ZeroLaborParser(), db=db_session, region="Москва")
     assert result is None
     assert _labor_row(db_session, "Укладка плитки", "garantstroikompleks.ru", "Москва") is None
 
@@ -316,7 +316,7 @@ def test_labor_combines_multiple_regional_sites(db_session):
     db_session.add_all(rows)
     db_session.commit()
     try:
-        price = get_labor_price("Укладка плитки", region="Москва")
+        price = get_labor_price("Укладка плитки", db=db_session, region="Москва")
         assert price.price_min == Decimal("400")        # минимум по сайтам
         assert price.price_max == Decimal("4500")       # максимум по сайтам
         assert price.price_avg == Decimal("1850")       # среднее средних (1000+2700)/2
@@ -341,7 +341,7 @@ def test_labor_single_site_reports_one_source(db_session):
     db_session.add(row)
     db_session.commit()
     try:
-        price = get_labor_price("Укладка плитки", region="Москва")
+        price = get_labor_price("Укладка плитки", db=db_session, region="Москва")
         assert price.price_avg == Decimal("900")
         assert price.contributing_sources == ["garantstroikompleks.ru"]
     finally:

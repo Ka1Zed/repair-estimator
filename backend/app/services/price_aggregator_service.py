@@ -3,8 +3,9 @@ import statistics
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
-from app.db.session import SessionLocal
 from app.db.models import Material, MaterialPrice, PriceSource, LaborService, LaborPrice
 from app.parsers.base import BaseParser, ParsedPrice
 
@@ -39,6 +40,7 @@ def _is_valid_parsed(parsed: ParsedPrice | None) -> bool:
 
 def get_price(
     material_name: str,
+    db: Session,
     parser: BaseParser | None = None,
     region: str | None = None,
     ttl_hours: int | None = None,
@@ -55,113 +57,112 @@ def get_price(
        базовую seed-цену с region IS NULL. Парсер региону не подчиняется (одна цена на всех).
     4. force_refresh=True заставляет дёрнуть парсер даже при свежем кэше (для CLI update_prices).
     5. Наверх исключение не пробрасываем никогда.
+
+    db — сессия приходит от вызывающего (Depends(get_db) в эндпоинте, своя SessionLocal()
+    в CLI) — эта функция сама сессию не открывает и не закрывает.
     '''
     if ttl_hours is None:
         ttl_hours = settings.PRICE_TTL_HOURS
 
-    session = SessionLocal()
-    try:
-        material = session.query(Material).filter(Material.name == material_name).first()
-        if not material:
-            logger.warning(f"Материал '{material_name}' не найден в БД")
-            return None
+    session = db
+    material = session.query(Material).filter(Material.name == material_name).first()
+    if not material:
+        logger.warning(f"Материал '{material_name}' не найден в БД")
+        return None
 
-        # Пробуем парсер
-        if parser is not None:
-            source = session.query(PriceSource).filter(
-                PriceSource.name == parser.source_name
+    # Пробуем парсер
+    if parser is not None:
+        source = session.query(PriceSource).filter(
+            PriceSource.name == parser.source_name
+        ).first()
+
+        price_entry = None
+        if source:
+            price_entry = session.query(MaterialPrice).filter(
+                MaterialPrice.material_id == material.id,
+                MaterialPrice.source_id == source.id
             ).first()
 
-            price_entry = None
-            if source:
-                price_entry = session.query(MaterialPrice).filter(
-                    MaterialPrice.material_id == material.id,
-                    MaterialPrice.source_id == source.id
-                ).first()
+        # Свежий кэш парсера — отдаём без сетевого запроса
+        if not force_refresh and price_entry and _is_fresh(price_entry.updated_at, ttl_hours):
+            logger.info(f"Цена для '{material_name}': источник=cache ({parser.source_name})")
+            return price_entry
 
-            # Свежий кэш парсера — отдаём без сетевого запроса
-            if not force_refresh and price_entry and _is_fresh(price_entry.updated_at, ttl_hours):
-                logger.info(f"Цена для '{material_name}': источник=cache ({parser.source_name})")
-                return price_entry
+        # Живой сетевой запрос делаем только когда это явно разрешено: при
+        # force_refresh (CLI update_prices) или PARSER_LIVE_FETCH=true (локалка).
+        # На сервере (PARSER_LIVE_FETCH=false) в сеть не ходим: выше отдали бы
+        # свежий кэш, иначе — seed-fallback ниже. Кэш на сервере наполняет
+        # update_prices с российского IP.
+        if force_refresh or settings.PARSER_LIVE_FETCH:
+            try:
+                parsed = parser.fetch_price(material_name)
 
-            # Живой сетевой запрос делаем только когда это явно разрешено: при
-            # force_refresh (CLI update_prices) или PARSER_LIVE_FETCH=true (локалка).
-            # На сервере (PARSER_LIVE_FETCH=false) в сеть не ходим: выше отдали бы
-            # свежий кэш, иначе — seed-fallback ниже. Кэш на сервере наполняет
-            # update_prices с российского IP.
-            if force_refresh or settings.PARSER_LIVE_FETCH:
-                try:
-                    parsed = parser.fetch_price(material_name)
-
-                    # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —
-                    # это закрепило бы 0 в кэше на весь TTL. Уходим в seed, как при исключении.
-                    if not _is_valid_parsed(parsed):
-                        logger.warning(
-                            f"Парсер {parser.source_name} вернул пустую/нулевую цену для "
-                            f"'{material_name}' — fallback на seed (parser=0/empty)"
+                # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —
+                # это закрепило бы 0 в кэше на весь TTL. Уходим в seed, как при исключении.
+                if not _is_valid_parsed(parsed):
+                    logger.warning(
+                        f"Парсер {parser.source_name} вернул пустую/нулевую цену для "
+                        f"'{material_name}' — fallback на seed (parser=0/empty)"
+                    )
+                elif source:
+                    if price_entry:
+                        # Обновляем
+                        price_entry.price_min = parsed.price_min
+                        price_entry.price_avg = parsed.price_avg
+                        price_entry.price_max = parsed.price_max
+                        price_entry.source_url = parsed.source_url
+                        price_entry.updated_at = datetime.now(timezone.utc)
+                    else:
+                        # Создаем новую
+                        price_entry = MaterialPrice(
+                            material_id=material.id,
+                            source_id=source.id,
+                            price_min=parsed.price_min,
+                            price_avg=parsed.price_avg,
+                            price_max=parsed.price_max,
+                            source_url=parsed.source_url,
+                            updated_at=datetime.now(timezone.utc)
                         )
-                    elif source:
-                        if price_entry:
-                            # Обновляем
-                            price_entry.price_min = parsed.price_min
-                            price_entry.price_avg = parsed.price_avg
-                            price_entry.price_max = parsed.price_max
-                            price_entry.source_url = parsed.source_url
-                            price_entry.updated_at = datetime.now(timezone.utc)
-                        else:
-                            # Создаем новую
-                            price_entry = MaterialPrice(
-                                material_id=material.id,
-                                source_id=source.id,
-                                price_min=parsed.price_min,
-                                price_avg=parsed.price_avg,
-                                price_max=parsed.price_max,
-                                source_url=parsed.source_url,
-                                updated_at=datetime.now(timezone.utc)
-                            )
-                            session.add(price_entry)
+                        session.add(price_entry)
 
-                        session.commit()
-                        session.refresh(price_entry)
-                        logger.info(f"Цена для '{material_name}': источник=parser ({parser.source_name})")
-                        return price_entry
+                    session.commit()
+                    session.refresh(price_entry)
+                    logger.info(f"Цена для '{material_name}': источник=parser ({parser.source_name})")
+                    return price_entry
 
-                except Exception as e:
-                    # Парсер упал - логируем и идем в fallback
-                    logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{material_name}': {e}")
+            except Exception as e:
+                # Парсер упал - логируем и идем в fallback
+                logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{material_name}': {e}")
 
-        # Fallback: берем seed-цену из БД
-        seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
-        if not seed_source:
-            logger.error("Источник 'seed' не найден в БД")
-            return None
+    # Fallback: берем seed-цену из БД
+    seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
+    if not seed_source:
+        logger.error("Источник 'seed' не найден в БД")
+        return None
 
-        seed_price = None
-        if region is not None:
-            # Региональная seed-цена имеет приоритет над базовой.
-            seed_price = session.query(MaterialPrice).filter(
-                MaterialPrice.material_id == material.id,
-                MaterialPrice.source_id == seed_source.id,
-                MaterialPrice.region == region,
-            ).first()
+    seed_price = None
+    if region is not None:
+        # Региональная seed-цена имеет приоритет над базовой.
+        seed_price = session.query(MaterialPrice).filter(
+            MaterialPrice.material_id == material.id,
+            MaterialPrice.source_id == seed_source.id,
+            MaterialPrice.region == region,
+        ).first()
 
-        if seed_price is None:
-            # Базовая seed-цена (region IS NULL) — fallback по умолчанию.
-            seed_price = session.query(MaterialPrice).filter(
-                MaterialPrice.material_id == material.id,
-                MaterialPrice.source_id == seed_source.id,
-                MaterialPrice.region.is_(None),
-            ).first()
+    if seed_price is None:
+        # Базовая seed-цена (region IS NULL) — fallback по умолчанию.
+        seed_price = session.query(MaterialPrice).filter(
+            MaterialPrice.material_id == material.id,
+            MaterialPrice.source_id == seed_source.id,
+            MaterialPrice.region.is_(None),
+        ).first()
 
-        if seed_price:
-            logger.info(f"Цена для '{material_name}': источник=seed (fallback), region={region}")
-        else:
-            logger.warning(f"Seed-цена для '{material_name}' не найдена")
+    if seed_price:
+        logger.info(f"Цена для '{material_name}': источник=seed (fallback), region={region}")
+    else:
+        logger.warning(f"Seed-цена для '{material_name}' не найдена")
 
-        return seed_price
-
-    finally:
-        session.close()
+    return seed_price
 
 
 def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
@@ -199,7 +200,7 @@ def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
     return combined
 
 
-def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice | None:
+def get_labor_price(service_name: str, db: Session, region: str | None = None) -> LaborPrice | None:
     '''
     Возвращает цену работы. Источник правды — парсер (#144): сначала ищем валидные
     спарсенные цены (любой не-seed источник, записанный CLI update_prices), seed —
@@ -222,133 +223,132 @@ def get_labor_price(service_name: str, region: str | None = None) -> LaborPrice 
     цена выигрывает тай-брейк представителя), что важно при региональных парсерах
     (#166). Нулевые/пустые и несвежие parser-цены игнорируются. Исключение наверх
     не пробрасываем.
+
+    db — сессия приходит от вызывающего, эта функция сама её не открывает/закрывает.
     '''
     ttl_hours = settings.PRICE_TTL_HOURS
-    session = SessionLocal()
-    try:
-        service = session.query(LaborService).filter(LaborService.name == service_name).first()
-        if not service:
-            logger.warning(f"Услуга '{service_name}' не найдена в БД")
-            return None
+    session = db
+    service = session.query(LaborService).filter(LaborService.name == service_name).first()
+    if not service:
+        logger.warning(f"Услуга '{service_name}' не найдена в БД")
+        return None
 
-        seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
-        if not seed_source:
-            logger.error("Источник 'seed' не найден в БД")
-            return None
+    seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
+    if not seed_source:
+        logger.error("Источник 'seed' не найден в БД")
+        return None
 
-        def _usable(p: LaborPrice | None) -> bool:
-            # Цену из парсера берём, только если она валидна (все > 0) И свежа
-            # (моложе ttl_hours): устаревшую parser-цену игнорируем, как get_price.
-            return (
-                p is not None
-                and all(v is not None and v > 0 for v in (p.price_min, p.price_avg, p.price_max))
-                and _is_fresh(p.updated_at, ttl_hours)
-            )
+    def _usable(p: LaborPrice | None) -> bool:
+        # Цену из парсера берём, только если она валидна (все > 0) И свежа
+        # (моложе ttl_hours): устаревшую parser-цену игнорируем, как get_price.
+        return (
+            p is not None
+            and all(v is not None and v > 0 for v in (p.price_min, p.price_avg, p.price_max))
+            and _is_fresh(p.updated_at, ttl_hours)
+        )
 
-        # 1-2. Цены из парсеров (любой не-seed источник): сначала региональные,
-        # при их отсутствии — базовые (region IS NULL). Несколько сайтов одного
-        # уровня объединяем в одну вилку. Сортировка по updated_at DESC делает
-        # выбор представителя детерминированным (самая свежая цена выигрывает).
-        parser_q = session.query(LaborPrice).filter(
+    # 1-2. Цены из парсеров (любой не-seed источник): сначала региональные,
+    # при их отсутствии — базовые (region IS NULL). Несколько сайтов одного
+    # уровня объединяем в одну вилку. Сортировка по updated_at DESC делает
+    # выбор представителя детерминированным (самая свежая цена выигрывает).
+    parser_q = session.query(LaborPrice).filter(
+        LaborPrice.labor_service_id == service.id,
+        LaborPrice.source_id != seed_source.id,
+    ).order_by(LaborPrice.updated_at.desc())
+    pool, scope_region = [], None
+    if region is not None:
+        region_rows = [p for p in parser_q.filter(LaborPrice.region == region).all() if _usable(p)]
+        if region_rows:
+            pool, scope_region = region_rows, region
+    if not pool:
+        base_rows = [p for p in parser_q.filter(LaborPrice.region.is_(None)).all() if _usable(p)]
+        if base_rows:
+            pool, scope_region = base_rows, None
+
+    if pool:
+        result = _combine_labor_prices(session, service.id, pool, scope_region)
+        logger.info(
+            f"Цена работы '{service_name}': источник=parser "
+            f"({', '.join(result.contributing_sources)}), region={scope_region}"
+        )
+        return result
+
+    # 3-4. Fallback на seed: региональная, затем базовая.
+    price = None
+    if region is not None:
+        price = session.query(LaborPrice).filter(
             LaborPrice.labor_service_id == service.id,
-            LaborPrice.source_id != seed_source.id,
-        ).order_by(LaborPrice.updated_at.desc())
-        pool, scope_region = [], None
-        if region is not None:
-            region_rows = [p for p in parser_q.filter(LaborPrice.region == region).all() if _usable(p)]
-            if region_rows:
-                pool, scope_region = region_rows, region
-        if not pool:
-            base_rows = [p for p in parser_q.filter(LaborPrice.region.is_(None)).all() if _usable(p)]
-            if base_rows:
-                pool, scope_region = base_rows, None
+            LaborPrice.source_id == seed_source.id,
+            LaborPrice.region == region,
+        ).first()
 
-        if pool:
-            result = _combine_labor_prices(session, service.id, pool, scope_region)
-            logger.info(
-                f"Цена работы '{service_name}': источник=parser "
-                f"({', '.join(result.contributing_sources)}), region={scope_region}"
-            )
-            return result
+    if price is None:
+        price = session.query(LaborPrice).filter(
+            LaborPrice.labor_service_id == service.id,
+            LaborPrice.source_id == seed_source.id,
+            LaborPrice.region.is_(None),
+        ).first()
 
-        # 3-4. Fallback на seed: региональная, затем базовая.
-        price = None
-        if region is not None:
-            price = session.query(LaborPrice).filter(
-                LaborPrice.labor_service_id == service.id,
-                LaborPrice.source_id == seed_source.id,
-                LaborPrice.region == region,
-            ).first()
+    if price:
+        logger.info(f"Цена работы '{service_name}': источник=seed (fallback), region={region}")
+    else:
+        logger.warning(f"Seed-цена для работы '{service_name}' не найдена")
 
-        if price is None:
-            price = session.query(LaborPrice).filter(
-                LaborPrice.labor_service_id == service.id,
-                LaborPrice.source_id == seed_source.id,
-                LaborPrice.region.is_(None),
-            ).first()
-
-        if price:
-            logger.info(f"Цена работы '{service_name}': источник=seed (fallback), region={region}")
-        else:
-            logger.warning(f"Seed-цена для работы '{service_name}' не найдена")
-
-        return price
-    finally:
-        session.close()
+    return price
 
 
-def update_labor_price(service_name: str, parser, region: str | None = None) -> LaborPrice | None:
+def update_labor_price(service_name: str, parser, db: Session, region: str | None = None) -> LaborPrice | None:
     '''
     Берет цену услуги через парсер и пишет в labor_prices с источником парсера.
     region — регион цены (город), пишется в LaborPrice.region; None для базовой
     (не региональной) цены. Запись адресуется по (услуга, источник, регион):
     у регионального парсера свой источник-сайт, поэтому регионы не конфликтуют.
     При любой ошибке парсера — ничего не меняет, возвращает None (старые цены остаются)
+
+    db — сессия приходит от вызывающего (CLI update_prices сам открывает и закрывает
+    SessionLocal() вокруг серии вызовов).
     '''
-    session = SessionLocal()
+    session = db
+    service = session.query(LaborService).filter(LaborService.name == service_name).first()
+    if not service:
+        logger.warning(f"Услуга '{service_name}' не найдена в БД")
+        return None
+
     try:
-        service = session.query(LaborService).filter(LaborService.name == service_name).first()
-        if not service:
-            logger.warning(f"Услуга '{service_name}' не найдена в БД")
-            return None
+        parsed = parser.fetch_price(service_name)
+    except Exception as e:
+        logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{service_name}': {e}")
+        return None
 
-        try:
-            parsed = parser.fetch_price(service_name)
-        except Exception as e:
-            logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{service_name}': {e}")
-            return None
+    # Нулевую/пустую цену не сохраняем — старые цены остаются, расчёт уйдёт на seed.
+    if not _is_valid_parsed(parsed):
+        logger.warning(
+            f"Парсер {parser.source_name} вернул пустую/нулевую цену для "
+            f"'{service_name}' — не сохраняем (parser=0/empty)"
+        )
+        return None
 
-        # Нулевую/пустую цену не сохраняем — старые цены остаются, расчёт уйдёт на seed.
-        if not _is_valid_parsed(parsed):
-            logger.warning(
-                f"Парсер {parser.source_name} вернул пустую/нулевую цену для "
-                f"'{service_name}' — не сохраняем (parser=0/empty)"
-            )
-            return None
+    source = session.query(PriceSource).filter(PriceSource.name == parser.source_name).first()
+    if not source:
+        logger.error(f"Источник '{parser.source_name}' не найден в БД")
+        return None
 
-        source = session.query(PriceSource).filter(PriceSource.name == parser.source_name).first()
-        if not source:
-            logger.error(f"Источник '{parser.source_name}' не найден в БД")
-            return None
+    price = session.query(LaborPrice).filter(
+        LaborPrice.labor_service_id == service.id,
+        LaborPrice.source_id == source.id,
+        LaborPrice.region == region,
+    ).first()
+    if not price:
+        price = LaborPrice(labor_service_id=service.id, source_id=source.id, region=region)
+        session.add(price)
 
-        price = session.query(LaborPrice).filter(
-            LaborPrice.labor_service_id == service.id,
-            LaborPrice.source_id == source.id,
-            LaborPrice.region == region,
-        ).first()
-        if not price:
-            price = LaborPrice(labor_service_id=service.id, source_id=source.id, region=region)
-            session.add(price)
+    price.price_min = parsed.price_min
+    price.price_avg = parsed.price_avg
+    price.price_max = parsed.price_max
+    price.source_url = parsed.source_url
+    price.updated_at = datetime.now(timezone.utc)
 
-        price.price_min = parsed.price_min
-        price.price_avg = parsed.price_avg
-        price.price_max = parsed.price_max
-        price.source_url = parsed.source_url
-        price.updated_at = datetime.now(timezone.utc)
-
-        session.commit()
-        session.refresh(price)
-        logger.info(f"Цена услуги '{service_name}' обновлена от {parser.source_name}")
-        return price
-    finally:
-        session.close()
+    session.commit()
+    session.refresh(price)
+    logger.info(f"Цена услуги '{service_name}' обновлена от {parser.source_name}")
+    return price

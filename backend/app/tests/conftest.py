@@ -154,9 +154,9 @@ def seed_test_data(session):
 
     # Материалы (с категорией). slug — как в seed_data/materials.json (#278).
     materials_data = [
-        {"name": "Краска для стен", "slug": "paint_walls", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9},
-        {"name": "Краска потолочная", "slug": "paint_ceiling", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9},
-        {"name": "Грунтовка", "slug": "primer", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10},
+        {"name": "Краска для стен", "slug": "paint_walls", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2},
+        {"name": "Краска потолочная", "slug": "paint_ceiling", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9, "layers": 2},
+        {"name": "Грунтовка", "slug": "primer", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10, "layers": 1},
         {"name": "Шпаклевка стартовая", "slug": "putty_start", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30},
         {"name": "Шпаклевка финишная", "slug": "putty_finish", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
         {"name": "Ламинат", "slug": "laminate", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
@@ -164,10 +164,10 @@ def seed_test_data(session):
         {"name": "Плитка", "slug": "tile", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 1.2},
         {"name": "Плиточный клей", "slug": "tile_adhesive", "category": "tile", "unit": "кг", "consumption_per_m2": 4.5, "waste_factor": 1.1, "package_size": 25},
         {"name": "Затирка", "slug": "grout", "category": "tile", "unit": "кг", "consumption_per_m2": 0.4, "waste_factor": 1.1, "package_size": 2},
-        {"name": "Обои", "slug": "wallpaper", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1},
+        {"name": "Обои", "slug": "wallpaper", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1, "pattern_factor": 1.3},
         {"name": "Линолеум", "slug": "linoleum", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
         {"name": "Паркетная доска", "slug": "parquet", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
-        {"name": "Краска влагостойкая", "slug": "paint_moisture", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9},
+        {"name": "Краска влагостойкая", "slug": "paint_moisture", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2},
         # Инженерка (works.electric / works.plumbing) — количество из запроса, не по норме.
         {"name": "Кабель электрический", "slug": "cable", "category": "electric", "unit": "м", "waste_factor": 1.1, "package_size": 1.0},
         {"name": "Розетка", "slug": "socket", "category": "electric", "unit": "шт", "package_size": 1},

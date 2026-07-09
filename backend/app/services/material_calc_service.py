@@ -2,11 +2,13 @@
 #
 # Расчёт количества материалов (B1-1).
 # Соответствует реальной схеме БД (app/db/models.py) и контракту docs/estimation-rules.md:
-#   - поля материала: name, slug, unit, package_size, consumption_per_m2, waste_factor
+#   - поля материала: name, slug, unit, package_size, consumption_per_m2, waste_factor,
+#     layers, pattern_factor
 #   - материал ищется по slug (машинный ключ, см. seed_data/materials.json и #278;
 #     name остаётся человекочитаемым label для API-ответов, по нему не матчим)
 #   - формула зависит от unit (см. estimation-rules.md)
-#   - число слоёв (layers) в БД не хранится — задаётся здесь
+#   - число слоёв (layers) и надбавка на раппорт обоев (pattern_factor) — колонки
+#     Material, значения в seed_data/materials.json (#278); дефолт при NULL — 1
 #
 # Округление до целых упаковок здесь НЕ делается: pack_quantity дробный,
 # ceil выполняется на агрегации по квартире (B1-5) после суммирования
@@ -15,6 +17,7 @@
 from decimal import Decimal, ROUND_CEILING
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
+from app.core.norms import WALL_CONDITION_FACTOR
 from app.db.models import Material
 from app.services._num import D
 
@@ -40,14 +43,6 @@ M_SOCKET        = "socket"
 M_LIGHT         = "light"
 M_CABLE         = "cable"
 M_PIPE          = "pipe"
-
-# Сколько слоёв класть у материалов с unit='л' (для остальных не используется)
-LAYERS = {
-    M_PAINT_WALLS:   2,
-    M_PAINT_CEILING: 2,
-    M_PAINT_MOIST:   2,
-    M_PRIMER:        1,
-}
 
 
 def packs_to_buy(pack_quantity: Decimal) -> int:
@@ -119,18 +114,6 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
     return sel
 
 
-# Надбавка на подгонку рисунка (раппорт) у обоев под рисунок — см. estimation-rules.md.
-WALLPAPER_PATTERN_FACTOR = Decimal("1.3")
-
-# Кривизна основания под выравнивание → множитель расхода СТАРТОВОЙ шпаклёвки
-# (норма 5.0 кг/м², вилка 3–8, см. estimation-rules.md). Финишную не трогает.
-WALL_CONDITION_FACTOR = {
-    "even":   Decimal("0.6"),   # ровные стены ≈3 кг/м²
-    "normal": Decimal("1.0"),   # дефолт, текущая норма 5.0 кг/м²
-    "uneven": Decimal("1.6"),   # кривые ≈8 кг/м²
-}
-
-
 def quantity_of(
     material: Material,
     area: Decimal,
@@ -149,7 +132,7 @@ def quantity_of(
     w = D(material.waste_factor) or Decimal(1)
 
     if unit == "л":
-        layers = D(LAYERS.get(material.slug, 1))
+        layers = D(material.layers) if material.layers else Decimal(1)
         # Пористое основание → грунт в 2 слоя (см. estimation-rules.md).
         if material.slug == M_PRIMER and repair_options.get("primer_two_coats"):
             layers = Decimal(2)
@@ -170,8 +153,13 @@ def quantity_of(
             length = Decimal(0)
         return length * w, length
     if unit == "рулон":  # обои: площадь_стен × (рулонов/м²) × запас
-        # Обои под рисунок требуют подгонки по раппорту → дополнительный расход ×1.3.
-        pattern = WALLPAPER_PATTERN_FACTOR if repair_options.get("wallpaper_pattern") else Decimal(1)
+        # Обои под рисунок требуют подгонки по раппорту → дополнительный расход
+        # (material.pattern_factor, обычно 1.3 — см. seed_data/materials.json).
+        pattern = (
+            D(material.pattern_factor)
+            if repair_options.get("wallpaper_pattern") and material.pattern_factor
+            else Decimal(1)
+        )
         base = area * c
         return base * w * pattern, base
     # неизвестная единица — безопасный дефолт

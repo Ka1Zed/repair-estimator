@@ -2,21 +2,14 @@
 from typing import List, Union, Dict, Any, Optional
 from decimal import Decimal, getcontext
 
+from app.core.norms import OTKOS_DEPTH_DEFAULT
+
 getcontext().prec = 28
 
 OPENING_TYPE_RU = {
     'door': 'двери',
     'window': 'окна',
     'unknown': 'проёма'
-}
-
-# Глубина откоса (толщина стены в проёме) по умолчанию, м — если проём не задал
-# её явно (поле depth). Откосы отделываются отдельно и дороже стен (см. #191,
-# docs/estimation-rules.md), поэтому в wall_area НЕ входят.
-OTKOS_DEPTH_DEFAULT = {
-    'door': Decimal('0.15'),
-    'window': Decimal('0.25'),
-    'unknown': Decimal('0.20'),
 }
 
 def to_decimal(value: Union[int, float, str, Decimal]) -> Decimal:

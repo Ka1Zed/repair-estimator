@@ -19,6 +19,7 @@ from typing import Any, Dict, List
 from sqlalchemy.orm import Session
 
 from app.db.models import LaborService
+from app.services._num import D as _D
 from app.services.price_aggregator_service import get_labor_price
 
 NOTE = (
@@ -33,14 +34,6 @@ _S_SCREED = "Стяжка пола"
 _S_LEVEL_WALLS = "Выравнивание стен"
 _S_CHASING = "Штробление"
 _S_WATERPROOF = "Гидроизоляция"
-
-
-def _D(value) -> Decimal:
-    if isinstance(value, Decimal):
-        return value
-    if value is None:
-        return Decimal(0)
-    return Decimal(str(value))
 
 
 def _source_name(source_id, sources_by_id: Dict[int, str] | None) -> str:

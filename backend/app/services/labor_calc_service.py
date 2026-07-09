@@ -16,14 +16,7 @@ from decimal import Decimal
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from app.db.models import LaborService, LaborPrice, PriceSource
-
-
-def D(value) -> Decimal:
-    if isinstance(value, Decimal):
-        return value
-    if value is None:
-        return Decimal(0)
-    return Decimal(str(value))
+from app.services._num import D
 
 
 # ---- имена операций (как в seed_data/labor_services.json) ----

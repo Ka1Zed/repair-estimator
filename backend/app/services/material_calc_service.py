@@ -15,6 +15,7 @@ from decimal import Decimal, ROUND_CEILING
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from app.db.models import Material
+from app.services._num import D
 
 
 # ---- имена материалов (как в seed_data/materials.json) ----
@@ -46,15 +47,6 @@ LAYERS = {
     M_PAINT_MOIST:   2,
     M_PRIMER:        1,
 }
-
-
-def D(value) -> Decimal:
-    """Безопасное приведение к Decimal (поля БД — float, геометрия — float)."""
-    if isinstance(value, Decimal):
-        return value
-    if value is None:
-        return Decimal(0)
-    return Decimal(str(value))
 
 
 def packs_to_buy(pack_quantity: Decimal) -> int:

@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from app.core.config import settings
 from app.parsers import headless_session
 from app.parsers._stats import filter_outliers
-from app.parsers.base import BaseParser, ParsedPrice
+from app.parsers.base import BaseParser, ParsedPrice, DEFAULT_HEADERS, DEFAULT_REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +21,10 @@ CATEGORY_MAP = {
     "Краска потолочная": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot?field142[]=для потолков",
 }
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-    ),
-    "Accept-Language": "ru-RU,ru;q=0.9",
-    "Accept": "text/html,application/xhtml+xml",
-}
+# Расширяет DEFAULT_HEADERS собственным Accept — не чистый дубль (#278).
+HEADERS = {**DEFAULT_HEADERS, "Accept": "text/html,application/xhtml+xml"}
 
-REQUEST_TIMEOUT = 10      # таймаут запроса, сек
+REQUEST_TIMEOUT = DEFAULT_REQUEST_TIMEOUT      # таймаут запроса, сек
 REQUEST_DELAY = 1.0       # пауза между страницами, чтобы не долбить сайт
 MAX_PAGES = 20            # защита от бесконечного цикла
 

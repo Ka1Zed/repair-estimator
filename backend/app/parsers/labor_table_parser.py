@@ -7,18 +7,12 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.parsers._stats import filter_outliers
-from app.parsers.base import BaseParser, ParsedPrice
+from app.parsers.base import BaseParser, ParsedPrice, DEFAULT_HEADERS, DEFAULT_REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-    ),
-    "Accept-Language": "ru-RU,ru;q=0.9",
-}
-REQUEST_TIMEOUT = 10
+HEADERS = DEFAULT_HEADERS
+REQUEST_TIMEOUT = DEFAULT_REQUEST_TIMEOUT
 
 # Цена работы не бывает меньше этого порога. Нужен, чтобы reversed-скан строки не
 # принял ячейку-единицу за цену: 'м2'/'м3' содержат цифру и парсятся в 2/3.

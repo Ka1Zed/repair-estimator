@@ -1,38 +1,25 @@
 import logging
-import re
 import statistics
 from decimal import Decimal
 
 import requests
 from bs4 import BeautifulSoup
 
-from app.parsers.base import BaseParser, ParsedPrice
+from app.parsers.base import BaseParser, ParsedPrice, DEFAULT_HEADERS, DEFAULT_REQUEST_TIMEOUT
 from app.parsers._stats import filter_outliers
-from app.parsers.labor_table_parser import LABOR_SERVICE_MAP, _matches
+from app.parsers.labor_table_parser import LABOR_SERVICE_MAP, _matches, _parse_price
 
 logger = logging.getLogger(__name__)
 
 PRICE_URL = "https://rembrigada116.ru/price"
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-    ),
-    "Accept-Language": "ru-RU,ru;q=0.9",
-}
-REQUEST_TIMEOUT = 10
+HEADERS = DEFAULT_HEADERS
+REQUEST_TIMEOUT = DEFAULT_REQUEST_TIMEOUT
 
 # Правила отбора строк прайса общие для всех парсеров работ — единый источник
 # LABOR_SERVICE_MAP в labor_table_parser (чтобы карты не расходились).
-
-
-def _parse_price(text: str) -> Decimal | None:
-    # 'от 1590' / '1 590 руб' -> Decimal(1590). Возвращает None, если числа нет
-    digits = re.sub(r"[^\d]", "", text)
-    if not digits:
-        return None
-    return Decimal(digits)
+# _parse_price тоже общий с labor_table_parser (была своя реализация, но она
+# трактовала "700/1100" как 7001100 вместо 700 — баг, не просто дубль, #278).
 
 
 class RembrigadaParser(BaseParser):

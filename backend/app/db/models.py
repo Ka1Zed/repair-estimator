@@ -22,6 +22,9 @@ class Material(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(unique=True)
+    # Машинный ключ для поиска в расчётных сервисах (#278) — name остаётся
+    # человекочитаемым label для API-ответов, по нему ничего не матчится в коде.
+    slug: Mapped[str] = mapped_column(unique=True)
     category: Mapped[str]
     unit: Mapped[str]
     package_size: Mapped[float | None]   # nullable - просто через | None
@@ -34,6 +37,8 @@ class LaborService(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(unique=True)
+    # Машинный ключ для поиска в расчётных сервисах (#278) — см. Material.slug.
+    slug: Mapped[str] = mapped_column(unique=True)
     specialist_type: Mapped[str]
     unit: Mapped[str]
 

@@ -4,9 +4,10 @@
 # Соответствует реальной схеме БД и контракту docs/api.md.
 #
 # ВАЖНО про схему: услуги в seed заданы ОПЕРАЦИЯМИ, не профессиями:
-#   name = "Покраска стен"/"Укладка ламината"/...  (по нему ищем услугу)
+#   name = "Покраска стен"/"Укладка ламината"/... (человекочитаемый label для API)
+#   slug = "paint_walls"/"lay_laminate"/...        (машинный ключ, по нему ищем услугу)
 #   specialist_type = "Маляр"/"Укладчик"/...       (это поле, НЕ "specialist")
-# Поэтому сопоставляем repair_options -> имя ОПЕРАЦИИ, а не специалиста.
+# Поэтому сопоставляем repair_options -> slug ОПЕРАЦИИ, а не специалиста.
 #
 # Контракт строки labor[]:
 #   service, specialist, volume, unit, price_avg (за единицу), total_avg (= volume*price)
@@ -19,31 +20,31 @@ from app.db.models import LaborService, LaborPrice, PriceSource
 from app.services._num import D
 
 
-# ---- имена операций (как в seed_data/labor_services.json) ----
-S_PAINT_WALLS   = "Покраска стен"
-S_PAINT_CEILING = "Покраска потолка"
-S_PUTTY_WALLS   = "Шпаклевка стен"
-S_WALLPAPER     = "Поклейка обоев"
-S_LAY_LAMINATE  = "Укладка ламината"
-S_LAY_LINOLEUM  = "Укладка линолеума"
-S_LAY_PARQUET   = "Укладка паркета"
-S_LAY_TILE      = "Укладка плитки"
-S_STRETCH_CEIL  = "Монтаж натяжного потолка"  # полотно, цена за м², материал в цене работы
-S_CEIL_EMBED    = "Закладная под светильник"  # закладные потолочника под точки света, шт
-S_CURTAIN_NICHE = "Ниша под карниз"           # ниша под гардину/штору в натяжном, пог. м
-S_OTKOS         = "Отделка откосов"           # откосы проёмов, м², дороже стен (×1.5–2)
+# ---- slug операций (как в seed_data/labor_services.json, поле slug) ----
+S_PAINT_WALLS   = "paint_walls"
+S_PAINT_CEILING = "paint_ceiling"
+S_PUTTY_WALLS   = "putty_walls"
+S_WALLPAPER     = "wallpaper_gluing"
+S_LAY_LAMINATE  = "lay_laminate"
+S_LAY_LINOLEUM  = "lay_linoleum"
+S_LAY_PARQUET   = "lay_parquet"
+S_LAY_TILE      = "lay_tile"
+S_STRETCH_CEIL  = "stretch_ceiling"  # полотно, цена за м², материал в цене работы
+S_CEIL_EMBED    = "ceiling_embed"    # закладные потолочника под точки света, шт
+S_CURTAIN_NICHE = "curtain_niche"    # ниша под гардину/штору в натяжном, пог. м
+S_OTKOS         = "otkos"            # откосы проёмов, м², дороже стен (×1.5–2)
 # Инженерка (works.electric / works.plumbing) — гранулярные операции по явным числам.
-S_CABLE_LAY     = "Прокладка кабеля"
-S_SOCKET_MOUNT  = "Монтаж розетки"
-S_LIGHT_MOUNT   = "Монтаж светильника"
-S_PIPE_MOUNT    = "Монтаж труб"
-S_PLUMBING      = "Сантехнические работы"
+S_CABLE_LAY     = "cable_lay"
+S_SOCKET_MOUNT  = "socket_mount"
+S_LIGHT_MOUNT   = "light_mount"
+S_PIPE_MOUNT    = "pipe_mount"
+S_PLUMBING      = "plumbing_works"
 # Черновые работы (#190) — добавляются только при scope=rough_and_finish.
-S_DEMOLITION    = "Демонтаж"
-S_LEVEL_WALLS   = "Выравнивание стен"
-S_SCREED_FLOOR  = "Стяжка пола"
-S_WATERPROOF    = "Гидроизоляция"
-S_PRIMER        = "Грунтование"
+S_DEMOLITION    = "demolition"
+S_LEVEL_WALLS   = "level_walls"
+S_SCREED_FLOOR  = "screed_floor"
+S_WATERPROOF    = "waterproof"
+S_PRIMER        = "priming"
 
 
 # ---- стадии ремонта (#190): rough / pre_finish / finish ----
@@ -87,13 +88,13 @@ STAGE_BY_SERVICE = {
 WET_ROOM_TYPES = {"bathroom"}
 
 
-def stage_of(service_name: str) -> str:
-    """Стадия ремонта по имени операции; дефолт — finish (чистовая)."""
-    return STAGE_BY_SERVICE.get(service_name, "finish")
+def stage_of(service_slug: str) -> str:
+    """Стадия ремонта по slug операции; дефолт — finish (чистовая)."""
+    return STAGE_BY_SERVICE.get(service_slug, "finish")
 
 
 def _labor_selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tuple]:
-    """repair_options -> список (имя_операции, объём)."""
+    """repair_options -> список (slug_операции, объём)."""
     walls   = repair_options.get("walls")
     ceiling = repair_options.get("ceiling")
     floor   = repair_options.get("floor")
@@ -165,7 +166,7 @@ def _labor_rows(
     selections: List[tuple], db: Session, seed_id,
     sources_by_id: Dict[int, str] | None = None,
 ) -> List[Dict[str, Any]]:
-    """Собрать строки сметы работ по списку (имя_операции, объём).
+    """Собрать строки сметы работ по списку (slug_операции, объём).
 
     sources_by_id — предзагруженный словарь id->name справочника PriceSource
     (передаёт вызывающий, обычно estimates.py); без него на каждую строку шёл
@@ -173,12 +174,12 @@ def _labor_rows(
     """
     result: List[Dict[str, Any]] = []
 
-    for service_name, volume in selections:
+    for service_slug, volume in selections:
         volume = D(volume)
         if volume <= 0:
             continue
 
-        service = db.query(LaborService).filter(LaborService.name == service_name).first()
+        service = db.query(LaborService).filter(LaborService.slug == service_slug).first()
         if service is None:
             continue  # услуга не засидована — пропускаем
 
@@ -202,9 +203,9 @@ def _labor_rows(
         p_min, p_avg, p_max = D(price.price_min), D(price.price_avg), D(price.price_max)
 
         result.append({
-            "service": service.name,                 # операция
+            "service": service.name,                 # операция (display, не slug)
             "specialist": service.specialist_type,   # ← поле specialist_type, не specialist
-            "stage": stage_of(service.name),         # стадия ремонта (#190)
+            "stage": stage_of(service.slug),         # стадия ремонта (#190)
             "volume": volume,
             "unit": service.unit,
             "price_min": p_min,                       # цена за единицу

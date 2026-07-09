@@ -94,6 +94,10 @@ def test_no_matching_rows_raises(monkeypatch):
         ("350", Decimal(350)),
         ("по запросу", None),
         ("", None),
+        # rembrigada_parser раньше держал свою реализацию _parse_price, которая
+        # склеивала "700/1100" в 7001100 (re.sub(r"[^\d]","",text)) вместо 700.
+        # Теперь _parse_price общий с labor_table_parser (#278) — берёт первое число.
+        ("700/1100", Decimal(700)),
     ],
 )
 def test_parse_price(text, expected):

@@ -30,6 +30,12 @@ class Material(Base):
     package_size: Mapped[float | None]   # nullable - просто через | None
     consumption_per_m2: Mapped[float | None]   # расход на м²
     waste_factor: Mapped[float | None]          # коэффициент запаса (1.1 / 1.08 ...)
+    # Число слоёв для материалов с unit='л' (краска/грунт); NULL = 1 слой по
+    # умолчанию (см. quantity_of в material_calc_service.py, #278).
+    layers: Mapped[int | None]
+    # Надбавка на подгонку рисунка (раппорт) — применяется только при
+    # repair_options.wallpaper_pattern; NULL = без надбавки (см. #278).
+    pattern_factor: Mapped[float | None]
 
 
 class LaborService(Base):

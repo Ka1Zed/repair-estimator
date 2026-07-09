@@ -5,7 +5,6 @@ import { getSelfIntersectingEdges } from "../utils/polygonValidation";
 type ViewBox = { x: number; y: number; w: number; h: number };
 
 const GRID_STEP = 0.5; // metres
-const SVG_HEIGHT = 320; // px — fixed canvas height
 
 export default function RoomPolygonEditor() {
   const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
@@ -274,13 +273,14 @@ export default function RoomPolygonEditor() {
           borderRadius: "4px",
           overflow: "hidden",
           cursor: isPanning || draggingIdx !== null ? "grabbing" : "default",
+          height: "clamp(280px, 50vh, 600px)",
         }}
       >
         <svg
           ref={svgRef}
           viewBox={viewBoxStr}
           width="100%"
-          height={SVG_HEIGHT}
+          height="100%"
           preserveAspectRatio="xMidYMid meet"
           style={{ display: "block", touchAction: "none" }}
           onPointerMove={handlePointerMove}

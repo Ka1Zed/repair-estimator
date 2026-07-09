@@ -170,6 +170,31 @@ class TestMaterialCalc:
         assert finish(even) == finish(no_field)
         assert finish(uneven) == finish(no_field)
 
+    def test_unknown_material_slug_skipped_not_crashed(self, db_session):
+        """Опечатка/расхождение slug в seed → материал тихо пропускается (как раньше
+        было с name), расчёт остальных строк не падает (#278)."""
+        from app.db.models import Material
+
+        primer = db_session.query(Material).filter(Material.slug == "primer").first()
+        primer.slug = "primer_TYPO"
+        db_session.commit()
+        try:
+            geometry = {
+                'floor_area': Decimal('12.0'), 'ceiling_area': Decimal('12.0'),
+                'wall_area': Decimal('34.1'), 'perimeter': Decimal('14.0'),
+                'door_width_sum': Decimal('0.8'),
+            }
+            repair_options = {'floor': None, 'walls': 'paint', 'ceiling': None}
+
+            materials = calculate_materials(geometry, repair_options, db_session)
+
+            names = {m['name'] for m in materials}
+            assert 'Грунтовка' not in names          # slug разошёлся — строка пропущена
+            assert 'Шпаклевка стартовая' in names     # остальные материалы посчитаны как обычно
+            assert 'Краска для стен' in names
+        finally:
+            primer.slug = "primer"
+            db_session.commit()
 
 
 class TestLaborCalc:

@@ -28,12 +28,13 @@ NOTE = (
     "Объёмы и цены приблизительные."
 )
 
-# Имена операций (как в seed_data/labor_services.json) — цену берём по ним.
-_S_DEMOLITION = "Демонтаж"
-_S_SCREED = "Стяжка пола"
-_S_LEVEL_WALLS = "Выравнивание стен"
-_S_CHASING = "Штробление"
-_S_WATERPROOF = "Гидроизоляция"
+# Slug операций (как в seed_data/labor_services.json, поле slug) — цену берём
+# по ним, name — только человекочитаемый label для API-ответа (#278).
+_S_DEMOLITION = "demolition"
+_S_SCREED = "screed_floor"
+_S_LEVEL_WALLS = "level_walls"
+_S_CHASING = "chasing"
+_S_WATERPROOF = "waterproof"
 
 
 def _source_name(source_id, sources_by_id: Dict[int, str] | None) -> str:
@@ -42,35 +43,40 @@ def _source_name(source_id, sources_by_id: Dict[int, str] | None) -> str:
     return sources_by_id.get(source_id, "seed")
 
 
+def _service_row(db: Session, service_slug: str):
+    return db.query(LaborService).filter(LaborService.slug == service_slug).first()
+
+
 def _priced_item(
-    service: str, reason: str, volume: Decimal, city: str, db: Session,
+    service_slug: str, reason: str, volume: Decimal, city: str, db: Session,
     sources_by_id: Dict[int, str] | None = None,
 ):
-    """Одна строка скрытых работ; None, если объём нулевой или нет seed-цены."""
+    """Одна строка скрытых работ; None, если объём нулевой, услуга не засидована
+    или нет seed-цены."""
     volume = _D(volume)
     if volume <= 0:
         return None
-    price = get_labor_price(service, db=db, region=city)
+    svc_row = _service_row(db, service_slug)
+    if svc_row is None:
+        return None  # услуга не засидована — молча пропускаем строку
+    # get_labor_price матчит по name (граница с парсерами работ, см. #278) —
+    # берём человекочитаемое имя из уже найденной по slug строки.
+    price = get_labor_price(svc_row.name, db=db, region=city)
     if price is None:
-        return None  # услуга/цена не засидована — молча пропускаем строку
+        return None  # цена не засидована — молча пропускаем строку
     p_min, p_avg, p_max = _D(price.price_min), _D(price.price_avg), _D(price.price_max)
-    svc_row = _service_row(db, service)
     return {
-        "service": service,
-        "specialist": svc_row.specialist_type if svc_row else "",
+        "service": svc_row.name,
+        "specialist": svc_row.specialist_type,
         "reason": reason,
         "volume": float(volume),
-        "unit": svc_row.unit if svc_row else "",
+        "unit": svc_row.unit,
         "price_avg": float(p_avg),
         "total_min": float(volume * p_min),
         "total_avg": float(volume * p_avg),
         "total_max": float(volume * p_max),
         "source": _source_name(price.source_id, sources_by_id),
     }
-
-
-def _service_row(db: Session, service: str):
-    return db.query(LaborService).filter(LaborService.name == service).first()
 
 
 def calculate_hidden_works(

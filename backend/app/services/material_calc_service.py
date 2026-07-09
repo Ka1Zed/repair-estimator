@@ -2,8 +2,9 @@
 #
 # Расчёт количества материалов (B1-1).
 # Соответствует реальной схеме БД (app/db/models.py) и контракту docs/estimation-rules.md:
-#   - поля материала: name, unit, package_size, consumption_per_m2, waste_factor
-#   - материал ищется ПО ИМЕНИ (как в seed)
+#   - поля материала: name, slug, unit, package_size, consumption_per_m2, waste_factor
+#   - материал ищется по slug (машинный ключ, см. seed_data/materials.json и #278;
+#     name остаётся человекочитаемым label для API-ответов, по нему не матчим)
 #   - формула зависит от unit (см. estimation-rules.md)
 #   - число слоёв (layers) в БД не хранится — задаётся здесь
 #
@@ -18,27 +19,27 @@ from app.db.models import Material
 from app.services._num import D
 
 
-# ---- имена материалов (как в seed_data/materials.json) ----
-M_PAINT_WALLS   = "Краска для стен"
-M_PAINT_CEILING = "Краска потолочная"
-M_PAINT_MOIST   = "Краска влагостойкая"   # влагостойкая (мокрые зоны), стены и потолок
-M_PRIMER        = "Грунтовка"
-M_PUTTY_START   = "Шпаклевка стартовая"
-M_PUTTY         = "Шпаклевка финишная"
-M_LAMINATE      = "Ламинат"
-M_LINOLEUM      = "Линолеум"
-M_PARQUET       = "Паркетная доска"
-M_PLINTH        = "Плинтус"
-M_TILE          = "Плитка"
-M_ADHESIVE      = "Плиточный клей"
-M_GROUT         = "Затирка"
-M_WALLPAPER     = "Обои"
+# ---- slug материалов (как в seed_data/materials.json, поле slug) ----
+M_PAINT_WALLS   = "paint_walls"
+M_PAINT_CEILING = "paint_ceiling"
+M_PAINT_MOIST   = "paint_moisture"   # влагостойкая (мокрые зоны), стены и потолок
+M_PRIMER        = "primer"
+M_PUTTY_START   = "putty_start"
+M_PUTTY         = "putty_finish"
+M_LAMINATE      = "laminate"
+M_LINOLEUM      = "linoleum"
+M_PARQUET       = "parquet"
+M_PLINTH        = "plinth"
+M_TILE          = "tile"
+M_ADHESIVE      = "tile_adhesive"
+M_GROUT         = "grout"
+M_WALLPAPER     = "wallpaper"
 # Инженерка (works.electric / works.plumbing) — количество берётся из запроса,
 # НЕ через quantity_of (там unit «м» захардкожен под плинтус, заметка ревью #230).
-M_SOCKET        = "Розетка"
-M_LIGHT         = "Светильник"
-M_CABLE         = "Кабель электрический"
-M_PIPE          = "Труба водопроводная"
+M_SOCKET        = "socket"
+M_LIGHT         = "light"
+M_CABLE         = "cable"
+M_PIPE          = "pipe"
 
 # Сколько слоёв класть у материалов с unit='л' (для остальных не используется)
 LAYERS = {
@@ -57,7 +58,7 @@ def packs_to_buy(pack_quantity: Decimal) -> int:
 def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tuple]:
     """
     Разворачивает repair_options ({floor, walls, ceiling, ...}) в список
-    позиций (material_name, area) — какую площадь использовать для материала.
+    позиций (material_slug, area) — какую площадь использовать для материала.
     Плинтус и плитка/клей/затирка добавляются как зависимые автоматически.
 
     area для unit='м' (плинтус) и unit='рулон' (обои) считается внутри
@@ -148,9 +149,9 @@ def quantity_of(
     w = D(material.waste_factor) or Decimal(1)
 
     if unit == "л":
-        layers = D(LAYERS.get(material.name, 1))
+        layers = D(LAYERS.get(material.slug, 1))
         # Пористое основание → грунт в 2 слоя (см. estimation-rules.md).
-        if material.name == M_PRIMER and repair_options.get("primer_two_coats"):
+        if material.slug == M_PRIMER and repair_options.get("primer_two_coats"):
             layers = Decimal(2)
         base = area * layers * c
         return base * w, base
@@ -158,7 +159,7 @@ def quantity_of(
         base = area * (c if c > 0 else Decimal(1))
         # Кривизна основания масштабирует только стартовую шпаклёвку (выравнивание).
         # Множитель складываем в base (до запаса), как раппорт у обоев.
-        if material.name == M_PUTTY_START:
+        if material.slug == M_PUTTY_START:
             base = base * WALL_CONDITION_FACTOR.get(
                 repair_options.get("wall_condition"), Decimal(1)
             )
@@ -219,11 +220,11 @@ def calculate_engineering_materials(
         (M_CABLE, cable_m, True),
         (M_PIPE, pipe_m, True),
     ]
-    for name, count, with_waste in specs:
+    for slug, count, with_waste in specs:
         qty = D(count)
         if qty <= 0:
             continue
-        material = db.query(Material).filter(Material.name == name).first()
+        material = db.query(Material).filter(Material.slug == slug).first()
         if material is None:
             continue
         base_qty = qty
@@ -252,8 +253,8 @@ def calculate_materials(
     """
     result: List[Dict[str, Any]] = []
 
-    for material_name, area in _selections(repair_options, geometry):
-        material = db.query(Material).filter(Material.name == material_name).first()
+    for material_slug, area in _selections(repair_options, geometry):
+        material = db.query(Material).filter(Material.slug == material_slug).first()
         if material is None:
             # материала нет в БД (например, не засидован) — пропускаем
             continue

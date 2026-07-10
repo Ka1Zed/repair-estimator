@@ -2,7 +2,7 @@ import logging
 import os
 import statistics
 import time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urljoin
 
 import requests
@@ -68,9 +68,13 @@ def _parse_page(html: str, page_url: str) -> list[tuple[Decimal, str | None]]:
         value = price_el.get("value")
         if not value:
             continue
+        # value может прийти с форматированием (пробелы/nbsp как разделитель тысяч,
+        # запятая-десятичная) — нормализуем перед Decimal, иначе валидная цена
+        # молча отсеется и вся выборка может схлопнуться в "не найдено цен".
+        normalized = value.replace("\xa0", "").replace(" ", "").replace(",", ".")
         try:
-            price = Decimal(value)
-        except Exception:
+            price = Decimal(normalized)
+        except (InvalidOperation, ValueError):
             continue
         if price <= 0:
             continue

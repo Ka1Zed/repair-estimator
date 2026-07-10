@@ -70,6 +70,20 @@ def test_parse_page_skips_items_without_price():
     assert items == [(Decimal("100"), "https://kazan.lemanapro.ru/product/ok/")]
 
 
+def test_parse_page_normalizes_formatted_price():
+    # Цена с разделителем тысяч (nbsp/пробел) и запятой-десятичной не должна
+    # молча отсеяться — иначе вся выборка схлопнется в "не найдено цен".
+    html = _page(
+        _item("1", "1\xa0500,50", "/product/a/"),
+        _item("2", "2 300", "/product/b/"),
+    )
+    items = _parse_page(html, PAGE_URL)
+    assert items == [
+        (Decimal("1500.50"), "https://kazan.lemanapro.ru/product/a/"),
+        (Decimal("2300"), "https://kazan.lemanapro.ru/product/b/"),
+    ]
+
+
 def _patch_pages(monkeypatch, page_html: str):
     '''Первая страница каталога отдаёт page_html, со 2-й — пустая (конец пагинации).'''
 

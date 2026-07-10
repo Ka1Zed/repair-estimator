@@ -60,21 +60,29 @@ _PAINT_CATEGORY = "https://kazan.lemanapro.ru/catalogue/kraski-dlya-sten-i-potol
 _SHPAKLEVKA_CATEGORY = "https://kazan.lemanapro.ru/catalogue/shpaklevki/"
 _IN_STOCK_KAZAN = "eligibilityByStores=Казань_Казань Солнечный_Казань Залесный"
 
-CATEGORY_MAP = {
-    "Краска для стен": f"{_PAINT_CATEGORY}?{_IN_STOCK_KAZAN}&00277=Стена",
-    "Краска потолочная": f"{_PAINT_CATEGORY}?{_IN_STOCK_KAZAN}&00277=Потолок",
-    "Шпаклевка стартовая": f"{_SHPAKLEVKA_CATEGORY}?14431=Базовая шпатлёвка&{_IN_STOCK_KAZAN}",
-    "Шпаклевка финишная": f"{_SHPAKLEVKA_CATEGORY}?14431=Финишная шпатлевка&{_IN_STOCK_KAZAN}",
-    "Грунтовка": f"https://kazan.lemanapro.ru/search/?q=грунтовки&{_IN_STOCK_KAZAN}",
+CATEGORY_MAP: dict[str, tuple[str, ...]] = {
+    "Краска для стен": (f"{_PAINT_CATEGORY}?{_IN_STOCK_KAZAN}&00277=Стена",),
+    "Краска потолочная": (f"{_PAINT_CATEGORY}?{_IN_STOCK_KAZAN}&00277=Потолок",),
+    "Шпаклевка стартовая": (f"{_SHPAKLEVKA_CATEGORY}?14431=Базовая шпатлёвка&{_IN_STOCK_KAZAN}",),
+    "Шпаклевка финишная": (f"{_SHPAKLEVKA_CATEGORY}?14431=Финишная шпатлевка&{_IN_STOCK_KAZAN}",),
+    "Грунтовка": (f"https://kazan.lemanapro.ru/search/?q=грунтовки&{_IN_STOCK_KAZAN}",),
     "Плиточный клей": (
         f"https://kazan.lemanapro.ru/catalogue/klei-dlya-plitki-kamnya-i-izolyacii/"
-        f"klei-dlya-plitki/?{_IN_STOCK_KAZAN}"
+        f"klei-dlya-plitki/?{_IN_STOCK_KAZAN}",
     ),
-    "Затирка": f"https://kazan.lemanapro.ru/catalogue/zatirki-dlya-shvov-plitki/?{_IN_STOCK_KAZAN}",
-    "Плитка": f"https://kazan.lemanapro.ru/catalogue/napolnaya-plitka/?{_IN_STOCK_KAZAN}",
-    "Ламинат": f"https://kazan.lemanapro.ru/catalogue/laminat/?{_IN_STOCK_KAZAN}",
-    "Обои": f"https://kazan.lemanapro.ru/catalogue/dekorativnye-oboi/?{_IN_STOCK_KAZAN}",
-    "Плинтус": f"https://kazan.lemanapro.ru/catalogue/napolnye-plintusy/?{_IN_STOCK_KAZAN}",
+    # zatirki-dlya-shvov-plitki/ — хаб-страница с плитками подкатегорий, без
+    # карточек товаров; берём реальные листинги по типам затирки напрямую.
+    # Полиуретановая недоступна в Казани (только онлайн-заказ) — не берём.
+    "Затирка": (
+        f"https://kazan.lemanapro.ru/catalogue/zatirki-cementnye-dlya-plitki/?{_IN_STOCK_KAZAN}",
+        f"https://kazan.lemanapro.ru/catalogue/zatirki-epoksidnye-dlya-plitki/?{_IN_STOCK_KAZAN}",
+        f"https://kazan.lemanapro.ru/catalogue/zatirki-polimernye-dlya-plitki/?{_IN_STOCK_KAZAN}",
+        f"https://kazan.lemanapro.ru/catalogue/zatirki-silikonovye-dlya-plitki/?{_IN_STOCK_KAZAN}",
+    ),
+    "Плитка": (f"https://kazan.lemanapro.ru/catalogue/napolnaya-plitka/?{_IN_STOCK_KAZAN}",),
+    "Ламинат": (f"https://kazan.lemanapro.ru/catalogue/laminat/?{_IN_STOCK_KAZAN}",),
+    "Обои": (f"https://kazan.lemanapro.ru/catalogue/dekorativnye-oboi/?{_IN_STOCK_KAZAN}",),
+    "Плинтус": (f"https://kazan.lemanapro.ru/catalogue/napolnye-plintusy/?{_IN_STOCK_KAZAN}",),
 }
 
 # Обходим не всю выдачу: после ~15-й страницы у Лемана идут серые/нерелевантные
@@ -216,40 +224,49 @@ class LemanParser(BaseParser):
             )
 
         spec = MATERIAL_UNITS[material_name]
-        base_url = CATEGORY_MAP[material_name]
-        pages_html = leman_browser.fetch_pages(base_url, MAX_PAGES)
-        if not pages_html:
-            raise RuntimeError(f"Леман: браузерный фетч не вернул ни одной страницы для '{material_name}'")
+        base_urls = CATEGORY_MAP[material_name]
 
         items: list[tuple[Decimal, str | None, str | None]] = []
         seen_ids: set[str] = set()
-        for page_num, html in enumerate(pages_html, start=1):
-            page_url = _build_page_url(base_url, page_num)
-            page_items = _parse_page(html, page_url)
-            new_items = []
-            for candidates, url, name in page_items:
-                product_id = _product_id(url)
-                if product_id is not None:
-                    if product_id in seen_ids:
+        any_pages_loaded = False
+
+        for base_url in base_urls:
+            pages_html = leman_browser.fetch_pages(base_url, MAX_PAGES)
+            if not pages_html:
+                logger.warning(f"  Леман '{material_name}' {base_url}: браузер не вернул ни одной страницы")
+                continue
+            any_pages_loaded = True
+
+            for page_num, html in enumerate(pages_html, start=1):
+                page_url = _build_page_url(base_url, page_num)
+                page_items = _parse_page(html, page_url)
+                new_items = []
+                for candidates, url, name in page_items:
+                    product_id = _product_id(url)
+                    if product_id is not None:
+                        if product_id in seen_ids:
+                            continue
+                        seen_ids.add(product_id)
+
+                    price = _select_price(candidates, spec)
+                    if price is None:
+                        # Ни основной, ни вторичный блок не дали нужную единицу
+                        # (напр. клей без price-block-unitprice) — не считаем товар.
                         continue
-                    seen_ids.add(product_id)
 
-                price = _select_price(candidates, spec)
-                if price is None:
-                    # Ни основной, ни вторичный блок не дали нужную единицу
-                    # (напр. клей без price-block-unitprice) — не считаем товар.
-                    continue
+                    if spec.normalize_length:
+                        length_m = _length_m_from_title(name)
+                        if not length_m:
+                            continue
+                        price = price / length_m
 
-                if spec.normalize_length:
-                    length_m = _length_m_from_title(name)
-                    if not length_m:
-                        continue
-                    price = price / length_m
+                    new_items.append((price, url, name))
 
-                new_items.append((price, url, name))
+                items.extend(new_items)
+                logger.info(f"  Леман '{material_name}' {base_url} стр.{page_num}: +{len(new_items)} цен")
 
-            items.extend(new_items)
-            logger.info(f"  Леман '{material_name}' стр.{page_num}: +{len(new_items)} цен")
+        if not any_pages_loaded:
+            raise RuntimeError(f"Леман: браузерный фетч не вернул ни одной страницы для '{material_name}'")
 
         if not items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (единица/размер не распознаны)")
@@ -280,7 +297,7 @@ class LemanParser(BaseParser):
         price_avg = Decimal(round(statistics.mean(all_prices)))
 
         representative = min(items, key=lambda it: abs(it[0] - price_avg))
-        source_url = representative[1] or CATEGORY_MAP[material_name]
+        source_url = representative[1] or base_urls[0]
 
         logger.info(
             f"Леман: '{material_name}' — всего {len(all_prices)} цен, "

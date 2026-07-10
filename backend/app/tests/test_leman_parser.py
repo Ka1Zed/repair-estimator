@@ -109,6 +109,60 @@ def test_fetch_price_raises_when_browser_returns_no_pages(monkeypatch):
         LemanParser().fetch_price("Краска для стен")
 
 
+def _patch_pages_by_url(monkeypatch, pages_by_url: dict[str, list[str]]):
+    # Затирка размазана по нескольким категориям Лемана (#277) — у каждого URL
+    # свой набор "страниц".
+    monkeypatch.setattr(leman_parser.settings, "LEMAN_LIVE", True)
+    monkeypatch.setattr(
+        leman_parser.leman_browser,
+        "fetch_pages",
+        lambda base_url, max_pages: pages_by_url.get(base_url, []),
+    )
+
+
+def test_grout_combines_multiple_category_urls(monkeypatch):
+    urls = leman_parser.CATEGORY_MAP["Затирка"]
+    assert len(urls) > 1
+
+    def _grout(href, price, unitprice):
+        return _item(href, name="Затирка", price=price, price_unit="шт.", unitprice=unitprice, unitprice_unit="кг")
+
+    _patch_pages_by_url(
+        monkeypatch,
+        {
+            urls[0]: [_page(_grout("/product/cementnaya-1/", "532", "80"))],
+            urls[1]: [_page(_grout("/product/epoksidnaya-2/", "2850", "150"))],
+        },
+    )
+
+    parsed = LemanParser().fetch_price("Затирка")
+
+    assert parsed.price_min == Decimal("80")
+    assert parsed.price_max == Decimal("150")
+
+
+def test_grout_continues_when_one_category_fails_to_load(monkeypatch):
+    urls = leman_parser.CATEGORY_MAP["Затирка"]
+
+    def _grout(href, unitprice):
+        return _item(href, name="Затирка", price="1", price_unit="шт.", unitprice=unitprice, unitprice_unit="кг")
+
+    # urls[0] "не отдался" (пустой список страниц), остальные не мокаются
+    # (значит fetch_pages вернёт [] по умолчанию из .get(url, [])).
+    _patch_pages_by_url(monkeypatch, {urls[1]: [_page(_grout("/product/ok-1/", "100"))]})
+
+    parsed = LemanParser().fetch_price("Затирка")
+
+    assert parsed.price_avg == Decimal("100")
+
+
+def test_grout_raises_when_all_categories_fail_to_load(monkeypatch):
+    _patch_pages_by_url(monkeypatch, {})  # ни один URL не отдал страниц
+
+    with pytest.raises(RuntimeError):
+        LemanParser().fetch_price("Затирка")
+
+
 def test_paint_uses_unitprice_block_not_whole_can_price(monkeypatch):
     # Баг (#277): раньше брали price-block-price (целая банка), а не ₽/л.
     # 2232 ₽/шт. за банку 10 л = 223.2 ₽/л — берём именно второе.
@@ -239,7 +293,7 @@ def test_source_url_falls_back_to_category_when_no_link(monkeypatch):
 
     parsed = LemanParser().fetch_price("Краска для стен")
 
-    assert parsed.source_url == CATEGORY_MAP["Краска для стен"]
+    assert parsed.source_url == CATEGORY_MAP["Краска для стен"][0]
 
 
 def test_fetch_price_dedupes_same_product_across_pages(monkeypatch):

@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx-js-style';
 
 import type { SummaryData } from '../components/EstimateSummary';
 import type { MaterialItem, LaborItem, HiddenWorks } from '../types/estimate';
+import type { PriceMode } from '../pages/Workspace/Workspace';
 
 export interface EstimateExportData {
   summary: SummaryData;
@@ -15,7 +16,7 @@ export interface EstimateExportData {
   };
   materials: MaterialItem[];
   labor: LaborItem[];
-  hidden_works?: HiddenWorks;
+  hidden_works?: HiddenWorks; // <--- Добавили эту строку
 }
 
 const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
@@ -110,14 +111,41 @@ const geometryUnits: Record<string, string> = {
   perimeter: 'м'
 };
 
+const MODE_LABELS: Record<PriceMode, string> = {
+  min: 'Минимальный',
+  avg: 'Средний',
+  max: 'Максимальный'
+};
+
+// Множитель уровня цен, СВОЙ для каждого раздела: у позиций нет своих min/max
+// (в контракте только total_avg), поэтому масштабируем средние коэффициентом из
+// вилки этого раздела. Общий total-множитель дал бы расхождение с «Итоговой
+// стоимостью» — у материалов и работ разный разброс. Совпадает с priceScale в UI.
+const scaleFor = (s: SummaryData, priceMode: PriceMode, category: 'materials' | 'labor') => {
+  const avg = category === 'materials' ? s.materials_avg : s.labor_avg;
+  if (avg === 0) return 1;
+  const min = category === 'materials' ? s.materials_min : s.labor_min;
+  const max = category === 'materials' ? s.materials_max : s.labor_max;
+  if (priceMode === 'min') return min / avg;
+  if (priceMode === 'max') return max / avg;
+  return 1;
+};
+
 // Excel-версия сметы в одном стиле с PDF: акцентная шапка, зебра, рамки,
 // город/дата, геометрия, кликабельные источники (синие подчёркнутые ячейки),
 // детализация количества и запаса. Оформление ячеек даёт xlsx-js-style.
-export const exportXlsx = (data: EstimateExportData, city: string) => {
+export const exportXlsx = (data: EstimateExportData, city: string, priceMode: PriceMode = "avg") => {
   const wb = XLSX.utils.book_new();
   const today = new Date().toLocaleDateString('ru-RU');
-  const metaLine = `Город: ${city}    ·    Дата: ${today}`;
   const s = data.summary;
+
+  // Множители уровня цен — раздельные для материалов и работ (см. scaleFor).
+  const scaleMat = scaleFor(s, priceMode, 'materials');
+  const scaleLab = scaleFor(s, priceMode, 'labor');
+  const pMat = (val: number) => Math.round(val * scaleMat);
+  const pLab = (val: number) => Math.round(val * scaleLab);
+
+  const metaLine = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${today}`;
 
   // ---------- Сводка: город/дата, геометрия, итоги min/avg/max ----------
   const summaryAoa: (string | number)[][] = [
@@ -152,7 +180,7 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
   cellAt(summarySheet, 0, 0).s = titleStyle;
   cellAt(summarySheet, 1, 0).s = metaStyle;
   if (geomEntries.length) cellAt(summarySheet, 3, 0).s = sectionStyle;
-  cellAt(summarySheet, costFirst - 2, 0).s = sectionStyle; // «Итоговая стоимость»
+  cellAt(summarySheet, costFirst - 2, 0).s = sectionStyle;
   styleTable(summarySheet, {
     headerRow: costFirst - 1,
     firstData: costFirst,
@@ -171,7 +199,7 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
     [],
     ['Наименование', 'Кол-во', 'Ед. изм.', 'Цена за ед.', 'Итого', 'Источник', 'Дата цены'],
     ...data.materials.map(m => [
-      m.name, m.quantity, m.unit, m.price_avg, m.total_avg,
+      m.name, m.quantity, m.unit, pMat(m.price_avg), pMat(m.total_avg),
       sourceLabel(m.source, m.region), fmtDate(m.updated_at),
     ]),
   ];
@@ -206,7 +234,7 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
     [],
     ['Услуга', 'Специалист', 'Объём', 'Ед. изм.', 'Цена за ед.', 'Итого', 'Источник'],
     ...data.labor.map(l => [
-      l.service, l.specialist, l.volume, l.unit, l.price_avg, l.total_avg,
+      l.service, l.specialist, l.volume, l.unit, pLab(l.price_avg), pLab(l.total_avg),
       sourceLabel(l.source, l.region),
     ]),
   ];
@@ -266,7 +294,7 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
   }
   XLSX.utils.book_append_sheet(wb, detSheet, 'Детализация');
 
-  // ---------- Скрытые работы (справочно) ----------
+  // ---------- Скрытые работы (справочно, вилка не масштабируется) ----------
   if (data.hidden_works && data.hidden_works.items.length > 0) {
     const hw = data.hidden_works;
     const hwAoa: (string | number)[][] = [
@@ -310,11 +338,11 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
 
 // Палитра из index.css, чтобы PDF был в одном стиле с сайтом
 type RGB = [number, number, number];
-const PDF_ACCENT: RGB = [176, 123, 94]; // --accent #B07B5E
-const PDF_HEADING: RGB = [42, 42, 42]; // --text-h #2A2A2A
-const PDF_MUTED: RGB = [107, 99, 99]; // --text #6b6363
-const PDF_BORDER: RGB = [229, 229, 229]; // --border #E5E5E5
-const PDF_ZEBRA: RGB = [250, 246, 243]; // тёплый оттенок для чётных строк
+const PDF_ACCENT: RGB = [176, 123, 94];
+const PDF_HEADING: RGB = [42, 42, 42];
+const PDF_MUTED: RGB = [107, 99, 99];
+const PDF_BORDER: RGB = [229, 229, 229];
+const PDF_ZEBRA: RGB = [250, 246, 243];
 const PDF_WHITE: RGB = [255, 255, 255];
 
 // Читаемая подпись источника цены: seed → «База», парсеры → человекочитаемо, + регион
@@ -333,8 +361,15 @@ const fmtQty = (x: number) => x.toLocaleString('ru-RU', { maximumFractionDigits:
 // Запас в процентах из множителя waste_factor (1.1 → «+10%»)
 const wastePct = (waste_factor: number) => `+${Math.round((waste_factor - 1) * 100)}%`;
 
-export const exportPdf = async (data: EstimateExportData, city: string) => {
+export const exportPdf = async (data: EstimateExportData, city: string, priceMode: PriceMode = "avg") => {
   const doc = new jsPDF();
+  const s = data.summary;
+
+  // Множители уровня цен — раздельные для материалов и работ (см. scaleFor).
+  const scaleMat = scaleFor(s, priceMode, 'materials');
+  const scaleLab = scaleFor(s, priceMode, 'labor');
+  const pMat = (val: number) => Math.round(val * scaleMat);
+  const pLab = (val: number) => Math.round(val * scaleLab);
 
   try {
     const response = await fetch('/Roboto-Regular.ttf');
@@ -361,7 +396,6 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
   const pageH = doc.internal.pageSize.getHeight();
   const marginX = 14;
 
-  // Общий стиль таблиц — тёплая шапка вместо синей темы по умолчанию
   const tableBase = {
     theme: 'grid' as const,
     styles: {
@@ -412,7 +446,8 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
   doc.line(marginX, 26, pageW - marginX, 26);
   doc.setFontSize(10);
   doc.setTextColor(...PDF_MUTED);
-  const meta = `Город: ${city}    ·    Дата: ${new Date().toLocaleDateString('ru-RU')}`;
+  
+  const meta = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${new Date().toLocaleDateString('ru-RU')}`;
   doc.text(meta, marginX, 33);
 
   let currentY = 44;
@@ -437,7 +472,7 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
     startY: currentY + 4,
     head: [['Наименование', 'Кол-во', 'Ед.', 'Цена', 'Итого', 'Источник']],
     body: data.materials.map(m => [
-      m.name, m.quantity, m.unit, formatPricePDF(m.price_avg), formatPricePDF(m.total_avg), sourceLabel(m.source, m.region)
+      m.name, m.quantity, m.unit, formatPricePDF(pMat(m.price_avg)), formatPricePDF(pMat(m.total_avg)), sourceLabel(m.source, m.region)
     ]),
     columnStyles: {
       0: { halign: 'left', cellWidth: 58 },
@@ -457,7 +492,7 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
     startY: currentY + 4,
     head: [['Услуга', 'Специалист', 'Объём', 'Ед.', 'Цена', 'Итого', 'Источник']],
     body: data.labor.map(l => [
-      l.service, l.specialist, l.volume, l.unit, formatPricePDF(l.price_avg), formatPricePDF(l.total_avg), sourceLabel(l.source, l.region)
+      l.service, l.specialist, l.volume, l.unit, formatPricePDF(pLab(l.price_avg)), formatPricePDF(pLab(l.total_avg)), sourceLabel(l.source, l.region)
     ]),
     columnStyles: {
       0: { halign: 'left', cellWidth: 40 },
@@ -470,7 +505,6 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
     }
   });
 
-  const s = data.summary;
   currentY = getFinalY(doc) + 14;
   sectionHeading('Итоговая стоимость', currentY);
   autoTable(doc, {
@@ -546,7 +580,15 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
       ...tableBase,
       startY: currentY + 5 + noteLines.length * 4,
       head: [['Работа', 'Специалист', 'Причина', 'Объём', 'Мин.', 'Макс.']],
-      body: hw.items.map(item => [
+      body: hw.items.map((item: {
+        service: string;
+        specialist: string;
+        reason: string;
+        volume: number;
+        unit: string;
+        total_min: number;
+        total_max: number;
+      }) => [
         item.service,
         item.specialist,
         item.reason,

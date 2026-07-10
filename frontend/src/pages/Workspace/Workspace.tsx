@@ -48,10 +48,11 @@ const formatNum = (n: number) =>
   n.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const formatQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
+
 // Регион, по которому реально взялась цена; null → базовая seed-цена (не зависит от города).
 const regionLabel = (region?: string | null) => region ?? "базовая цена";
 
-type PriceMode = "min" | "avg" | "max";
+export type PriceMode = "min" | "avg" | "max";
 
 export function Workspace() {
   const rooms = useProjectStore((s) => s.rooms);
@@ -275,59 +276,72 @@ export function Workspace() {
     : avgPos;
 
   // --- price scaling ---
-  const priceScale = useMemo(() => {
-    if (!data) return 1;
-    const { total_min, total_avg, total_max } = data.summary;
-    if (total_avg === 0) return 1;
-    if (priceMode === "min") return total_min / total_avg;
-    if (priceMode === "max") return total_max / total_avg;
-    return 1;
-  }, [data, priceMode]);
+  // Множитель выбранного режима СВОЙ для каждого раздела: берётся из min/avg/max
+  // именно этого раздела. У позиций нет своих min/max (в контракте только
+  // total_avg), поэтому масштабируем средние. Общий total-коэффициент здесь не
+  // годится — у материалов и работ разный разброс, и «Итого по разделу» разошлось
+  // бы с вилкой в сводной таблице выше.
+  const priceScale = useCallback(
+    (category: "materials" | "labor") => {
+      if (!data) return 1;
+      const s = data.summary;
+      const avg = category === "materials" ? s.materials_avg : s.labor_avg;
+      if (avg === 0) return 1;
+      const min = category === "materials" ? s.materials_min : s.labor_min;
+      const max = category === "materials" ? s.materials_max : s.labor_max;
+      if (priceMode === "min") return min / avg;
+      if (priceMode === "max") return max / avg;
+      return 1;
+    },
+    [data, priceMode],
+  );
 
   const sectionTotal = useMemo(() => {
     if (!data) return 0;
     const items = tab === "materials" ? data.materials : data.labor;
     const sum = items.reduce((s, i) => s + (i.total_avg ?? 0), 0);
-    return Math.round(sum * priceScale);
+    return Math.round(sum * priceScale(tab));
   }, [data, tab, priceScale]);
 
-  const materialRows: LedgerRow[] = useMemo(
-    () =>
-      (data?.materials ?? ([] as MaterialItem[])).map((m) => ({
-        name: m.name,
-        volume: `${formatQty(m.quantity)} ${m.unit}`,
-        price: rub(Math.round(m.price_avg * priceScale)),
-        details: [
-          { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
-          { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
-          { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
-          { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
-          { label: "Цена за единицу", value: rub(m.price_avg) },
-          { label: "Итог по позиции", value: rub(m.total_avg) },
-          { label: "Источник цены", value: m.source, url: m.source_url },
-          { label: "Регион", value: regionLabel(m.region) },
-          ...(m.updated_at
-            ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
-            : []),
-        ],
-      })),
-    [data, priceScale],
-  );
+  const materialRows: LedgerRow[] = useMemo(() => {
+    const scale = priceScale("materials");
+    return (data?.materials ?? []).map((m) => ({
+      name: m.name,
+      volume: `${formatQty(m.quantity)} ${m.unit}`,
+      price: rub(Math.round(m.price_avg * scale)),
+      details: [
+        { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
+        { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
+        { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
+        { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
+        { label: "Цена за единицу", value: rub(Math.round(m.price_avg * scale)) },
+        { label: "Итог по позиции", value: rub(Math.round(m.total_avg * scale)) },
+        { label: "Источник цены", value: m.source, url: m.source_url },
+        { label: "Регион", value: regionLabel(m.region) },
+        ...(m.updated_at
+          ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
+          : []),
+      ],
+    }));
+  }, [data, priceScale]);
 
   const toLedgerRow = useCallback(
-    (l: LaborItem): LedgerRow => ({
-      name: l.service,
-      subtitle: l.specialist,
-      volume: `${formatQty(l.volume)} ${l.unit}`,
-      price: rub(Math.round(l.price_avg * priceScale)),
-      details: [
-        { label: "Специалист", value: l.specialist },
-        { label: "Цена за единицу", value: rub(l.price_avg) },
-        { label: "Итог по позиции", value: rub(l.total_avg) },
-        { label: "Источник цены", value: l.source, url: l.source_url },
-        { label: "Регион", value: regionLabel(l.region) },
-      ],
-    }),
+    (l: LaborItem): LedgerRow => {
+      const scale = priceScale("labor");
+      return {
+        name: l.service,
+        subtitle: l.specialist,
+        volume: `${formatQty(l.volume)} ${l.unit}`,
+        price: rub(Math.round(l.price_avg * scale)),
+        details: [
+          { label: "Специалист", value: l.specialist },
+          { label: "Цена за единицу", value: rub(Math.round(l.price_avg * scale)) },
+          { label: "Итог по позиции", value: rub(Math.round(l.total_avg * scale)) },
+          { label: "Источник цены", value: l.source, url: l.source_url },
+          { label: "Регион", value: regionLabel(l.region) },
+        ],
+      };
+    },
     [priceScale],
   );
 
@@ -336,6 +350,8 @@ export function Workspace() {
     [data, toLedgerRow],
   );
 
+  // Работы, сгруппированные по стадиям (черновая/предчистовая/чистовая) — для
+  // сметы «Черновая + чистовая». В режиме «только чистовая» группировки нет.
   const laborByStage = useMemo(() => {
     const labor = data?.labor ?? [];
     const groups = new Map<LaborStage, LaborItem[]>();
@@ -495,33 +511,6 @@ export function Workspace() {
                 {data && ` · общая площадь пола ${formatNum(data.geometry.floor_area)} м²`}
               </div>
             </div>
-            <div className={styles.exportRow}>
-              <button
-                className={styles.exportBtn}
-                onClick={() =>
-                  data &&
-                  import("../../utils/exportEstimate").then((m) =>
-                    m.exportPdf(data, city)
-                  )
-                }
-                disabled={!data}
-              >
-                Скачать PDF
-              </button>
-              <button
-                className={styles.exportBtn}
-                onClick={() =>
-                  data &&
-                  import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city))
-                }
-                disabled={!data}
-              >
-                Экспорт в Excel
-              </button>
-              <button className={styles.exportBtn} onClick={() => window.print()} disabled={!data}>
-                Печать
-              </button>
-            </div>
           </div>
 
           {!data ? (
@@ -603,57 +592,85 @@ export function Workspace() {
                 </p>
               )}
 
-              {/* переключатель режима цен — суммы в таблице выше, здесь только подписи */}
-              <div className={styles.rangeRow}>
-                <div
-                  className={`${styles.rangeCol} ${styles.rangeColClickable}`}
-                  onClick={() => !isDragging && setPriceMode("min")}
-                >
-                  <span className={`${styles.rangeCap} ${priceMode === "min" ? styles.rangeCapActive : ""}`}>
-                    Минимум
-                  </span>
-                </div>
-                <div
-                  className={`${styles.rangeCol} ${styles.rangeColCenter} ${styles.rangeColClickable}`}
-                  onClick={() => !isDragging && setPriceMode("avg")}
-                >
-                  <span className={`${styles.rangeCap} ${priceMode === "avg" ? styles.rangeCapActive : ""}`}>
-                    Средняя
-                  </span>
-                </div>
-                <div
-                  className={`${styles.rangeCol} ${styles.rangeColRight} ${styles.rangeColClickable}`}
-                  onClick={() => !isDragging && setPriceMode("max")}
-                >
-                  <span className={`${styles.rangeCap} ${priceMode === "max" ? styles.rangeCapActive : ""}`}>
-                    Максимум
-                  </span>
-                </div>
-              </div>
+              {/* Блок: Переключатель уровней цен + кнопки экспорта */}
+              <div className={styles.exportControlsWrapper}>
+                <div className={styles.rangeWrapper}>
+                  {/* переключатель режима цен — суммы в таблице выше, здесь только подписи */}
+                  <div className={styles.rangeRow}>
+                    <div
+                      className={`${styles.rangeCol} ${styles.rangeColClickable}`}
+                      onClick={() => !isDragging && setPriceMode("min")}
+                    >
+                      <span className={`${styles.rangeCap} ${priceMode === "min" ? styles.rangeCapActive : ""}`}>
+                        Минимум
+                      </span>
+                    </div>
+                    <div
+                      className={`${styles.rangeCol} ${styles.rangeColCenter} ${styles.rangeColClickable}`}
+                      onClick={() => !isDragging && setPriceMode("avg")}
+                    >
+                      <span className={`${styles.rangeCap} ${priceMode === "avg" ? styles.rangeCapActive : ""}`}>
+                        Средняя
+                      </span>
+                    </div>
+                    <div
+                      className={`${styles.rangeCol} ${styles.rangeColRight} ${styles.rangeColClickable}`}
+                      onClick={() => !isDragging && setPriceMode("max")}
+                    >
+                      <span className={`${styles.rangeCap} ${priceMode === "max" ? styles.rangeCapActive : ""}`}>
+                        Максимум
+                      </span>
+                    </div>
+                  </div>
 
-              <div
-                ref={trackRef}
-                className={`${styles.rangeTrack} ${isDragging ? styles.rangeTrackDragging : ""}`}
-                onPointerDown={handleTrackPointerDown}
-                onPointerMove={handleTrackPointerMove}
-                onPointerUp={handleTrackPointerUp}
-                onPointerCancel={handleTrackPointerUp}
-              >
-                <span
-                  className={`${styles.rangeEnd} ${priceMode === "min" && !isDragging ? styles.rangeEndActive : ""}`}
-                  style={{ left: 0 }}
-                />
-                <span
-                  className={styles.rangeDot}
-                  style={{
-                    left: `${dotVisualPos}%`,
-                    transition: isDragging ? "none" : "left 0.2s ease",
-                  }}
-                />
-                <span
-                  className={`${styles.rangeEnd} ${priceMode === "max" && !isDragging ? styles.rangeEndActive : ""}`}
-                  style={{ right: 0 }}
-                />
+                  <div
+                    ref={trackRef}
+                    className={`${styles.rangeTrack} ${styles.rangeTrackCompact} ${isDragging ? styles.rangeTrackDragging : ""}`}
+                    onPointerDown={handleTrackPointerDown}
+                    onPointerMove={handleTrackPointerMove}
+                    onPointerUp={handleTrackPointerUp}
+                    onPointerCancel={handleTrackPointerUp}
+                    style={{ marginBottom: '8px' }}
+                  >
+                    <span
+                      className={`${styles.rangeEnd} ${priceMode === "min" && !isDragging ? styles.rangeEndActive : ""}`}
+                      style={{ left: 0 }}
+                    />
+                    <span
+                      className={styles.rangeDot}
+                      style={{
+                        left: `${dotVisualPos}%`,
+                        transition: isDragging ? "none" : "left 0.2s ease",
+                      }}
+                    />
+                    <span
+                      className={`${styles.rangeEnd} ${priceMode === "max" && !isDragging ? styles.rangeEndActive : ""}`}
+                      style={{ right: 0 }}
+                    />
+                  </div>
+                </div>
+                
+                <div className={`${styles.exportRow} ${styles.exportRowPadded}`}>
+                  <button
+                    className={styles.exportBtn}
+                    onClick={() =>
+                      data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode))
+                    }
+                  >
+                    Скачать PDF
+                  </button>
+                  <button
+                    className={styles.exportBtn}
+                    onClick={() =>
+                      data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode))
+                    }
+                  >
+                    Экспорт в Excel
+                  </button>
+                  <button className={styles.exportBtn} onClick={() => window.print()}>
+                    Печать
+                  </button>
+                </div>
               </div>
 
               {/* вкладки */}
@@ -686,7 +703,7 @@ export function Workspace() {
                           <div className={styles.stageHeader}>{STAGE_LABELS[stage]}</div>
                           <EstimateLedger rows={items.map(toLedgerRow)} />
                           <div className={styles.stageSubtotal}>
-                            {rub(Math.round(stageTotalAvg * priceScale))}
+                            {rub(Math.round(stageTotalAvg * priceScale("labor")))}
                           </div>
                         </div>
                       );

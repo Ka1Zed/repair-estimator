@@ -696,3 +696,24 @@
     overflow: visible;
   }
 }
+/* Обертка для переключателя уровней и кнопок экспорта */
+.exportControlsWrapper {
+  display: flex;
+  gap: 24px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.rangeWrapper {
+  flex: 1;
+  min-width: 240px;
+}
+
+.rangeTrackCompact {
+  margin-bottom: 8px;
+}
+
+.exportRowPadded {
+  padding-bottom: 8px;
+}

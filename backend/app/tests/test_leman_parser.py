@@ -14,7 +14,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.parsers import leman_parser
+from app.parsers import leman_browser, leman_parser
 from app.parsers.leman_parser import (
     CATEGORY_MAP,
     LemanParser,
@@ -24,9 +24,9 @@ from app.parsers.leman_parser import (
 PAGE_URL = "https://kazan.lemanapro.ru/catalogue/kraski-dlya-sten-i-potolkov/"
 
 
-def _item(price: str | None, href: str | None) -> str:
+def _item(price: str | None, href: str | None, name: str = "товар") -> str:
     price_block = f'<div data-testid="price-block-price" value="{price}"></div>' if price else ""
-    link = f'<a data-qa="product-name" href="{href}">товар</a>' if href else ""
+    link = f'<a data-qa="product-name" href="{href}">{name}</a>' if href else ""
     return f'<div data-qa="product">{price_block}{link}</div>'
 
 
@@ -41,15 +41,15 @@ def test_parse_page_returns_price_and_absolute_url():
     )
     items = _parse_page(html, PAGE_URL)
     assert items == [
-        (Decimal("150"), "https://kazan.lemanapro.ru/product/kraska-a-1/"),
-        (Decimal("250"), "https://kazan.lemanapro.ru/product/kraska-b-2/"),
+        (Decimal("150"), "https://kazan.lemanapro.ru/product/kraska-a-1/", "товар"),
+        (Decimal("250"), "https://kazan.lemanapro.ru/product/kraska-b-2/", "товар"),
     ]
 
 
 def test_parse_page_skips_items_without_price():
     html = _page(_item(None, "/product/free/"), _item("100", "/product/ok-2/"))
     items = _parse_page(html, PAGE_URL)
-    assert items == [(Decimal("100"), "https://kazan.lemanapro.ru/product/ok-2/")]
+    assert items == [(Decimal("100"), "https://kazan.lemanapro.ru/product/ok-2/", "товар")]
 
 
 def test_parse_page_normalizes_formatted_price():
@@ -61,8 +61,8 @@ def test_parse_page_normalizes_formatted_price():
     )
     items = _parse_page(html, PAGE_URL)
     assert items == [
-        (Decimal("1500.50"), "https://kazan.lemanapro.ru/product/a-1/"),
-        (Decimal("2300"), "https://kazan.lemanapro.ru/product/b-2/"),
+        (Decimal("1500.50"), "https://kazan.lemanapro.ru/product/a-1/", "товар"),
+        (Decimal("2300"), "https://kazan.lemanapro.ru/product/b-2/", "товар"),
     ]
 
 
@@ -149,6 +149,55 @@ def test_fetch_price_excludes_outliers_from_spread_and_source(monkeypatch):
     assert "designer" not in (parsed.source_url or "")
 
 
+def test_fetch_price_excludes_irrelevant_subtypes_by_name(monkeypatch):
+    # Пробник за 30 ₽ и колеровочная паста — семантический мусок, который роняет
+    # min и перекашивает вилку. Отсекаются по имени до статистики: min уже не 30.
+    html = _page(
+        _item("30", "/product/probnik-1/", name="Пробник краски интерьерной"),
+        _item("45", "/product/koler-2/", name="Паста колеровочная белая"),
+        _item("500", "/product/kraska-a-3/", name="Краска для стен матовая"),
+        _item("600", "/product/kraska-b-4/", name="Краска для стен моющаяся"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Краска для стен")
+
+    assert parsed.price_min == Decimal("500")
+    assert parsed.price_max == Decimal("600")
+
+
+def test_fetch_price_keeps_sample_when_name_filter_would_empty_it(monkeypatch):
+    # Если по именам всё выглядит нерелевантным (разметка сменилась/имена пустые),
+    # не схлопываем выборку в ноль — цена не должна уйти в seed из-за фильтра.
+    html = _page(
+        _item("300", "/product/grunt-1/", name="Грунтовка глубокого проникновения"),
+        _item("320", "/product/grunt-2/", name="Грунт-концентрат"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Краска для стен")
+
+    assert parsed.price_min == Decimal("300")
+    assert parsed.price_max == Decimal("320")
+
+
 def test_unknown_material_raises():
     with pytest.raises(ValueError):
         LemanParser().fetch_price("Нет такого материала")
+
+
+def test_page_signature_matches_on_same_products_regardless_of_price():
+    # Overflow-детект в fetch_pages сравнивает набор id товаров: та же выдача, что
+    # и на прошлой странице (цены/порядок могут отличаться — id нет) → стоп.
+    page_a = _page(_item("100", "/product/a-1/"), _item("200", "/product/b-2/"))
+    page_a_reordered = _page(_item("999", "/product/b-2/"), _item("100", "/product/a-1/"))
+    page_b = _page(_item("100", "/product/a-1/"), _item("300", "/product/c-3/"))
+
+    assert leman_browser._page_signature(page_a) == leman_browser._page_signature(page_a_reordered)
+    assert leman_browser._page_signature(page_a) != leman_browser._page_signature(page_b)
+
+
+def test_page_signature_empty_when_no_products():
+    # Пустая/урезанная страница → пустая сигнатура; она не должна ложно
+    # срабатывать как «повтор» (в fetch_pages стоп только на непустом совпадении).
+    assert leman_browser._page_signature("<html><body></body></html>") == frozenset()

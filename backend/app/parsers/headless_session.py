@@ -10,10 +10,9 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / ".cache"
 
 # Кэш clearance-cookie DDoS-Guard на диске: харвестим headless-браузером редко
-# (см. результаты прогона в plans/2026-06-30-beta-headless-parser.md — ключевые
-# DDoS-Guard куки живут ~53ч, не минуты), а не на каждый запрос update_prices.
+# (по результатам ручного прогона ключевые DDoS-Guard куки живут ~53ч, не
+# минуты), а не на каждый запрос update_prices.
 CACHE_PATH = CACHE_DIR / "megastroy_cookie.json"
-LEMAN_CACHE_PATH = CACHE_DIR / "leman_cookie.json"
 
 # Запас сильно меньше эмпирически замеренного TTL (~53ч у __ddg8_/9_/10_),
 # чтобы не словить протухший cookie на старте долгого прогона update_prices.
@@ -63,17 +62,20 @@ def _collect_cookies(
     site_label: str,
     ready_check: Callable[[object], bool] | None = None,
 ) -> dict[str, str] | None:
-    # Общая Playwright-механика для всех сайтов: запустить headless Chromium,
-    # открыть страницу, дождаться готовности (по умолчанию — networkidle; сайты
-    # с JS-challenge вроде Мегастроя передают свою проверку через ready_check) и
-    # забрать куки контекста. Ошибка/отсутствие playwright — не исключение, а
+    # Общая механика для всех сайтов: запустить headless Chromium, открыть
+    # страницу, дождаться готовности (по умолчанию — networkidle; сайты с
+    # JS-challenge вроде Мегастроя передают свою проверку через ready_check) и
+    # забрать куки контекста. Ошибка/отсутствие patchright — не исключение, а
     # None, чтобы вызывающий код спокойно ушёл в обычный путь без cookie.
+    # patchright (не playwright) — drop-in замена с патчами против CDP-детекта;
+    # используем везде, включая Мегастрой, чтобы не тащить оба пакета разом
+    # (конфликт версии pyee — pip check ругался при обоих одновременно).
     try:
-        from playwright.sync_api import sync_playwright
+        from patchright.sync_api import sync_playwright
     except ImportError:
         logger.warning(
-            f"{site_label}: headless включён, но playwright не установлен "
-            "(pip install -r requirements-headless.txt && playwright install chromium)"
+            f"{site_label}: headless включён, но patchright не установлен "
+            "(pip install -r requirements-headless.txt && patchright install chrome)"
         )
         return None
 
@@ -104,7 +106,7 @@ def _collect_cookies(
 
 def _harvest(url: str, user_agent: str) -> str | None:
     # DDoS-Guard сам перезагружает страницу после прохождения JS-challenge —
-    # готовность определяем по смене title (у Лемана — по снятию Qrator-скрипта).
+    # готовность определяем по смене title.
     cookies = _collect_cookies(
         url, user_agent,
         site_label="Мегастрой",
@@ -132,38 +134,4 @@ def get_megastroy_cookie(url: str, user_agent: str) -> str | None:
     cookie = _harvest(url, user_agent)
     if cookie:
         _write_cache(CACHE_PATH, cookie)
-    return cookie
-
-
-def _qrator_challenge_cleared(page: object) -> bool:
-    # Qrator отдаёт страницу-заглушку с <script src="/__qrator/qauth.js">, JS
-    # считает clearance-cookie и перезагружает страницу на реальный контент.
-    # Готовность = challenge-скрипта на странице больше нет. Ловим момент ПОСЛЕ
-    # решения, иначе снимем только временную qrator_jsr (Max-Age=300), а не
-    # валидную сессионную куку.
-    return page.query_selector("script[src*='qauth.js']") is None
-
-
-def get_leman_cookie(url: str, user_agent: str) -> str | None:
-    """Clearance-cookie Qrator для Лемана: из кэша, иначе headless-харвест.
-
-    WAF Лемана — Qrator с JS-challenge (server: QRATOR, /__qrator/qauth.js):
-    голый requests получает 401, валидную куку отдаёт только после исполнения
-    JS в реальном движке. Поэтому готовность ждём по снятию challenge-скрипта
-    (не networkidle — та сработала бы на самой заглушке), а куки берём все из
-    контекста, не сужая по префиксам. Как и get_megastroy_cookie — никогда не
-    бросает исключения, сбой headless значит просто None.
-    """
-    cached = _read_cache(LEMAN_CACHE_PATH)
-    if cached:
-        return cached
-
-    cookies = _collect_cookies(
-        url, user_agent, site_label="Леман", ready_check=_qrator_challenge_cleared
-    )
-    if not cookies:
-        return None
-
-    cookie = "; ".join(f"{k}={v}" for k, v in cookies.items())
-    _write_cache(LEMAN_CACHE_PATH, cookie)
     return cookie

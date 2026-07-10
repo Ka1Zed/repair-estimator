@@ -76,6 +76,19 @@ def get_price(
             PriceSource.name == parser.source_name
         ).first()
 
+        if source is None:
+            # Источник парсера отсутствует в БД (например, добавили парсер в код,
+            # но не досеяли price_sources — `python -m app.db.seed --missing`).
+            # Без источника валидную цену некуда сохранить и нечего вернуть:
+            # молча уходили бы в seed после успешного (и, для браузерных парсеров,
+            # долгого) фетча. Логируем явно, чтобы это не выглядело как «парсер не
+            # сработал».
+            logger.warning(
+                f"Источник '{parser.source_name}' не найден в price_sources — "
+                f"цена парсера для '{material_name}' будет отброшена в seed. "
+                "Досейте источник: python -m app.db.seed --missing"
+            )
+
         price_entry = None
         if source:
             price_entry = session.query(MaterialPrice).filter(

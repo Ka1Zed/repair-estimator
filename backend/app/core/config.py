@@ -22,16 +22,21 @@ class DBSettings(BaseSettings):
     # Цены работ сеть на расчёте не трогают в любом случае (только чтение БД).
     PARSER_LIVE_FETCH: bool = True
 
-    # Beta: headless-харвестер clearance-cookie DDoS-Guard для Мегастроя
-    # (plans/2026-06-30-beta-headless-parser.md). По умолчанию выключен — без
-    # него поведение прежнее (MEGASTROY_COOKIE вручную или 403 -> seed).
-    # Требует playwright + chromium (requirements-headless.txt), поэтому не
-    # включается по умолчанию, чтобы не раздувать обязательные зависимости/образ.
+    # Beta: headless-харвестер clearance-cookie DDoS-Guard для Мегастроя.
+    # По умолчанию выключен — без него поведение прежнее (MEGASTROY_COOKIE
+    # вручную или 403 -> seed). Требует patchright + chrome
+    # (requirements-headless.txt), поэтому не включается по умолчанию, чтобы
+    # не раздувать обязательные зависимости/образ.
     MEGASTROY_HEADLESS: bool = False
 
-    # Beta: headless-харвестер cookie для Лемана (#276), тот же принцип, что у
-    # Мегастроя выше — по умолчанию выключен, требует playwright + chromium.
-    LEMAN_HEADLESS: bool = False
+    # Beta: живой браузерный фетч каталога Лемана (#276). В отличие от
+    # Мегастроя, cookie-харвест + requests тут не работает — Qrator ловит CDP
+    # даже у headed настоящего Chrome без patchright. Поэтому это не харвест
+    # cookie, а полноценный browser-fetch (app/parsers/leman_browser.py) через
+    # patchright, и он же требует РФ-резидентный IP (не сработает в GCP US),
+    # поэтому включаем только для ручного локального наполнения кэша цен.
+    # По умолчанию выключен: fetch_price не ходит в сеть → seed-fallback.
+    LEMAN_LIVE: bool = False
 
     model_config = SettingsConfigDict(env_file=ENV_PATH, env_file_encoding="utf8", extra="ignore")
 

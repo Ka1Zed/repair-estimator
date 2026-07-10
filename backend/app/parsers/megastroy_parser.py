@@ -35,9 +35,8 @@ def _build_headers(url: str | None = None) -> dict[str, str]:
     # и кладёт строку Cookie в MEGASTROY_COOKIE (целиком из DevTools → Network →
     # Request Headers → Cookie). При необходимости UA тоже можно переопределить
     # (MEGASTROY_UA) под свой браузер.
-    # Способ 2 (beta) — MEGASTROY_HEADLESS=1: headless Playwright сам проходит
-    # challenge и кэширует cookie на диске (см.
-    # plans/2026-06-30-beta-headless-parser.md). Используется только если
+    # Способ 2 (beta) — MEGASTROY_HEADLESS=1: headless-браузер сам проходит
+    # challenge и кэширует cookie на диске. Используется только если
     # MEGASTROY_COOKIE не задан руками явно.
     # Всё выключено по умолчанию → прежнее поведение (свой UA, без cookie) → 403 → seed.
     headers = dict(HEADERS)

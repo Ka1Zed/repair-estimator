@@ -1,17 +1,15 @@
 import logging
-import os
+import re
 import statistics
-import time
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urljoin
 
-import requests
 from bs4 import BeautifulSoup
 
 from app.core.config import settings
-from app.parsers import headless_session
+from app.parsers import leman_browser
 from app.parsers._stats import filter_outliers
-from app.parsers.base import BaseParser, ParsedPrice, DEFAULT_HEADERS, DEFAULT_REQUEST_TIMEOUT
+from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
 
@@ -24,44 +22,40 @@ CATEGORY_MAP = {
     "Краска потолочная": _PAINT_CATEGORY_URL,
 }
 
-HEADERS = {**DEFAULT_HEADERS, "Accept": "text/html,application/xhtml+xml"}
+# Обходим не всю категорию (до ~43 стр.): после ~15-й страницы у Лемана идут
+# серые/нет-в-наличии/нерелевантные позиции, они только искажают вилку и тянут
+# прогон на десятки минут. Осмысленная выборка — верхние страницы; семантическая
+# фильтрация категории — отдельная задача (issue-аналог #207).
+MAX_PAGES = 15
 
-REQUEST_TIMEOUT = DEFAULT_REQUEST_TIMEOUT      # таймаут запроса, сек
-REQUEST_DELAY = 1.0       # пауза между страницами, чтобы не долбить сайт
-MAX_PAGES = 20            # защита от бесконечного цикла
+CARD_SELECTOR = '[data-qa="product"]'
+_PRODUCT_ID_RE = re.compile(r"-(\d+)/?$")
 
 
-def _build_headers(url: str | None = None) -> dict[str, str]:
-    # По аналогии с megastroy_parser._build_headers: если сайт блокирует голый
-    # requests, есть два пути обхода — ручной cookie hand-off (LEMAN_COOKIE) или
-    # beta headless-харвестер (LEMAN_HEADLESS=1). Оба выключены по умолчанию.
-    headers = dict(HEADERS)
-    ua = os.environ.get("LEMAN_UA", "").strip()
-    if ua:
-        headers["User-Agent"] = ua
-    cookie = os.environ.get("LEMAN_COOKIE", "").strip()
-    if not cookie and settings.LEMAN_HEADLESS:
-        cookie = headless_session.get_leman_cookie(
-            url or "https://kazan.lemanapro.ru/", headers["User-Agent"]
-        )
-    if cookie:
-        headers["Cookie"] = cookie
-    return headers
+def _build_page_url(base_url: str, page_num: int) -> str:
+    # Пагинация Лемана 0-индексирована со 2-й страницы: 1-я страница — без
+    # ?page, дальше ?page=1, ?page=2, ... Общая с leman_browser формула.
+    if page_num == 1:
+        return base_url
+    sep = "&" if "?" in base_url else "?"
+    return f"{base_url}{sep}page={page_num - 1}"
+
+
+def _product_id(url: str | None) -> str | None:
+    if not url:
+        return None
+    match = _PRODUCT_ID_RE.search(url)
+    return match.group(1) if match else None
 
 
 def _parse_page(html: str, page_url: str) -> list[tuple[Decimal, str | None]]:
-    # Достаёт со страницы пары (цена, ссылка на карточку товара). Каждая карточка
-    # в SSR-разметке Лемана рендерится дважды (мобильная/десктопная копия с
-    # одинаковыми data-sl-product-id) — дедуплицируем, иначе цены задвоятся.
+    # Карточка товара в живой разметке каталога — [data-qa="product"] (без
+    # моб./десктоп дублей, в отличие от старой SSR-разметки). Дедуп между
+    # страницами — на стороне fetch_price (по id товара из хвоста ссылки).
     soup = BeautifulSoup(html, "html.parser")
-    items = soup.select('[data-qa="products-list"] [data-sl-product-id]')
+    items = soup.select(CARD_SELECTOR)
     results = []
-    seen_ids: set[str] = set()
     for item in items:
-        product_id = item.get("data-sl-product-id")
-        if product_id in seen_ids:
-            continue
-
         price_el = item.select_one('[data-testid="price-block-price"]')
         if not price_el:
             continue
@@ -83,7 +77,6 @@ def _parse_page(html: str, page_url: str) -> list[tuple[Decimal, str | None]]:
         href = link_el.get("href") if link_el else None
         url = urljoin(page_url, href.strip()) if href else None
 
-        seen_ids.add(product_id)
         results.append((price, url))
     return results
 
@@ -98,35 +91,37 @@ class LemanParser(BaseParser):
         if material_name not in CATEGORY_MAP:
             raise ValueError(f"Нет категории Лемана для материала '{material_name}'")
 
+        if not settings.LEMAN_LIVE:
+            # Cookie-харвест + requests (как у Мегастроя) для Лемана не работает —
+            # Qrator ловит CDP-утечки даже у headed настоящего Chrome без patchright
+            # (см. app/parsers/leman_browser.py). Без явного включения браузерного
+            # фетча в сеть не ходим вовсе — сразу уходим в seed-fallback, не тратя
+            # время на заведомо безуспешный запрос.
+            raise RuntimeError(
+                f"LEMAN_LIVE выключен — живой фетч Лемана для '{material_name}' пропущен"
+            )
+
         base_url = CATEGORY_MAP[material_name]
-        sep = "&" if "?" in base_url else "?"
+        pages_html = leman_browser.fetch_pages(base_url, MAX_PAGES)
+        if not pages_html:
+            raise RuntimeError(f"Леман: браузерный фетч не вернул ни одной страницы для '{material_name}'")
 
-        headers = _build_headers(base_url)
         items: list[tuple[Decimal, str | None]] = []
+        seen_ids: set[str] = set()
+        for page_num, html in enumerate(pages_html, start=1):
+            page_url = _build_page_url(base_url, page_num)
+            page_items = _parse_page(html, page_url)
+            new_items = []
+            for price, url in page_items:
+                product_id = _product_id(url)
+                if product_id is not None:
+                    if product_id in seen_ids:
+                        continue
+                    seen_ids.add(product_id)
+                new_items.append((price, url))
 
-        for page in range(1, MAX_PAGES + 1):
-            # Первая страница — без ?page (0-я страница сайта), со 2-й добавляем
-            # ?page=1, ?page=2, ... (пагинация Лемана 0-индексирована).
-            if page == 1:
-                url = base_url
-            else:
-                url = f"{base_url}{sep}page={page - 1}"
-
-            time.sleep(REQUEST_DELAY)
-            response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-
-            if response.status_code == 404:
-                break
-            response.raise_for_status()
-
-            page_items = _parse_page(response.text, url)
-            if not page_items:
-                # Останов по пустой странице, а не только по 404 — поведение
-                # сайта на overflow-страницах не подтверждено живым прогоном.
-                break
-
-            items.extend(page_items)
-            logger.info(f"  Леман '{material_name}' стр.{page}: +{len(page_items)} цен")
+            items.extend(new_items)
+            logger.info(f"  Леман '{material_name}' стр.{page_num}: +{len(new_items)} цен")
 
         if not items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (возможно, урезанная страница)")

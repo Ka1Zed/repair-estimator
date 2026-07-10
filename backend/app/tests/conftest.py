@@ -152,27 +152,27 @@ def seed_test_data(session):
     session.add(src_prorabneva)
     session.flush()
 
-    # Материалы (с категорией)
+    # Материалы (с категорией). slug — как в seed_data/materials.json (#278).
     materials_data = [
-        {"name": "Краска для стен", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9},
-        {"name": "Краска потолочная", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9},
-        {"name": "Грунтовка", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10},
-        {"name": "Шпаклевка стартовая", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30},
-        {"name": "Шпаклевка финишная", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
-        {"name": "Ламинат", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
-        {"name": "Плинтус", "category": "floor", "unit": "м", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
-        {"name": "Плитка", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 1.2},
-        {"name": "Плиточный клей", "category": "tile", "unit": "кг", "consumption_per_m2": 4.5, "waste_factor": 1.1, "package_size": 25},
-        {"name": "Затирка", "category": "tile", "unit": "кг", "consumption_per_m2": 0.4, "waste_factor": 1.1, "package_size": 2},
-        {"name": "Обои", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1},
-        {"name": "Линолеум", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
-        {"name": "Паркетная доска", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
-        {"name": "Краска влагостойкая", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9},
+        {"name": "Краска для стен", "slug": "paint_walls", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2},
+        {"name": "Краска потолочная", "slug": "paint_ceiling", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9, "layers": 2},
+        {"name": "Грунтовка", "slug": "primer", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10, "layers": 1},
+        {"name": "Шпаклевка стартовая", "slug": "putty_start", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30},
+        {"name": "Шпаклевка финишная", "slug": "putty_finish", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
+        {"name": "Ламинат", "slug": "laminate", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
+        {"name": "Плинтус", "slug": "plinth", "category": "floor", "unit": "м", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
+        {"name": "Плитка", "slug": "tile", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 1.2},
+        {"name": "Плиточный клей", "slug": "tile_adhesive", "category": "tile", "unit": "кг", "consumption_per_m2": 4.5, "waste_factor": 1.1, "package_size": 25},
+        {"name": "Затирка", "slug": "grout", "category": "tile", "unit": "кг", "consumption_per_m2": 0.4, "waste_factor": 1.1, "package_size": 2},
+        {"name": "Обои", "slug": "wallpaper", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1, "pattern_factor": 1.3},
+        {"name": "Линолеум", "slug": "linoleum", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
+        {"name": "Паркетная доска", "slug": "parquet", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
+        {"name": "Краска влагостойкая", "slug": "paint_moisture", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2},
         # Инженерка (works.electric / works.plumbing) — количество из запроса, не по норме.
-        {"name": "Кабель электрический", "category": "electric", "unit": "м", "waste_factor": 1.1, "package_size": 1.0},
-        {"name": "Розетка", "category": "electric", "unit": "шт", "package_size": 1},
-        {"name": "Светильник", "category": "electric", "unit": "шт", "package_size": 1},
-        {"name": "Труба водопроводная", "category": "plumbing", "unit": "м", "waste_factor": 1.1, "package_size": 2.0},
+        {"name": "Кабель электрический", "slug": "cable", "category": "electric", "unit": "м", "waste_factor": 1.1, "package_size": 1.0},
+        {"name": "Розетка", "slug": "socket", "category": "electric", "unit": "шт", "package_size": 1},
+        {"name": "Светильник", "slug": "light", "category": "electric", "unit": "шт", "package_size": 1},
+        {"name": "Труба водопроводная", "slug": "pipe", "category": "plumbing", "unit": "м", "waste_factor": 1.1, "package_size": 2.0},
     ]
     for m in materials_data:
         mat = Material(**m)
@@ -191,35 +191,35 @@ def seed_test_data(session):
         price_min=180, price_avg=200, price_max=240, region="Москва",
     ))
 
-    # Услуги 
+    # Услуги. slug — как в seed_data/labor_services.json (#278).
     services_data = [
-        {"name": "Покраска стен", "specialist_type": "Маляр", "unit": "м²"},
-        {"name": "Шпаклевка стен", "specialist_type": "Маляр", "unit": "м²"},
-        {"name": "Покраска потолка", "specialist_type": "Маляр", "unit": "м²"},
-        {"name": "Поклейка обоев", "specialist_type": "Маляр", "unit": "м²"},
-        {"name": "Укладка ламината", "specialist_type": "Укладчик", "unit": "м²"},
-        {"name": "Укладка линолеума", "specialist_type": "Укладчик", "unit": "м²"},
-        {"name": "Укладка паркета", "specialist_type": "Паркетчик", "unit": "м²"},
-        {"name": "Укладка плитки", "specialist_type": "Плиточник", "unit": "м²"},
-        {"name": "Монтаж натяжного потолка", "specialist_type": "Потолочник", "unit": "м²"},
+        {"name": "Покраска стен", "slug": "paint_walls", "specialist_type": "Маляр", "unit": "м²"},
+        {"name": "Шпаклевка стен", "slug": "putty_walls", "specialist_type": "Маляр", "unit": "м²"},
+        {"name": "Покраска потолка", "slug": "paint_ceiling", "specialist_type": "Маляр", "unit": "м²"},
+        {"name": "Поклейка обоев", "slug": "wallpaper_gluing", "specialist_type": "Маляр", "unit": "м²"},
+        {"name": "Укладка ламината", "slug": "lay_laminate", "specialist_type": "Укладчик", "unit": "м²"},
+        {"name": "Укладка линолеума", "slug": "lay_linoleum", "specialist_type": "Укладчик", "unit": "м²"},
+        {"name": "Укладка паркета", "slug": "lay_parquet", "specialist_type": "Паркетчик", "unit": "м²"},
+        {"name": "Укладка плитки", "slug": "lay_tile", "specialist_type": "Плиточник", "unit": "м²"},
+        {"name": "Монтаж натяжного потолка", "slug": "stretch_ceiling", "specialist_type": "Потолочник", "unit": "м²"},
         # Натяжной потолок блоком + откосы (#191).
-        {"name": "Закладная под светильник", "specialist_type": "Потолочник", "unit": "шт"},
-        {"name": "Ниша под карниз", "specialist_type": "Потолочник", "unit": "м"},
-        {"name": "Отделка откосов", "specialist_type": "Штукатур", "unit": "м²"},
-        {"name": "Электромонтаж", "specialist_type": "Электрик", "unit": "точка"},
-        {"name": "Штробление", "specialist_type": "Электрик", "unit": "м"},
-        {"name": "Сантехнические работы", "specialist_type": "Сантехник", "unit": "точка"},
+        {"name": "Закладная под светильник", "slug": "ceiling_embed", "specialist_type": "Потолочник", "unit": "шт"},
+        {"name": "Ниша под карниз", "slug": "curtain_niche", "specialist_type": "Потолочник", "unit": "м"},
+        {"name": "Отделка откосов", "slug": "otkos", "specialist_type": "Штукатур", "unit": "м²"},
+        {"name": "Электромонтаж", "slug": "electrical_install", "specialist_type": "Электрик", "unit": "точка"},
+        {"name": "Штробление", "slug": "chasing", "specialist_type": "Электрик", "unit": "м"},
+        {"name": "Сантехнические работы", "slug": "plumbing_works", "specialist_type": "Сантехник", "unit": "точка"},
         # Гранулярная инженерка works (#222).
-        {"name": "Прокладка кабеля", "specialist_type": "Электрик", "unit": "м"},
-        {"name": "Монтаж розетки", "specialist_type": "Электрик", "unit": "шт"},
-        {"name": "Монтаж светильника", "specialist_type": "Электрик", "unit": "шт"},
-        {"name": "Монтаж труб", "specialist_type": "Сантехник", "unit": "м"},
+        {"name": "Прокладка кабеля", "slug": "cable_lay", "specialist_type": "Электрик", "unit": "м"},
+        {"name": "Монтаж розетки", "slug": "socket_mount", "specialist_type": "Электрик", "unit": "шт"},
+        {"name": "Монтаж светильника", "slug": "light_mount", "specialist_type": "Электрик", "unit": "шт"},
+        {"name": "Монтаж труб", "slug": "pipe_mount", "specialist_type": "Сантехник", "unit": "м"},
         # Черновые работы (#190).
-        {"name": "Демонтаж", "specialist_type": "Разнорабочий", "unit": "м²"},
-        {"name": "Выравнивание стен", "specialist_type": "Штукатур", "unit": "м²"},
-        {"name": "Стяжка пола", "specialist_type": "Стяжечник", "unit": "м²"},
-        {"name": "Гидроизоляция", "specialist_type": "Гидроизолировщик", "unit": "м²"},
-        {"name": "Грунтование", "specialist_type": "Маляр", "unit": "м²"},
+        {"name": "Демонтаж", "slug": "demolition", "specialist_type": "Разнорабочий", "unit": "м²"},
+        {"name": "Выравнивание стен", "slug": "level_walls", "specialist_type": "Штукатур", "unit": "м²"},
+        {"name": "Стяжка пола", "slug": "screed_floor", "specialist_type": "Стяжечник", "unit": "м²"},
+        {"name": "Гидроизоляция", "slug": "waterproof", "specialist_type": "Гидроизолировщик", "unit": "м²"},
+        {"name": "Грунтование", "slug": "priming", "specialist_type": "Маляр", "unit": "м²"},
     ]
     for s in services_data:
         svc = LaborService(**s)

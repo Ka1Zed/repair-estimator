@@ -1,204 +1,107 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect, useLayoutEffect } from "react";
 import { useProjectStore } from "../store/projectStore";
 import { getSelfIntersectingEdges } from "../utils/polygonValidation";
 
+type ViewBox = { x: number; y: number; w: number; h: number };
+
+const GRID_STEP = 0.5; // metres
+
 export default function RoomPolygonEditor() {
   const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
-  const points = useProjectStore(
-    (state) => state.rooms[activeRoomIndex].points,
-  );
+  const points = useProjectStore((state) => state.rooms[activeRoomIndex].points);
   const updatePoint = useProjectStore((state) => state.updatePoint);
   const setPoints = useProjectStore((state) => state.setPoints);
-
   const clearActiveRoom = useProjectStore((state) => state.clearActiveRoom);
   const loadDemoRoom = useProjectStore((state) => state.loadDemoRoom);
   const resetProject = useProjectStore((state) => state.resetProject);
 
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(true);
-
   const [editingEdge, setEditingEdge] = useState<number | null>(null);
   const [edgeInputValue, setEdgeInputValue] = useState("");
 
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [dragSnapshot, setDragSnapshot] = useState<{
-    scale: number;
-    offsetX: number;
-    offsetY: number;
-    svgWidth: number;
-    svgHeight: number;
-  } | null>(null);
+  // null = auto-fit, non-null = user has zoomed/panned
+  const [userViewBox, setUserViewBox] = useState<ViewBox | null>(null);
+  // frozen viewBox during vertex drag to prevent coordinate feedback loop
+  const [dragVb, setDragVb] = useState<ViewBox | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
 
-  const controlButtonsJSX = (
-    <div
-      style={{
-        display: "flex",
-        gap: "10px",
-        marginTop: "15px",
-        justifyContent: "flex-end",
-        flexWrap: "wrap",
-      }}
-    >
-      <button
-        onClick={resetProject}
-        style={{
-          padding: "8px 14px",
-          background: "#fff",
-          color: "#B5524A",
-          border: "1px solid #E3C9C4",
-          borderRadius: "3px",
-          cursor: "pointer",
-          fontSize: "13px",
-          letterSpacing: ".01em",
-          marginRight: "auto",
-        }}
-      >
-        Сбросить черновик
-      </button>
-      <button
-        onClick={clearActiveRoom}
-        style={{
-          padding: "8px 14px",
-          background: "#fff",
-          color: "#8A8A8A",
-          border: "1px solid var(--border)",
-          borderRadius: "3px",
-          cursor: "pointer",
-          fontSize: "13px",
-          letterSpacing: ".01em",
-        }}
-      >
-        Очистить комнату
-      </button>
-      <button
-        onClick={loadDemoRoom}
-        style={{
-          padding: "8px 14px",
-          background: "var(--accent-bg)",
-          color: "var(--accent)",
-          border: "1px solid var(--accent-border)",
-          borderRadius: "3px",
-          cursor: "pointer",
-          fontSize: "13px",
-          letterSpacing: ".01em",
-        }}
-      >
-        Загрузить пример
-      </button>
-    </div>
+  const svgRef = useRef<SVGSVGElement>(null);
+  // pan state stored in ref (only read inside event handlers, not during render)
+  const panRef = useRef<{ startX: number; startY: number; vb: ViewBox; ctm: DOMMatrix } | null>(null);
+
+  const safePoints = useMemo(
+    () => points.map((p) => ({ x: Number(p.x) || 0, y: Number(p.y) || 0 })),
+    [points],
   );
 
+  const autoViewBox = useMemo((): ViewBox => {
+    if (safePoints.length < 3) return { x: -1, y: -1, w: 10, h: 8 };
+    const xs = safePoints.map((p) => p.x);
+    const ys = safePoints.map((p) => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const pw = Math.max(maxX - minX, 0.1);
+    const ph = Math.max(maxY - minY, 0.1);
+    const pad = Math.max(pw, ph) * 0.18;
+    return { x: minX - pad, y: minY - pad, w: pw + pad * 2, h: ph + pad * 2 };
+  }, [safePoints]);
+
+  // During vertex drag freeze viewBox so CTM stays stable
+  const vb: ViewBox = (draggingIdx !== null && dragVb) ? dragVb : (userViewBox ?? autoViewBox);
+
+  // Ref for wheel handler — keeps listener stable (no re-add on every pan/drag frame)
+  const vbRef = useRef<ViewBox>(vb);
+  useLayoutEffect(() => { vbRef.current = vb; });
+
+  const viewBoxStr = `${vb.x} ${vb.y} ${vb.w} ${vb.h}`;
+
+  // Scale-invariant sizes (proportional to viewBox width)
+  const pointR = vb.w * 0.018;
+  const fontSize = vb.w * 0.032;
+  const labelW = vb.w * 0.12;
+  const labelH = vb.w * 0.052;
+
   const badEdges = useMemo(() => getSelfIntersectingEdges(points), [points]);
-
-  if (points.length < 3) {
-    return (
-      <div style={{ marginTop: "20px", width: "100%" }}>
-        <div style={{ color: "#888", marginBottom: "15px" }}>
-          Добавьте минимум 3 точки для отображения плана или загрузите готовый
-          пример.
-        </div>
-        {controlButtonsJSX}
-      </div>
-    );
-  }
-
-  const safePoints = points.map((p) => ({
-    x: Number(p.x) || 0,
-    y: Number(p.y) || 0,
-  }));
-
-  const calculateDistance = (
-    p1: { x: number; y: number },
-    p2: { x: number; y: number },
-  ) => {
-    return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
-  };
-
-  const xs = safePoints.map((p) => p.x);
-  const ys = safePoints.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-
-  const rangeX = maxX - minX;
-  const rangeY = maxY - minY;
-  const effectiveRangeX = rangeX === 0 ? 1 : rangeX;
-  const effectiveRangeY = rangeY === 0 ? 1 : rangeY;
-
-  const MAX_PREVIEW_WIDTH = 400;
-  const MAX_PREVIEW_HEIGHT = 300;
-
-  const paddingX = effectiveRangeX * 0.2;
-  const paddingY = effectiveRangeY * 0.2;
-  const totalViewWidth = effectiveRangeX + paddingX * 2;
-  const totalViewHeight = effectiveRangeY + paddingY * 2;
-
-  const scaleX = MAX_PREVIEW_WIDTH / totalViewWidth;
-  const scaleY = MAX_PREVIEW_HEIGHT / totalViewHeight;
-  const scale = Math.min(scaleX, scaleY);
-
-  const svgWidth = totalViewWidth * scale;
-  const svgHeight = totalViewHeight * scale;
-  const offsetX = minX - paddingX;
-  const offsetY = minY - paddingY;
-
-  // Freeze coordinate system during drag to prevent feedback loop:
-  // updatePoint → bbox change → scale/offset change → wrong cursor coord → updatePoint → ...
-  const snap = dragSnapshot;
-  const activeScale = snap ? snap.scale : scale;
-  const activeOffsetX = snap ? snap.offsetX : offsetX;
-  const activeOffsetY = snap ? snap.offsetY : offsetY;
-  const activeSvgWidth = snap ? snap.svgWidth : svgWidth;
-  const activeSvgHeight = snap ? snap.svgHeight : svgHeight;
-
-  const GRID_STEP = 0.5;
-  const gridPixelSize = GRID_STEP * activeScale;
-
-  const gridOffsetX = (-activeOffsetX * activeScale) % gridPixelSize;
-  const gridOffsetY = (-activeOffsetY * activeScale) % gridPixelSize;
-
-  const pointsString = safePoints
-    .map((p) => `${(p.x - activeOffsetX) * activeScale},${(p.y - activeOffsetY) * activeScale}`)
-    .join(" ");
-
   const hasBadEdges = badEdges.size > 0;
 
+  // Convert screen pixel coords to SVG user (real) coords using current CTM
+  const screenToReal = (clientX: number, clientY: number, ctm?: DOMMatrix) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const resolvedCtm = ctm ?? svg.getScreenCTM();
+    if (!resolvedCtm) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    return pt.matrixTransform(resolvedCtm.inverse());
+  };
+
+  const calculateDistance = (p1: { x: number; y: number }, p2: { x: number; y: number }) =>
+    Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
+
+  // --- Vertex drag ---
   const handlePointerDown = (index: number) => {
-    setDragSnapshot({ scale, offsetX, offsetY, svgWidth, svgHeight });
+    setDragVb(userViewBox ?? autoViewBox);
     setDraggingIdx(index);
     setEditingEdge(null);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (draggingIdx === null || !svgRef.current || !dragSnapshot) return;
-
-    const { scale: s, offsetX: ox, offsetY: oy } = dragSnapshot;
-    const svg = svgRef.current;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return;
-
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const cursorPt = pt.matrixTransform(ctm.inverse());
-
-    let newRealX = cursorPt.x / s + ox;
-    let newRealY = cursorPt.y / s + oy;
-
+    if (draggingIdx === null) return;
+    let { x, y } = screenToReal(e.clientX, e.clientY);
     if (snapToGrid) {
-      newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
-      newRealY = Math.round(newRealY / GRID_STEP) * GRID_STEP;
+      x = Math.round(x / GRID_STEP) * GRID_STEP;
+      y = Math.round(y / GRID_STEP) * GRID_STEP;
     } else {
-      newRealX = Math.round(newRealX * 1000) / 1000;
-      newRealY = Math.round(newRealY * 1000) / 1000;
+      x = Math.round(x * 1000) / 1000;
+      y = Math.round(y * 1000) / 1000;
     }
-
-    updatePoint(draggingIdx, newRealX, newRealY);
+    updatePoint(draggingIdx, x, y);
   };
 
   const handlePointerUp = () => {
-    setDragSnapshot(null);
+    setDragVb(null);
     setDraggingIdx(null);
   };
 
@@ -214,138 +117,152 @@ export default function RoomPolygonEditor() {
     }
   };
 
+  // --- Add point on edge click ---
   const handleEdgeClick = (e: React.PointerEvent, index1: number) => {
     if (editingEdge !== null) return;
-
-    const svg = svgRef.current;
-    if (!svg) return;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return;
-
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const cursorPt = pt.matrixTransform(ctm.inverse());
-
-    let newRealX = cursorPt.x / scale + offsetX;
-    let newRealY = cursorPt.y / scale + offsetY;
-
+    let { x, y } = screenToReal(e.clientX, e.clientY);
     if (snapToGrid) {
-      newRealX = Math.round(newRealX / GRID_STEP) * GRID_STEP;
-      newRealY = Math.round(newRealY / GRID_STEP) * GRID_STEP;
+      x = Math.round(x / GRID_STEP) * GRID_STEP;
+      y = Math.round(y / GRID_STEP) * GRID_STEP;
     } else {
-      newRealX = Math.round(newRealX * 1000) / 1000;
-      newRealY = Math.round(newRealY * 1000) / 1000;
+      x = Math.round(x * 1000) / 1000;
+      y = Math.round(y * 1000) / 1000;
     }
-
     const newPoints = [...points];
-    newPoints.splice(index1 + 1, 0, { x: newRealX, y: newRealY });
+    newPoints.splice(index1 + 1, 0, { x, y });
     setPoints(newPoints);
   };
 
+  // --- Edge length edit ---
   const handleEdgeLengthSubmit = (index: number) => {
-    if (!edgeInputValue) {
-      setEditingEdge(null);
-      return;
-    }
-
+    if (!edgeInputValue) { setEditingEdge(null); return; }
     const newLen = parseFloat(edgeInputValue.replace(",", "."));
-    if (isNaN(newLen) || newLen <= 0) {
-      setEditingEdge(null);
-      return;
-    }
-
+    if (isNaN(newLen) || newLen <= 0) { setEditingEdge(null); return; }
     const p1 = safePoints[index];
     const nextIndex = (index + 1) % safePoints.length;
     const p2 = safePoints[nextIndex];
-
     const currentLen = calculateDistance(p1, p2);
-    if (currentLen === 0) {
-      setEditingEdge(null);
-      return;
-    }
-
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-
-    const nx = dx / currentLen;
-    const ny = dy / currentLen;
-
-    let newRealX = p1.x + nx * newLen;
-    let newRealY = p1.y + ny * newLen;
-
-    newRealX = Math.round(newRealX * 1000) / 1000;
-    newRealY = Math.round(newRealY * 1000) / 1000;
-
-    updatePoint(nextIndex, newRealX, newRealY);
+    if (currentLen === 0) { setEditingEdge(null); return; }
+    const nx = (p2.x - p1.x) / currentLen;
+    const ny = (p2.y - p1.y) / currentLen;
+    updatePoint(nextIndex, Math.round((p1.x + nx * newLen) * 1000) / 1000, Math.round((p1.y + ny * newLen) * 1000) / 1000);
     setEditingEdge(null);
     setEdgeInputValue("");
   };
 
+  // --- Pan ---
+  const handleBgDown = (e: React.PointerEvent) => {
+    if (draggingIdx !== null || editingEdge !== null) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const svg = svgRef.current;
+    if (!svg) return;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return;
+    const { x, y } = screenToReal(e.clientX, e.clientY, ctm);
+    panRef.current = { startX: x, startY: y, vb: userViewBox ?? autoViewBox, ctm };
+    setIsPanning(true);
+  };
+
+  const handleBgMove = (e: React.PointerEvent) => {
+    if (!panRef.current) return;
+    const current = screenToReal(e.clientX, e.clientY, panRef.current.ctm);
+    const dx = current.x - panRef.current.startX;
+    const dy = current.y - panRef.current.startY;
+    const pv = panRef.current.vb;
+    setUserViewBox({ x: pv.x - dx, y: pv.y - dy, w: pv.w, h: pv.h });
+  };
+
+  const handleBgUp = () => {
+    panRef.current = null;
+    setIsPanning(false);
+  };
+
+  // --- Zoom (нативный listener — React вешает onWheel пассивно, поэтому
+  //     preventDefault() в нём no-op и страница скроллится вместе с зумом)
+  //     Читаем vbRef.current вместо замыкания на state — listener стабилен,
+  //     не пересоздаётся на каждый pointermove при пане/драге. ---
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const cursor = screenToReal(e.clientX, e.clientY);
+      const cv = vbRef.current;
+      // Math.pow учитывает величину deltaY → плавный зум на трекпаде
+      const factor = Math.pow(1.0015, e.deltaY);
+      const newW = Math.min(Math.max(cv.w * factor, 0.5), 500);
+      const newH = cv.h * (newW / cv.w);
+      const rx = (cursor.x - cv.x) / cv.w;
+      const ry = (cursor.y - cv.y) / cv.h;
+      setUserViewBox({ x: cursor.x - rx * newW, y: cursor.y - ry * newH, w: newW, h: newH });
+    };
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // --- Fit to view ---
+  const handleFitToView = () => setUserViewBox(null);
+
+  const pointsStr = safePoints.map((p) => `${p.x},${p.y}`).join(" ");
+
+  const controlButtonsJSX = (
+    <div style={{ display: "flex", gap: "10px", marginTop: "15px", justifyContent: "flex-end", flexWrap: "wrap" }}>
+      <button
+        onClick={resetProject}
+        style={{ padding: "8px 14px", background: "#fff", color: "#B5524A", border: "1px solid #E3C9C4", borderRadius: "3px", cursor: "pointer", fontSize: "13px", letterSpacing: ".01em", marginRight: "auto" }}
+      >
+        Сбросить черновик
+      </button>
+      <button
+        onClick={clearActiveRoom}
+        style={{ padding: "8px 14px", background: "#fff", color: "#8A8A8A", border: "1px solid var(--border)", borderRadius: "3px", cursor: "pointer", fontSize: "13px", letterSpacing: ".01em" }}
+      >
+        Очистить комнату
+      </button>
+      <button
+        onClick={loadDemoRoom}
+        style={{ padding: "8px 14px", background: "var(--accent-bg)", color: "var(--accent)", border: "1px solid var(--accent-border)", borderRadius: "3px", cursor: "pointer", fontSize: "13px", letterSpacing: ".01em" }}
+      >
+        Загрузить пример
+      </button>
+    </div>
+  );
+
+  if (points.length < 3) {
+    return (
+      <div style={{ marginTop: "20px", width: "100%" }}>
+        <div style={{ color: "#888", marginBottom: "15px" }}>
+          Добавьте минимум 3 точки для отображения плана или загрузите готовый пример.
+        </div>
+        {controlButtonsJSX}
+      </div>
+    );
+  }
+
   return (
     <div style={{ marginTop: "20px", width: "100%" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-end",
-          marginBottom: "10px",
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: "11px",
-              letterSpacing: ".16em",
-              textTransform: "uppercase",
-              color: "#B0B0B0",
-              marginBottom: "8px",
-            }}
-          >
-            Проект · план помещения
-          </div>
-          <p
-            style={{
-              fontSize: "13px",
-              color: "#8A8A8A",
-              margin: 0,
-            }}
-          >
-            💡 Клик по границе — добавить точку.
-            <br />
-            💡 <b>Клик по ценнику</b> — задать точную длину.
-            <br />
-            💡 <b>Shift + Клик</b> по точке — удалить.
-          </p>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-end",
-          }}
-        >
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              cursor: "pointer",
-              fontSize: "12px",
-              color: "#8A8A8A",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={snapToGrid}
-              onChange={(e) => setSnapToGrid(e.target.checked)}
-              style={{ marginRight: "6px", accentColor: "var(--accent)" }}
-            />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "10px" }}>
+        <p style={{ fontSize: "13px", color: "#8A8A8A", margin: 0 }}>
+          💡 Клик по границе — добавить точку.
+          <br />
+          💡 <b>Клик по ценнику</b> — задать точную длину.
+          <br />
+          💡 <b>Shift + Клик</b> по точке — удалить.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+          <label style={{ display: "flex", alignItems: "center", cursor: "pointer", fontSize: "12px", color: "#8A8A8A" }}>
+            <input type="checkbox" checked={snapToGrid} onChange={(e) => setSnapToGrid(e.target.checked)} style={{ marginRight: "6px", accentColor: "var(--accent)" }} />
             Привязка к узлам
           </label>
-          <span style={{ fontSize: "11px", color: "#B8B8B8", marginTop: "4px" }}>
-            1 клетка = 0.5 м
-          </span>
+          <span style={{ fontSize: "11px", color: "#B8B8B8" }}>1 клетка = 0.5 м</span>
+          {userViewBox && (
+            <button
+              onClick={handleFitToView}
+              style={{ padding: "4px 10px", background: "#fff", color: "#8A8A8A", border: "1px solid var(--border)", borderRadius: "3px", cursor: "pointer", fontSize: "12px" }}
+            >
+              Вписать
+            </button>
+          )}
         </div>
       </div>
 
@@ -353,117 +270,100 @@ export default function RoomPolygonEditor() {
         style={{
           background: "var(--bg-canvas)",
           border: "1px solid var(--border)",
-          padding: "20px",
           borderRadius: "4px",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          boxSizing: "border-box",
-          minHeight: "150px",
-          cursor: draggingIdx !== null ? "grabbing" : "default",
+          overflow: "hidden",
+          cursor: isPanning || draggingIdx !== null ? "grabbing" : "default",
+          height: "clamp(280px, 50vh, 600px)",
         }}
       >
         <svg
           ref={svgRef}
-          viewBox={`0 0 ${activeSvgWidth} ${activeSvgHeight}`}
-          style={{
-            display: "block",
-            touchAction: "none",
-            width: "100%",
-            height: "auto",
-            maxHeight: "300px",
-            overflow: "visible",
-          }}
+          viewBox={viewBoxStr}
+          width="100%"
+          height="100%"
+          preserveAspectRatio="xMidYMid meet"
+          style={{ display: "block", touchAction: "none" }}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
         >
           <defs>
-            <pattern
-              id="grid"
-              width={gridPixelSize}
-              height={gridPixelSize}
-              patternUnits="userSpaceOnUse"
-              patternTransform={`translate(${gridOffsetX}, ${gridOffsetY})`}
-            >
-              <circle
-                cx={gridPixelSize / 2}
-                cy={gridPixelSize / 2}
-                r="1"
-                fill="#DDDDDD"
-              />
+            <pattern id="rpeg-grid" width={GRID_STEP} height={GRID_STEP} patternUnits="userSpaceOnUse">
+              <circle cx={GRID_STEP / 2} cy={GRID_STEP / 2} r={GRID_STEP * 0.06} fill="#DDDDDD" />
             </pattern>
           </defs>
-          <rect width="100%" height="100%" fill="#FFFFFF" />
-          <rect width="100%" height="100%" fill="url(#grid)" />
 
-          <polygon
-            points={pointsString}
-            fill={hasBadEdges ? "rgba(176,70,70,0.05)" : "rgba(176,123,94,0.06)"}
-            stroke="none"
+          {/* background: covers full viewBox */}
+          <rect
+            x={vb.x - vb.w}
+            y={vb.y - vb.h}
+            width={vb.w * 3}
+            height={vb.h * 3}
+            fill="white"
+            onPointerDown={handleBgDown}
+            onPointerMove={handleBgMove}
+            onPointerUp={handleBgUp}
+            onPointerCancel={handleBgUp}
+          />
+          <rect
+            x={vb.x - vb.w}
+            y={vb.y - vb.h}
+            width={vb.w * 3}
+            height={vb.h * 3}
+            fill="url(#rpeg-grid)"
+            style={{ pointerEvents: "none" }}
           />
 
+          {/* polygon fill */}
+          <polygon
+            points={pointsStr}
+            fill={hasBadEdges ? "rgba(176,70,70,0.05)" : "rgba(176,123,94,0.06)"}
+            stroke="none"
+            style={{ pointerEvents: "none" }}
+          />
+
+          {/* edge stroke */}
           {safePoints.map((p, i) => {
-            const nextIndex = (i + 1) % safePoints.length;
-            const nextP = safePoints[nextIndex];
+            const np = safePoints[(i + 1) % safePoints.length];
             const isBad = badEdges.has(i);
             return (
               <line
-                key={`edge-stroke-${i}`}
-                x1={(p.x - activeOffsetX) * activeScale}
-                y1={(p.y - activeOffsetY) * activeScale}
-                x2={(nextP.x - activeOffsetX) * activeScale}
-                y2={(nextP.y - activeOffsetY) * activeScale}
+                key={`es-${i}`}
+                x1={p.x} y1={p.y} x2={np.x} y2={np.y}
                 stroke={isBad ? "var(--error)" : "var(--accent)"}
-                strokeWidth={isBad ? "2.5" : "1.5"}
-                strokeDasharray={isBad ? "5 3" : undefined}
+                strokeWidth={isBad ? vb.w * 0.006 : vb.w * 0.004}
+                strokeDasharray={isBad ? `${vb.w * 0.015} ${vb.w * 0.009}` : undefined}
+                style={{ pointerEvents: "none" }}
               />
             );
           })}
 
+          {/* edge hit targets */}
           {safePoints.map((p, i) => {
-            const nextIndex = (i + 1) % safePoints.length;
-            const nextP = safePoints[nextIndex];
+            const np = safePoints[(i + 1) % safePoints.length];
             return (
               <line
-                key={`edge-hit-${i}`}
-                x1={(p.x - activeOffsetX) * activeScale}
-                y1={(p.y - activeOffsetY) * activeScale}
-                x2={(nextP.x - activeOffsetX) * activeScale}
-                y2={(nextP.y - activeOffsetY) * activeScale}
+                key={`eh-${i}`}
+                x1={p.x} y1={p.y} x2={np.x} y2={np.y}
                 stroke="transparent"
-                strokeWidth="15"
+                strokeWidth={vb.w * 0.05}
                 style={{ cursor: "crosshair" }}
                 onPointerDown={(e) => handleEdgeClick(e, i)}
               />
             );
           })}
 
+          {/* edge labels */}
           {safePoints.map((p, i) => {
-            const nextIndex = (i + 1) % safePoints.length;
-            const nextP = safePoints[nextIndex];
-
-            const midX = (p.x + nextP.x) / 2;
-            const midY = (p.y + nextP.y) / 2;
-
-            const screenMidX = (midX - activeOffsetX) * activeScale;
-            const screenMidY = (midY - activeOffsetY) * activeScale;
-
-            const currentLen = calculateDistance(p, nextP);
-            const displayLen = Number.isInteger(currentLen)
-              ? currentLen.toString()
-              : currentLen.toFixed(1);
+            const np = safePoints[(i + 1) % safePoints.length];
+            const mx = (p.x + np.x) / 2;
+            const my = (p.y + np.y) / 2;
+            const len = calculateDistance(p, np);
+            const displayLen = Number.isInteger(len) ? len.toString() : len.toFixed(1);
 
             if (editingEdge === i) {
               return (
-                <foreignObject
-                  key={`edge-input-${i}`}
-                  x={screenMidX - 35}
-                  y={screenMidY - 15}
-                  width="70"
-                  height="30"
-                  style={{ overflow: "visible" }}
-                >
+                <foreignObject key={`ei-${i}`} x={mx - labelW / 2} y={my - labelH / 2} width={labelW} height={labelH} style={{ overflow: "visible" }}>
                   <input
                     autoFocus
                     type="text"
@@ -473,23 +373,9 @@ export default function RoomPolygonEditor() {
                     onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleEdgeLengthSubmit(i);
-                      if (e.key === "Escape") {
-                        setEdgeInputValue("");
-                        setEditingEdge(null);
-                      }
+                      if (e.key === "Escape") { setEdgeInputValue(""); setEditingEdge(null); }
                     }}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      textAlign: "center",
-                      fontSize: "12px",
-                      border: "1px solid var(--accent)",
-                      borderRadius: "3px",
-                      background: "#fff",
-                      color: "var(--text-h)",
-                      outline: "none",
-                      boxSizing: "border-box",
-                    }}
+                    style={{ width: "100%", height: "100%", textAlign: "center", fontSize: "12px", border: "1px solid var(--accent)", borderRadius: "3px", background: "#fff", color: "var(--text-h)", outline: "none", boxSizing: "border-box" }}
                   />
                 </foreignObject>
               );
@@ -497,47 +383,27 @@ export default function RoomPolygonEditor() {
 
             return (
               <g
-                key={`edge-label-group-${i}`}
+                key={`el-${i}`}
                 style={{ cursor: "pointer" }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEditingEdge(i);
-                  setEdgeInputValue(displayLen);
-                }}
+                onClick={(e) => { e.stopPropagation(); setEditingEdge(i); setEdgeInputValue(displayLen); }}
               >
-                <rect
-                  x={screenMidX - 25}
-                  y={screenMidY - 11}
-                  width="50"
-                  height="22"
-                  rx="3"
-                  fill="#FFFFFF"
-                  stroke="var(--border)"
-                  strokeWidth="1"
-                />
-                <text
-                  x={screenMidX}
-                  y={screenMidY}
-                  fill="#6B6B6B"
-                  fontSize="11"
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                >
+                <rect x={mx - labelW / 2} y={my - labelH / 2} width={labelW} height={labelH} rx={vb.w * 0.008} fill="#FFFFFF" stroke="var(--border)" strokeWidth={vb.w * 0.003} />
+                <text x={mx} y={my} fill="#6B6B6B" fontSize={fontSize} textAnchor="middle" dominantBaseline="central" style={{ letterSpacing: "normal" }}>
                   {displayLen}м
                 </text>
               </g>
             );
           })}
 
+          {/* vertex circles */}
           {safePoints.map((p, i) => (
             <circle
-              key={i}
-              cx={(p.x - activeOffsetX) * activeScale}
-              cy={(p.y - activeOffsetY) * activeScale}
-              r={draggingIdx === i ? "6.5" : "5"}
+              key={`v-${i}`}
+              cx={p.x} cy={p.y}
+              r={draggingIdx === i ? pointR * 1.3 : pointR}
               fill={draggingIdx === i ? "var(--accent)" : "#FFFFFF"}
               stroke="var(--accent)"
-              strokeWidth="1.4"
+              strokeWidth={vb.w * 0.003}
               onPointerDown={(e) => handleDeletePoint(i, e)}
               style={{ cursor: "grab" }}
             />
@@ -546,17 +412,7 @@ export default function RoomPolygonEditor() {
       </div>
 
       {hasBadEdges && (
-        <div
-          style={{
-            marginTop: "10px",
-            padding: "8px 12px",
-            background: "var(--error-bg)",
-            border: "1px solid var(--error-border)",
-            borderRadius: "4px",
-            color: "var(--error)",
-            fontSize: "13px",
-          }}
-        >
+        <div style={{ marginTop: "10px", padding: "8px 12px", background: "var(--error-bg)", border: "1px solid var(--error-border)", borderRadius: "4px", color: "var(--error)", fontSize: "13px" }}>
           Контур самопересекается — площадь будет неверной. Исправьте форму комнаты.
         </div>
       )}

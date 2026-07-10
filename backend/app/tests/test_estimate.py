@@ -170,6 +170,31 @@ class TestMaterialCalc:
         assert finish(even) == finish(no_field)
         assert finish(uneven) == finish(no_field)
 
+    def test_unknown_material_slug_skipped_not_crashed(self, db_session):
+        """Опечатка/расхождение slug в seed → материал тихо пропускается (как раньше
+        было с name), расчёт остальных строк не падает (#278)."""
+        from app.db.models import Material
+
+        primer = db_session.query(Material).filter(Material.slug == "primer").first()
+        primer.slug = "primer_TYPO"
+        db_session.commit()
+        try:
+            geometry = {
+                'floor_area': Decimal('12.0'), 'ceiling_area': Decimal('12.0'),
+                'wall_area': Decimal('34.1'), 'perimeter': Decimal('14.0'),
+                'door_width_sum': Decimal('0.8'),
+            }
+            repair_options = {'floor': None, 'walls': 'paint', 'ceiling': None}
+
+            materials = calculate_materials(geometry, repair_options, db_session)
+
+            names = {m['name'] for m in materials}
+            assert 'Грунтовка' not in names          # slug разошёлся — строка пропущена
+            assert 'Шпаклевка стартовая' in names     # остальные материалы посчитаны как обычно
+            assert 'Краска для стен' in names
+        finally:
+            primer.slug = "primer"
+            db_session.commit()
 
 
 class TestLaborCalc:
@@ -421,10 +446,11 @@ class TestFinishOptionsCoverage:
                 for m in materials:
                     assert m["quantity"] > 0, f"нулевое количество {m['name']}: {ctx}"
                     # get_price → seed-цена; None означало бы source «нет цены» в смете.
-                    assert get_price(m["name"]) is not None, f"нет цены материала {m['name']}: {ctx}"
+                    assert get_price(m["name"], db=db_session) is not None, \
+                        f"нет цены материала {m['name']}: {ctx}"
                 for job in labor:
                     # Работа без цены молча выпадает из сметы (endpoint: continue).
-                    assert get_labor_price(job["service"]) is not None, \
+                    assert get_labor_price(job["service"], db=db_session) is not None, \
                         f"нет цены работы {job['service']}: {ctx}"
 
     def test_wallpaper_has_gluing_work(self, db_session):
@@ -432,7 +458,7 @@ class TestFinishOptionsCoverage:
         labor = calculate_labor(self.GEOM, {"walls": "wallpaper"}, db_session)
         services = {j["service"] for j in labor}
         assert "Поклейка обоев" in services
-        assert get_labor_price("Поклейка обоев") is not None
+        assert get_labor_price("Поклейка обоев", db=db_session) is not None
 
     def test_parquet_maps_to_own_material_and_work(self, db_session):
         """Паркет: отдельный материал «Паркетная доска» и работа «Укладка паркета»,
@@ -459,7 +485,7 @@ class TestFinishOptionsCoverage:
         by_service = {j["service"]: j for j in labor}
         assert "Монтаж натяжного потолка" in by_service
         assert by_service["Монтаж натяжного потолка"]["volume"] == Decimal("12.0")
-        price = get_labor_price("Монтаж натяжного потолка")
+        price = get_labor_price("Монтаж натяжного потолка", db=db_session)
         assert price is not None and price.price_avg > 0
         # Натяжной не даёт строки материала.
         assert calculate_materials(self.GEOM, opts, db_session) == []

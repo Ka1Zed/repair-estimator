@@ -17,21 +17,19 @@ client = TestClient(app)
 
 # --- lookup материалов ---
 
-@pytest.mark.usefixtures("setup_test_db")
-def test_material_regional_price_selected():
+def test_material_regional_price_selected(db_session):
     """При заданном region выбирается seed-цена этого региона, а не базовая."""
-    moscow = get_price("Краска для стен", region="Москва")
-    base = get_price("Краска для стен", region=None)
+    moscow = get_price("Краска для стен", db=db_session, region="Москва")
+    base = get_price("Краска для стен", db=db_session, region=None)
     assert moscow is not None and base is not None
     assert moscow.region == "Москва"
     assert moscow.price_avg != base.price_avg
 
 
-@pytest.mark.usefixtures("setup_test_db")
-def test_material_fallback_to_seed_when_region_missing():
+def test_material_fallback_to_seed_when_region_missing(db_session):
     """Для города без своих цен — fallback на базовую seed (region IS NULL), расчёт не падает."""
-    other = get_price("Краска для стен", region="Новосибирск")
-    base = get_price("Краска для стен", region=None)
+    other = get_price("Краска для стен", db=db_session, region="Новосибирск")
+    base = get_price("Краска для стен", db=db_session, region=None)
     assert other is not None
     assert other.region is None
     assert other.price_avg == base.price_avg
@@ -39,18 +37,16 @@ def test_material_fallback_to_seed_when_region_missing():
 
 # --- lookup работ ---
 
-@pytest.mark.usefixtures("setup_test_db")
-def test_labor_regional_price_selected():
-    moscow = get_labor_price("Покраска стен", region="Москва")
-    base = get_labor_price("Покраска стен", region=None)
+def test_labor_regional_price_selected(db_session):
+    moscow = get_labor_price("Покраска стен", db=db_session, region="Москва")
+    base = get_labor_price("Покраска стен", db=db_session, region=None)
     assert moscow is not None and base is not None
     assert moscow.region == "Москва"
     assert moscow.price_avg != base.price_avg
 
 
-@pytest.mark.usefixtures("setup_test_db")
-def test_labor_fallback_to_seed_when_region_missing():
-    other = get_labor_price("Покраска стен", region="Новосибирск")
+def test_labor_fallback_to_seed_when_region_missing(db_session):
+    other = get_labor_price("Покраска стен", db=db_session, region="Новосибирск")
     assert other is not None
     assert other.region is None
 

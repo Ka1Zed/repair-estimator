@@ -24,7 +24,7 @@ from app.services.repair_coeffs_service import CONTINGENCY
 from app.services.price_aggregator_service import get_price, get_labor_price
 from app.services.hidden_works_service import calculate_hidden_works
 from app.parsers.base import BaseParser
-from app.parsers.megastroy_parser import MegastroyParser
+from app.parsers.registry import MATERIAL_PARSERS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
@@ -34,9 +34,12 @@ def get_material_parser() -> BaseParser:
     '''Парсер цен материалов для расчёта сметы.
 
     Вынесен в зависимость FastAPI, чтобы тесты могли подменить его заглушкой
-    (app.dependency_overrides) и не ходить в сеть. В проде — живой Мегастрой.
+    (app.dependency_overrides) и не ходить в сеть. В проде — живой Мегастрой
+    (первый источник в app.parsers.registry.MATERIAL_PARSERS). Когда появится
+    второй источник материалов (Леман, #276), выбор/комбинирование цен между
+    ними войдёт сюда — сам список источников уже вынесен в registry.py.
     '''
-    return MegastroyParser()
+    return MATERIAL_PARSERS[0]
 
 # Дефолты инженерки, когда группа works включена, а число не задано (null).
 # Явный 0 остаётся 0 (осознанный ноль). База — пресеты по типу комнаты; для типа
@@ -130,6 +133,10 @@ def calculate_estimate(
     db: Session = Depends(get_db),
     parser: BaseParser = Depends(get_material_parser),
 ) -> EstimateResponse:
+    # Источники цен — маленький справочник (~10 строк), грузим один раз вместо
+    # точечного запроса на каждую строку материала/работы (устраняет N+1, #278).
+    sources_by_id = {s.id: s.name for s in db.query(PriceSource).all()}
+
     all_materials: List[Dict[str, Any]] = []
     all_labor: List[Dict[str, Any]] = []
     total_geometry = {
@@ -178,7 +185,8 @@ def calculate_estimate(
             geometry=geometry, repair_options=finish_options, db=db
         ))
         all_labor.extend(calculate_labor(
-            geometry=geometry, repair_options=finish_options, db=db
+            geometry=geometry, repair_options=finish_options, db=db,
+            sources_by_id=sources_by_id,
         ))
 
         # --- черновые работы (#190): только при scope=rough_and_finish ---
@@ -186,6 +194,7 @@ def calculate_estimate(
             all_labor.extend(calculate_rough_labor(
                 geometry=geometry, repair_options=finish_options,
                 room_type=room.room_type, db=db,
+                sources_by_id=sources_by_id,
             ))
 
         # --- инженерка по явным числам works (дефолты от типа/площади) ---
@@ -205,7 +214,8 @@ def calculate_estimate(
         ))
         all_labor.extend(calculate_engineering_labor(
             sockets=sockets, lights=lights, cable_m=cable_m,
-            plumbing_points=points, pipe_m=pipe_m, db=db
+            plumbing_points=points, pipe_m=pipe_m, db=db,
+            sources_by_id=sources_by_id,
         ))
 
     # Множитель строк детализации: непредвиденные расходы (avg). Класса ремонта больше нет (#222).
@@ -242,7 +252,7 @@ def calculate_estimate(
         # с накрученным по факту коэффициентом даже после суммирования нескольких комнат.
         waste_factor = (group['quantity'] / base_quantity) if base_quantity > 0 else Decimal(1)
 
-        price_obj = get_price(name, parser=parser, region=request.city)
+        price_obj = get_price(name, db=db, parser=parser, region=request.city)
         if not price_obj:
             # Цены нет даже в seed — не теряем позицию молча, показываем её с пометкой.
             logger.warning(f"Цена для материала '{name}' не найдена, показываем без цены")
@@ -267,8 +277,7 @@ def calculate_estimate(
         # Строчный итог уже включает запас на непредвиденные (CONTINGENCY), чтобы
         # сумма строк совпадала с summary (см. line_factor). Класса ремонта больше нет (#222).
         total_avg = final_quantity * price_avg * line_factor
-        source = db.query(PriceSource).filter(PriceSource.id == price_obj.source_id).first()
-        source_name = source.name if source else "unknown"
+        source_name = sources_by_id.get(price_obj.source_id, "unknown")
         updated_at = price_obj.updated_at.strftime("%Y-%m-%d") if price_obj.updated_at else ""
 
         materials_response.append(MaterialItem(
@@ -308,7 +317,7 @@ def calculate_estimate(
     labor_sum = {'min': Decimal(0), 'avg': Decimal(0), 'max': Decimal(0)}
 
     for service, group in labor_groups.items():
-        labor_price = get_labor_price(service, region=request.city)
+        labor_price = get_labor_price(service, db=db, region=request.city)
         if not labor_price:
             continue
 
@@ -316,10 +325,7 @@ def calculate_estimate(
         price_avg = labor_price.price_avg
         # Строчный итог включает запас на непредвиденные (CONTINGENCY), как и у материалов.
         total_avg = volume * price_avg * line_factor
-        labor_source = db.query(PriceSource).filter(
-            PriceSource.id == labor_price.source_id
-        ).first()
-        labor_source_name = labor_source.name if labor_source else "seed"
+        labor_source_name = sources_by_id.get(labor_price.source_id, "seed")
 
         labor_response.append(LaborItem(
             service=service,
@@ -369,6 +375,7 @@ def calculate_estimate(
         wet_floor_area=hidden['wet_floor'],
         city=request.city,
         db=db,
+        sources_by_id=sources_by_id,
     )
     hidden_works = HiddenWorks(
         note=hidden_raw['note'],

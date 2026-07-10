@@ -68,6 +68,9 @@ services:
     environment:
       # Публичный домен для автоматического TLS (см. .env и Caddyfile).
       PUBLIC_HOST: ${PUBLIC_HOST:-:80}
+      # Голый IP сервера — только для редиректа http://<IP> на PUBLIC_HOST
+      # (см. Caddyfile). Не влияет на TLS.
+      PUBLIC_IP: ${PUBLIC_IP:-}
     ports:
       - "80:80"
       - "443:443"

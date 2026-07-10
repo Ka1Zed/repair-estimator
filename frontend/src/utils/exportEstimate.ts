@@ -20,6 +20,8 @@ export interface EstimateExportData {
 
 const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
 
+// Палитра Excel (те же цвета, что в PDF из index.css). xlsx-js-style пишет
+// заливки/шрифты/рамки ячеек через свойство cell.s — обычный xlsx это не умеет.
 const XLS = {
   accent: 'B07B5E',
   heading: '2A2A2A',
@@ -57,6 +59,8 @@ const cellAt = (ws: XLSX.WorkSheet, r: number, c: number) => {
   return ws[ref];
 };
 
+// Оформление таблицы: акцентная шапка, зебра, рамки, денежный формат
+// на money-колонках, синие подчёркнутые ячейки-ссылки на link-колонке.
 const styleTable = (
   ws: XLSX.WorkSheet,
   cfg: {
@@ -112,18 +116,21 @@ const MODE_LABELS: Record<PriceMode, string> = {
   max: 'Максимальный'
 };
 
+// Excel-версия сметы в одном стиле с PDF: акцентная шапка, зебра, рамки,
+// город/дата, геометрия, кликабельные источники (синие подчёркнутые ячейки),
+// детализация количества и запаса. Оформление ячеек даёт xlsx-js-style.
 export const exportXlsx = (data: EstimateExportData, city: string, priceMode: PriceMode = "avg") => {
   const wb = XLSX.utils.book_new();
   const today = new Date().toLocaleDateString('ru-RU');
   const s = data.summary;
   
-  
+  // Расчет множителя на основе выбранного уровня цен
   const scale = s.total_avg === 0 ? 1 : priceMode === 'min' ? s.total_min / s.total_avg : priceMode === 'max' ? s.total_max / s.total_avg : 1;
   const p = (val: number) => Math.round(val * scale);
 
   const metaLine = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${today}`;
 
-  
+  // ---------- Сводка: город/дата, геометрия, итоги min/avg/max ----------
   const summaryAoa: (string | number)[][] = [
     ['Смета на ремонт'],
     [metaLine],
@@ -168,7 +175,7 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
   for (let c = 0; c <= 3; c++) cellAt(summarySheet, costLast, c).s = { ...totalStyle, ...(c ? { numFmt: MONEY_FMT, alignment: { horizontal: 'right', vertical: 'center' } } : {}) };
   XLSX.utils.book_append_sheet(wb, summarySheet, 'Сводка');
 
-  
+  // ---------- Материалы ----------
   const matAoa: (string | number)[][] = [
     ['Материалы'],
     [metaLine],
@@ -203,7 +210,7 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
   }
   XLSX.utils.book_append_sheet(wb, matSheet, 'Материалы');
 
- 
+  // ---------- Работы ----------
   const labAoa: (string | number)[][] = [
     ['Работы'],
     [metaLine],
@@ -238,7 +245,7 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
   }
   XLSX.utils.book_append_sheet(wb, labSheet, 'Работы');
 
-  
+  // ---------- Детализация количества: из чего сложилось «Кол-во» ----------
   const detAoa: (string | number)[][] = [
     ['Детализация количества материалов'],
     ['Количество = базовый расход × запас, округлённое вверх до целых упаковок'],
@@ -273,6 +280,7 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
   XLSX.writeFile(wb, 'Смета.xlsx');
 };
 
+// Палитра из index.css, чтобы PDF был в одном стиле с сайтом
 type RGB = [number, number, number];
 const PDF_ACCENT: RGB = [176, 123, 94];
 const PDF_HEADING: RGB = [42, 42, 42];
@@ -281,6 +289,7 @@ const PDF_BORDER: RGB = [229, 229, 229];
 const PDF_ZEBRA: RGB = [250, 246, 243];
 const PDF_WHITE: RGB = [255, 255, 255];
 
+// Читаемая подпись источника цены: seed → «База», парсеры → человекочитаемо, + регион
 const sourceNames: Record<string, string> = { seed: 'База', megastroy: 'Мегастрой', leroy: 'Леруа', lemana: 'Лемана ПРО' };
 const sourceLabel = (source: string, region?: string | null) => {
   const src = !source ? '—' : sourceNames[source] ?? source;
@@ -290,7 +299,10 @@ const sourceLabel = (source: string, region?: string | null) => {
 const getFinalY = (d: jsPDF) =>
   (d as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
+// Числовое кол-во: без хвостовых нулей, максимум 2 знака
 const fmtQty = (x: number) => x.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+
+// Запас в процентах из множителя waste_factor (1.1 → «+10%»)
 const wastePct = (waste_factor: number) => `+${Math.round((waste_factor - 1) * 100)}%`;
 
 export const exportPdf = async (data: EstimateExportData, city: string, priceMode: PriceMode = "avg") => {
@@ -351,6 +363,8 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
     doc.text(text, marginX, y);
   };
 
+  // Делает ячейки колонки «Источник» кликабельными ссылками на source_url:
+  // подсвечивает акцентом и вешает doc.link поверх ячейки.
   const sourceLinks = (items: { source_url?: string | null }[], col: number) => ({
     didParseCell: (h: CellHookData) => {
       if (h.section === 'body' && h.column.index === col && items[h.row.index]?.source_url) {
@@ -364,6 +378,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
     },
   });
 
+  // Обложка: титул + акцентная линейка + мета
   doc.setFontSize(22);
   doc.setTextColor(...PDF_HEADING);
   doc.text('Смета на ремонт', marginX, 22);
@@ -456,7 +471,9 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
     }
   });
 
+  // Детализация количества материалов: из чего сложилось «Кол-во» в смете
   currentY = getFinalY(doc) + 14;
+  // не оставлять заголовок секции «висеть» внизу страницы — перенести целиком
   if (currentY > pageH - 45) {
     doc.addPage();
     currentY = 20;
@@ -487,6 +504,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
     }
   });
 
+  // Футер: подпись слева, нумерация справа — на каждой странице
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);

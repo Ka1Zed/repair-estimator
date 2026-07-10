@@ -22,11 +22,20 @@ class Material(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(unique=True)
+    # Машинный ключ для поиска в расчётных сервисах (#278) — name остаётся
+    # человекочитаемым label для API-ответов, по нему ничего не матчится в коде.
+    slug: Mapped[str] = mapped_column(unique=True)
     category: Mapped[str]
     unit: Mapped[str]
     package_size: Mapped[float | None]   # nullable - просто через | None
     consumption_per_m2: Mapped[float | None]   # расход на м²
     waste_factor: Mapped[float | None]          # коэффициент запаса (1.1 / 1.08 ...)
+    # Число слоёв для материалов с unit='л' (краска/грунт); NULL = 1 слой по
+    # умолчанию (см. quantity_of в material_calc_service.py, #278).
+    layers: Mapped[int | None]
+    # Надбавка на подгонку рисунка (раппорт) — применяется только при
+    # repair_options.wallpaper_pattern; NULL = без надбавки (см. #278).
+    pattern_factor: Mapped[float | None]
 
 
 class LaborService(Base):
@@ -34,6 +43,8 @@ class LaborService(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(unique=True)
+    # Машинный ключ для поиска в расчётных сервисах (#278) — см. Material.slug.
+    slug: Mapped[str] = mapped_column(unique=True)
     specialist_type: Mapped[str]
     unit: Mapped[str]
 

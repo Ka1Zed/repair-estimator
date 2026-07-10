@@ -40,6 +40,8 @@ const formatNum = (n: number) =>
   n.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const formatQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
+
+// Регион, по которому реально взялась цена; null → базовая seed-цена (не зависит от города).
 const regionLabel = (region?: string | null) => region ?? "базовая цена";
 
 export type PriceMode = "min" | "avg" | "max";
@@ -58,22 +60,27 @@ export function Workspace() {
   const [tab, setTab] = useState<"materials" | "labor">("materials");
   const [regions, setRegions] = useState<string[]>([]);
 
+  // resizable split
   const containerRef = useRef<HTMLDivElement>(null);
   const dividerDragging = useRef(false);
   const [splitPct, setSplitPct] = useState(55);
   const [isDividerDragging, setIsDividerDragging] = useState(false);
 
+  // interactive range state
   const trackRef = useRef<HTMLDivElement>(null);
   const [priceMode, setPriceMode] = useState<PriceMode>("avg");
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState(0);
 
+  // Список городов для селектора. Если текущего города нет в ответе бэка,
+  // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
   useEffect(() => {
     apiClient
       .fetchRegions()
       .then((res) => setRegions(res.regions))
       .catch((err) => {
         console.error("Не удалось загрузить список городов:", err);
+        // fetchRegions падает первым при мёртвом бэке — поднимаем баннер.
         useBackendStatus.getState().setBackendDown(true);
       });
   }, []);
@@ -83,28 +90,42 @@ export function Workspace() {
     [regions, city],
   );
 
+  // silent=true — авто-пересчёт по дебаунсу: молча пропускаем невалидное состояние,
+  // не пугаем пользователя ошибкой, пока он редактирует.
   const runCalculate = useCallback(
     async (silent: boolean) => {
       const geometryValid = rooms.every(
         (r) => r.points.length >= 3 && r.height !== "" && Number(r.height) > 0,
       );
       if (!geometryValid) {
-        if (!silent) setError("У каждой комнаты нужны минимум 3 точки и высота потолка больше нуля.");
+        if (!silent) {
+          setError("У каждой комнаты нужны минимум 3 точки и высота потолка больше нуля.");
+        }
         return;
       }
 
+      // Невалидные проёмы не отправляем: иначе кривая ширина/высота уедет в wall_area.
       if (rooms.some(roomHasInvalidOpenings)) {
-        if (!silent) setError("Проверьте размеры проёмов: ширина и высота должны быть больше нуля.");
+        if (!silent) {
+          setError(
+            "Проверьте размеры проёмов: ширина и высота должны быть больше нуля и не превышать допустимых пределов.",
+          );
+        }
         return;
       }
 
       if (rooms.some((r) => r.points.length >= 3 && hasSelfIntersection(r.points))) {
-        if (!silent) setError("Контур комнаты самопересекается — площадь будет неверной. Исправьте форму.");
+        if (!silent) {
+          setError("Контур комнаты самопересекается — площадь будет неверной. Исправьте форму.");
+        }
         return;
       }
 
+      // validateHeight ловит и верхний предел (> 10 м), который geometryValid пропускает.
       if (rooms.some((r) => validateHeight(r.height) !== null)) {
-        if (!silent) setError("Высота потолка должна быть больше нуля и не превышать 10 м.");
+        if (!silent) {
+          setError("Высота потолка должна быть больше нуля и не превышать 10 м.");
+        }
         return;
       }
 
@@ -131,7 +152,9 @@ export function Workspace() {
         setPriceMode("avg");
       } catch (err) {
         console.error(err);
-        if (!silent) setError("Не удалось рассчитать смету. Проверьте, что бэкенд запущен.");
+        if (!silent) {
+          setError("Не удалось рассчитать смету. Проверьте, что бэкенд запущен.");
+        }
       } finally {
         setIsLoading(false);
       }
@@ -139,6 +162,8 @@ export function Workspace() {
     [rooms, city],
   );
 
+  // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
+  // Дебаунс схлопывает всё перетаскивание угла в один запрос к бэку.
   useEffect(() => {
     const timer = setTimeout(() => runCalculate(true), 500);
     return () => clearTimeout(timer);
@@ -146,11 +171,27 @@ export function Workspace() {
 
   const handleCalculate = () => runCalculate(false);
 
-  const hasInvalidOpenings = useMemo(() => rooms.some(roomHasInvalidOpenings), [rooms]);
-  const hasSelfIntersectingPolygon = useMemo(() => rooms.some((r) => r.points.length >= 3 && hasSelfIntersection(r.points)), [rooms]);
-  const heightError = useMemo(() => validateHeight(activeRoom?.height ?? ""), [activeRoom?.height]);
-  const hasInvalidHeight = useMemo(() => rooms.some((r) => validateHeight(r.height) !== null), [rooms]);
+  const hasInvalidOpenings = useMemo(
+    () => rooms.some(roomHasInvalidOpenings),
+    [rooms],
+  );
 
+  const hasSelfIntersectingPolygon = useMemo(
+    () => rooms.some((r) => r.points.length >= 3 && hasSelfIntersection(r.points)),
+    [rooms],
+  );
+
+  const heightError = useMemo(
+    () => validateHeight(activeRoom?.height ?? ""),
+    [activeRoom?.height],
+  );
+
+  const hasInvalidHeight = useMemo(
+    () => rooms.some((r) => validateHeight(r.height) !== null),
+    [rooms],
+  );
+
+  // --- divider drag handlers ---
   const handleDividerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     dividerDragging.current = true;
@@ -160,6 +201,7 @@ export function Workspace() {
   const handleDividerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dividerDragging.current || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
+    // вычитаем padding 24px с каждой стороны (.page), чтобы курсор не отставал
     const paddingX = 24;
     const contentWidth = rect.width - paddingX * 2;
     const pct = ((e.clientX - rect.left - paddingX) / contentWidth) * 100;
@@ -171,6 +213,7 @@ export function Workspace() {
     setIsDividerDragging(false);
   };
 
+  // Слайдер вилки: позиция средней между min и max
   const avgPos = useMemo(() => {
     if (!data) return 50;
     const { total_min, total_avg, total_max } = data.summary;
@@ -178,6 +221,7 @@ export function Workspace() {
     return ((total_avg - total_min) / (total_max - total_min)) * 100;
   }, [data]);
 
+  // --- drag handlers ---
   const getPosFromEvent = (e: React.PointerEvent): number => {
     if (!trackRef.current) return 0;
     const rect = trackRef.current.getBoundingClientRect();
@@ -212,8 +256,15 @@ export function Workspace() {
     setPriceMode(snapToMode(getPosFromEvent(e)));
   };
 
-  const dotVisualPos = isDragging ? dragPos : priceMode === "min" ? 0 : priceMode === "max" ? 100 : avgPos;
+  const dotVisualPos = isDragging
+    ? dragPos
+    : priceMode === "min"
+    ? 0
+    : priceMode === "max"
+    ? 100
+    : avgPos;
 
+  // --- price scaling ---
   const priceScale = useMemo(() => {
     if (!data) return 1;
     const { total_min, total_avg, total_max } = data.summary;
@@ -245,7 +296,9 @@ export function Workspace() {
           { label: "Итог по позиции", value: rub(Math.round(m.total_avg * priceScale)) },
           { label: "Источник цены", value: m.source, url: m.source_url },
           { label: "Регион", value: regionLabel(m.region) },
-          ...(m.updated_at ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }] : []),
+          ...(m.updated_at
+            ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
+            : []),
         ],
       })),
     [data, priceScale],
@@ -271,6 +324,7 @@ export function Workspace() {
 
   return (
     <div className={styles.page} ref={containerRef}>
+      {/* ===== ЛЕВО: редактор ===== */}
       <section className={styles.left} style={{ width: `${splitPct}%` }}>
         <div className={styles.eyebrow}>Проект · план помещения</div>
         <h1 className={styles.title}>
@@ -356,15 +410,29 @@ export function Workspace() {
         <button
           className={styles.calcBtn}
           onClick={handleCalculate}
-          disabled={isLoading || hasInvalidOpenings || hasSelfIntersectingPolygon || hasInvalidHeight}
+          disabled={
+            isLoading ||
+            hasInvalidOpenings ||
+            hasSelfIntersectingPolygon ||
+            hasInvalidHeight
+          }
         >
           {isLoading ? "Считаем…" : "Рассчитать смету"}
         </button>
-        {hasInvalidOpenings && <div className={styles.error}>Исправьте размеры проёмов — расчёт недоступен.</div>}
-        {hasSelfIntersectingPolygon && <div className={styles.error}>Контур комнаты самопересекается — исправьте форму.</div>}
+        {hasInvalidOpenings && (
+          <div className={styles.error}>
+            Исправьте размеры проёмов — расчёт недоступен.
+          </div>
+        )}
+        {hasSelfIntersectingPolygon && (
+          <div className={styles.error}>
+            Контур комнаты самопересекается — исправьте форму.
+          </div>
+        )}
         {error && <div className={styles.error}>{error}</div>}
       </section>
 
+      {/* ===== РАЗДЕЛИТЕЛЬ (перетаскивается) ===== */}
       <div
         className={`${styles.divider} ${isDividerDragging ? styles.dividerDragging : ""}`}
         onPointerDown={handleDividerDown}
@@ -373,17 +441,18 @@ export function Workspace() {
         onPointerCancel={handleDividerUp}
       />
 
+      {/* ===== ПРАВО: аналитика ===== */}
       <aside className={styles.right}>
         <div className={styles.rightSticky}>
           <div className={styles.rightHeader}>
             <div>
               <div className={styles.eyebrow}>Смета · предв. расчёт</div>
               <div className={styles.rightHeaderSub}>
-                {rooms.length} {rooms.length === 1 ? "комната" : rooms.length < 5 ? "комнаты" : "комнат"}
+                {rooms.length}{" "}
+                {rooms.length === 1 ? "комната" : rooms.length < 5 ? "комнаты" : "комнат"}
                 {data && ` · общая площадь пола ${formatNum(data.geometry.floor_area)} м²`}
               </div>
             </div>
-            {/* Кнопки скачивания перенесены вниз к переключателю */}
           </div>
 
           {!data ? (
@@ -394,25 +463,39 @@ export function Workspace() {
             </div>
           ) : (
             <>
+              {/* плитки геометрии */}
               <div className={styles.tiles}>
                 <div className={styles.tile}>
-                  <div className={styles.tileValue}>{formatNum(data.geometry.floor_area)}<span className={styles.tileUnit}>м²</span></div>
+                  <div className={styles.tileValue}>
+                    {formatNum(data.geometry.floor_area)}
+                    <span className={styles.tileUnit}>м²</span>
+                  </div>
                   <div className={styles.tileLabel}>Пол</div>
                 </div>
                 <div className={styles.tile}>
-                  <div className={styles.tileValue}>{formatNum(data.geometry.ceiling_area)}<span className={styles.tileUnit}>м²</span></div>
+                  <div className={styles.tileValue}>
+                    {formatNum(data.geometry.ceiling_area)}
+                    <span className={styles.tileUnit}>м²</span>
+                  </div>
                   <div className={styles.tileLabel}>Потолок</div>
                 </div>
                 <div className={styles.tile}>
-                  <div className={styles.tileValue}>{formatNum(data.geometry.perimeter)}<span className={styles.tileUnit}>м</span></div>
+                  <div className={styles.tileValue}>
+                    {formatNum(data.geometry.perimeter)}
+                    <span className={styles.tileUnit}>м</span>
+                  </div>
                   <div className={styles.tileLabel}>Периметр</div>
                 </div>
                 <div className={styles.tile}>
-                  <div className={styles.tileValue}>{formatNum(data.geometry.wall_area)}<span className={styles.tileUnit}>м²</span></div>
+                  <div className={styles.tileValue}>
+                    {formatNum(data.geometry.wall_area)}
+                    <span className={styles.tileUnit}>м²</span>
+                  </div>
                   <div className={styles.tileLabel}>Стены</div>
                 </div>
               </div>
 
+              {/* три итога: материалы / работы / итого × низкая/средняя/высокая */}
               <div className={styles.blockLabel}>Вилка стоимости</div>
               <table className={styles.summaryTable}>
                 <thead>
@@ -446,45 +529,76 @@ export function Workspace() {
               </table>
 
               {/* Блок: Переключатель уровней цен + кнопки экспорта */}
-              <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-end', marginBottom: '16px', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: '240px' }}>
+              <div className={styles.exportControlsWrapper}>
+                <div className={styles.rangeWrapper}>
+                  {/* переключатель режима цен — суммы в таблице выше, здесь только подписи */}
                   <div className={styles.rangeRow}>
-                    <div className={`${styles.rangeCol} ${styles.rangeColClickable}`} onClick={() => !isDragging && setPriceMode("min")}>
-                      <span className={`${styles.rangeCap} ${priceMode === "min" ? styles.rangeCapActive : ""}`}>Минимум</span>
+                    <div
+                      className={`${styles.rangeCol} ${styles.rangeColClickable}`}
+                      onClick={() => !isDragging && setPriceMode("min")}
+                    >
+                      <span className={`${styles.rangeCap} ${priceMode === "min" ? styles.rangeCapActive : ""}`}>
+                        Минимум
+                      </span>
                     </div>
-                    <div className={`${styles.rangeCol} ${styles.rangeColCenter} ${styles.rangeColClickable}`} onClick={() => !isDragging && setPriceMode("avg")}>
-                      <span className={`${styles.rangeCap} ${priceMode === "avg" ? styles.rangeCapActive : ""}`}>Средняя</span>
+                    <div
+                      className={`${styles.rangeCol} ${styles.rangeColCenter} ${styles.rangeColClickable}`}
+                      onClick={() => !isDragging && setPriceMode("avg")}
+                    >
+                      <span className={`${styles.rangeCap} ${priceMode === "avg" ? styles.rangeCapActive : ""}`}>
+                        Средняя
+                      </span>
                     </div>
-                    <div className={`${styles.rangeCol} ${styles.rangeColRight} ${styles.rangeColClickable}`} onClick={() => !isDragging && setPriceMode("max")}>
-                      <span className={`${styles.rangeCap} ${priceMode === "max" ? styles.rangeCapActive : ""}`}>Максимум</span>
+                    <div
+                      className={`${styles.rangeCol} ${styles.rangeColRight} ${styles.rangeColClickable}`}
+                      onClick={() => !isDragging && setPriceMode("max")}
+                    >
+                      <span className={`${styles.rangeCap} ${priceMode === "max" ? styles.rangeCapActive : ""}`}>
+                        Максимум
+                      </span>
                     </div>
                   </div>
 
                   <div
                     ref={trackRef}
-                    className={`${styles.rangeTrack} ${isDragging ? styles.rangeTrackDragging : ""}`}
+                    className={`${styles.rangeTrack} ${styles.rangeTrackCompact} ${isDragging ? styles.rangeTrackDragging : ""}`}
                     onPointerDown={handleTrackPointerDown}
                     onPointerMove={handleTrackPointerMove}
                     onPointerUp={handleTrackPointerUp}
                     onPointerCancel={handleTrackPointerUp}
-                    style={{ marginBottom: '8px' }} 
                   >
-                    <span className={`${styles.rangeEnd} ${priceMode === "min" && !isDragging ? styles.rangeEndActive : ""}`} style={{ left: 0 }} />
-                    <span className={styles.rangeDot} style={{ left: `${dotVisualPos}%`, transition: isDragging ? "none" : "left 0.2s ease" }} />
-                    <span className={`${styles.rangeEnd} ${priceMode === "max" && !isDragging ? styles.rangeEndActive : ""}`} style={{ right: 0 }} />
+                    <span
+                      className={`${styles.rangeEnd} ${priceMode === "min" && !isDragging ? styles.rangeEndActive : ""}`}
+                      style={{ left: 0 }}
+                    />
+                    <span
+                      className={styles.rangeDot}
+                      style={{
+                        left: `${dotVisualPos}%`,
+                        transition: isDragging ? "none" : "left 0.2s ease",
+                      }}
+                    />
+                    <span
+                      className={`${styles.rangeEnd} ${priceMode === "max" && !isDragging ? styles.rangeEndActive : ""}`}
+                      style={{ right: 0 }}
+                    />
                   </div>
                 </div>
                 
-                <div className={styles.exportRow} style={{ paddingBottom: '8px' }}>
+                <div className={`${styles.exportRow} ${styles.exportRowPadded}`}>
                   <button
                     className={styles.exportBtn}
-                    onClick={() => data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode))}
+                    onClick={() =>
+                      data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode))
+                    }
                   >
                     Скачать PDF
                   </button>
                   <button
                     className={styles.exportBtn}
-                    onClick={() => data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode))}
+                    onClick={() =>
+                      data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode))
+                    }
                   >
                     Экспорт в Excel
                   </button>
@@ -494,11 +608,18 @@ export function Workspace() {
                 </div>
               </div>
 
+              {/* вкладки */}
               <div className={styles.tabs}>
-                <button className={`${styles.tab} ${tab === "materials" ? styles.tabActive : ""}`} onClick={() => setTab("materials")}>
+                <button
+                  className={`${styles.tab} ${tab === "materials" ? styles.tabActive : ""}`}
+                  onClick={() => setTab("materials")}
+                >
                   Ведомость материалов
                 </button>
-                <button className={`${styles.tab} ${tab === "labor" ? styles.tabActive : ""}`} onClick={() => setTab("labor")}>
+                <button
+                  className={`${styles.tab} ${tab === "labor" ? styles.tabActive : ""}`}
+                  onClick={() => setTab("labor")}
+                >
                   План работ
                 </button>
               </div>

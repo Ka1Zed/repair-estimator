@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
 import { apiClient } from "../api/client";
 import BlueprintReview from "./BlueprintReview";
+import styles from "./BlueprintUpload.module.css";
 
 interface Point {
   x: number;
@@ -35,8 +36,8 @@ const METHOD_LABEL: Record<string, string> = {
   none: "—",
 };
 
-const CONFIDENCE_COLOR = (c: number) =>
-  c >= 0.7 ? "#4caf50" : c >= 0.4 ? "#ff9800" : "#f44336";
+const confidenceClass = (c: number) =>
+  c >= 0.7 ? styles.confidenceHigh : c >= 0.4 ? styles.confidenceMid : styles.confidenceLow;
 
 export default function BlueprintUpload() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -91,43 +92,11 @@ export default function BlueprintUpload() {
     if (file) handleFile(file);
   };
 
-  const labelStyle: React.CSSProperties = {
-    fontSize: "11px",
-    letterSpacing: ".16em",
-    textTransform: "uppercase",
-    color: "var(--text)",
-    marginBottom: "8px",
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-  };
-
-  const dropzoneStyle: React.CSSProperties = {
-    border: "1.5px dashed var(--border)",
-    borderRadius: "6px",
-    padding: "20px",
-    textAlign: "center",
-    cursor: uploading ? "not-allowed" : "pointer",
-    color: "var(--text)",
-    fontSize: "13px",
-    transition: "border-color 0.15s",
-  };
-
   return (
-    <div style={{ marginBottom: "20px" }}>
-      <div style={labelStyle}>
+    <div className={styles.wrapper}>
+      <div className={styles.labelRow}>
         Загрузить чертёж
-        <span
-          style={{
-            fontSize: "10px",
-            background: "var(--accent-bg)",
-            color: "var(--accent)",
-            border: "1px solid var(--accent-border)",
-            borderRadius: "3px",
-            padding: "1px 6px",
-            letterSpacing: ".08em",
-          }}
-        >
+        <span className={styles.betaBadge}>
           beta
         </span>
       </div>
@@ -136,12 +105,12 @@ export default function BlueprintUpload() {
         ref={inputRef}
         type="file"
         accept=".png,.jpg,.jpeg,.pdf"
-        style={{ display: "none" }}
+        className={styles.hiddenInput}
         onChange={handleChange}
       />
 
       <div
-        style={dropzoneStyle}
+        className={`${styles.dropzone} ${uploading ? styles.dropzoneDisabled : ""}`}
         onClick={() => !uploading && inputRef.current?.click()}
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
@@ -152,7 +121,7 @@ export default function BlueprintUpload() {
           <>
             PNG / JPG / PDF · до 10 MB
             <br />
-            <span style={{ fontSize: "12px", color: "var(--text)" }}>
+            <span className={styles.dropzoneHint}>
               нажмите или перетащите файл
             </span>
           </>
@@ -160,54 +129,23 @@ export default function BlueprintUpload() {
       </div>
 
       {error && (
-        <div
-          style={{
-            marginTop: "10px",
-            padding: "10px",
-            background: "#fdecea",
-            border: "1px solid #f5c6c2",
-            borderRadius: "4px",
-            color: "#c0392b",
-            fontSize: "13px",
-          }}
-        >
+        <div className={styles.errorBox}>
           {error}
         </div>
       )}
 
       {result && (
-        <div
-          style={{
-            marginTop: "12px",
-            padding: "12px",
-            background: "var(--bg-canvas)",
-            border: "1px solid var(--border)",
-            borderRadius: "6px",
-            fontSize: "13px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "8px",
-            }}
-          >
-            <span style={{ color: "var(--text)" }}>
+        <div className={styles.resultBox}>
+          <div className={styles.resultHeader}>
+            <span className={styles.resultMethod}>
               {METHOD_LABEL[result.method] ?? result.method}
             </span>
-            <span
-              style={{
-                color: CONFIDENCE_COLOR(result.confidence),
-                fontWeight: 500,
-              }}
-            >
+            <span className={`${styles.confidence} ${confidenceClass(result.confidence)}`}>
               {Math.round(result.confidence * 100)}% уверенность
             </span>
           </div>
 
-          <div style={{ color: "var(--text-h)", marginBottom: "6px" }}>
+          <div className={styles.resultMeta}>
             Точек: {result.points.length}
             {result.height !== null && ` · Высота: ${result.height} м`}
             {result.openings.length > 0 &&
@@ -215,20 +153,13 @@ export default function BlueprintUpload() {
           </div>
 
           {result.raw_dimensions.length > 0 && (
-            <div style={{ color: "var(--text)", marginBottom: "6px", fontSize: "12px" }}>
+            <div className={styles.rawDimensions}>
               {result.raw_dimensions.join(", ")}
             </div>
           )}
 
           {result.warnings.map((w, i) => (
-            <div
-              key={i}
-              style={{
-                color: "#ff9800",
-                fontSize: "12px",
-                marginBottom: "4px",
-              }}
-            >
+            <div key={i} className={styles.warningRow}>
               ⚠ {w}
             </div>
           ))}
@@ -241,14 +172,7 @@ export default function BlueprintUpload() {
               onCancel={() => setReviewing(false)}
             />
           ) : (
-            <p
-              style={{
-                margin: "10px 0 0",
-                fontSize: "11px",
-                color: "var(--text)",
-                fontStyle: "italic",
-              }}
-            >
+            <p className={styles.appliedHint}>
               {result.points.length >= 3
                 ? "Точки применены в редактор"
                 : "Не удалось распознать контур — нужно минимум 3 точки"}

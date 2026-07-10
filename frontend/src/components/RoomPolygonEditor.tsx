@@ -1,6 +1,7 @@
 import { useState, useRef, useMemo, useEffect, useLayoutEffect } from "react";
 import { useProjectStore } from "../store/projectStore";
 import { getSelfIntersectingEdges } from "../utils/polygonValidation";
+import styles from "./RoomPolygonEditor.module.css";
 
 type ViewBox = { x: number; y: number; w: number; h: number };
 
@@ -206,23 +207,14 @@ export default function RoomPolygonEditor() {
   const pointsStr = safePoints.map((p) => `${p.x},${p.y}`).join(" ");
 
   const controlButtonsJSX = (
-    <div style={{ display: "flex", gap: "10px", marginTop: "15px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-      <button
-        onClick={resetProject}
-        style={{ padding: "8px 14px", background: "#fff", color: "#B5524A", border: "1px solid #E3C9C4", borderRadius: "3px", cursor: "pointer", fontSize: "13px", letterSpacing: ".01em", marginRight: "auto" }}
-      >
+    <div className={styles.controlsRow}>
+      <button onClick={resetProject} className={styles.btnReset}>
         Сбросить черновик
       </button>
-      <button
-        onClick={clearActiveRoom}
-        style={{ padding: "8px 14px", background: "#fff", color: "#8A8A8A", border: "1px solid var(--border)", borderRadius: "3px", cursor: "pointer", fontSize: "13px", letterSpacing: ".01em" }}
-      >
+      <button onClick={clearActiveRoom} className={styles.btnClear}>
         Очистить комнату
       </button>
-      <button
-        onClick={loadDemoRoom}
-        style={{ padding: "8px 14px", background: "var(--accent-bg)", color: "var(--accent)", border: "1px solid var(--accent-border)", borderRadius: "3px", cursor: "pointer", fontSize: "13px", letterSpacing: ".01em" }}
-      >
+      <button onClick={loadDemoRoom} className={styles.btnDemo}>
         Загрузить пример
       </button>
     </div>
@@ -230,8 +222,8 @@ export default function RoomPolygonEditor() {
 
   if (points.length < 3) {
     return (
-      <div style={{ marginTop: "20px", width: "100%" }}>
-        <div style={{ color: "#888", marginBottom: "15px" }}>
+      <div className={styles.emptyWrap}>
+        <div className={styles.emptyHint}>
           Добавьте минимум 3 точки для отображения плана или загрузите готовый пример.
         </div>
         {controlButtonsJSX}
@@ -240,26 +232,23 @@ export default function RoomPolygonEditor() {
   }
 
   return (
-    <div style={{ marginTop: "20px", width: "100%" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "10px" }}>
-        <p style={{ fontSize: "13px", color: "#8A8A8A", margin: 0 }}>
+    <div className={styles.canvasWrap}>
+      <div className={styles.headerRow}>
+        <p className={styles.hintText}>
           💡 Клик по границе — добавить точку.
           <br />
           💡 <b>Клик по ценнику</b> — задать точную длину.
           <br />
           💡 <b>Shift + Клик</b> по точке — удалить.
         </p>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-          <label style={{ display: "flex", alignItems: "center", cursor: "pointer", fontSize: "12px", color: "#8A8A8A" }}>
-            <input type="checkbox" checked={snapToGrid} onChange={(e) => setSnapToGrid(e.target.checked)} style={{ marginRight: "6px", accentColor: "var(--accent)" }} />
+        <div className={styles.rightControls}>
+          <label className={styles.snapLabel}>
+            <input type="checkbox" checked={snapToGrid} onChange={(e) => setSnapToGrid(e.target.checked)} className={styles.snapCheckbox} />
             Привязка к узлам
           </label>
-          <span style={{ fontSize: "11px", color: "#B8B8B8" }}>1 клетка = 0.5 м</span>
+          <span className={styles.gridLegend}>1 клетка = 0.5 м</span>
           {userViewBox && (
-            <button
-              onClick={handleFitToView}
-              style={{ padding: "4px 10px", background: "#fff", color: "#8A8A8A", border: "1px solid var(--border)", borderRadius: "3px", cursor: "pointer", fontSize: "12px" }}
-            >
+            <button onClick={handleFitToView} className={styles.btnFit}>
               Вписать
             </button>
           )}
@@ -267,14 +256,7 @@ export default function RoomPolygonEditor() {
       </div>
 
       <div
-        style={{
-          background: "var(--bg-canvas)",
-          border: "1px solid var(--border)",
-          borderRadius: "4px",
-          overflow: "hidden",
-          cursor: isPanning || draggingIdx !== null ? "grabbing" : "default",
-          height: "clamp(280px, 50vh, 600px)",
-        }}
+        className={`${styles.canvasFrame} ${isPanning || draggingIdx !== null ? styles.canvasFrameGrabbing : ""}`}
       >
         <svg
           ref={svgRef}
@@ -282,7 +264,7 @@ export default function RoomPolygonEditor() {
           width="100%"
           height="100%"
           preserveAspectRatio="xMidYMid meet"
-          style={{ display: "block", touchAction: "none" }}
+          className={styles.svgRoot}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
@@ -311,7 +293,7 @@ export default function RoomPolygonEditor() {
             width={vb.w * 3}
             height={vb.h * 3}
             fill="url(#rpeg-grid)"
-            style={{ pointerEvents: "none" }}
+            className={styles.noPointerEvents}
           />
 
           {/* polygon fill */}
@@ -319,7 +301,7 @@ export default function RoomPolygonEditor() {
             points={pointsStr}
             fill={hasBadEdges ? "rgba(176,70,70,0.05)" : "rgba(176,123,94,0.06)"}
             stroke="none"
-            style={{ pointerEvents: "none" }}
+            className={styles.noPointerEvents}
           />
 
           {/* edge stroke */}
@@ -333,7 +315,7 @@ export default function RoomPolygonEditor() {
                 stroke={isBad ? "var(--error)" : "var(--accent)"}
                 strokeWidth={isBad ? vb.w * 0.006 : vb.w * 0.004}
                 strokeDasharray={isBad ? `${vb.w * 0.015} ${vb.w * 0.009}` : undefined}
-                style={{ pointerEvents: "none" }}
+                className={styles.noPointerEvents}
               />
             );
           })}
@@ -347,7 +329,7 @@ export default function RoomPolygonEditor() {
                 x1={p.x} y1={p.y} x2={np.x} y2={np.y}
                 stroke="transparent"
                 strokeWidth={vb.w * 0.05}
-                style={{ cursor: "crosshair" }}
+                className={styles.edgeHitTarget}
                 onPointerDown={(e) => handleEdgeClick(e, i)}
               />
             );
@@ -363,7 +345,7 @@ export default function RoomPolygonEditor() {
 
             if (editingEdge === i) {
               return (
-                <foreignObject key={`ei-${i}`} x={mx - labelW / 2} y={my - labelH / 2} width={labelW} height={labelH} style={{ overflow: "visible" }}>
+                <foreignObject key={`ei-${i}`} x={mx - labelW / 2} y={my - labelH / 2} width={labelW} height={labelH} className={styles.foreignObjectVisible}>
                   <input
                     autoFocus
                     type="text"
@@ -375,7 +357,7 @@ export default function RoomPolygonEditor() {
                       if (e.key === "Enter") handleEdgeLengthSubmit(i);
                       if (e.key === "Escape") { setEdgeInputValue(""); setEditingEdge(null); }
                     }}
-                    style={{ width: "100%", height: "100%", textAlign: "center", fontSize: "12px", border: "1px solid var(--accent)", borderRadius: "3px", background: "#fff", color: "var(--text-h)", outline: "none", boxSizing: "border-box" }}
+                    className={styles.edgeInput}
                   />
                 </foreignObject>
               );
@@ -384,11 +366,11 @@ export default function RoomPolygonEditor() {
             return (
               <g
                 key={`el-${i}`}
-                style={{ cursor: "pointer" }}
+                className={styles.edgeLabelGroup}
                 onClick={(e) => { e.stopPropagation(); setEditingEdge(i); setEdgeInputValue(displayLen); }}
               >
                 <rect x={mx - labelW / 2} y={my - labelH / 2} width={labelW} height={labelH} rx={vb.w * 0.008} fill="#FFFFFF" stroke="var(--border)" strokeWidth={vb.w * 0.003} />
-                <text x={mx} y={my} fill="#6B6B6B" fontSize={fontSize} textAnchor="middle" dominantBaseline="central" style={{ letterSpacing: "normal" }}>
+                <text x={mx} y={my} fill="#6B6B6B" fontSize={fontSize} textAnchor="middle" dominantBaseline="central" className={styles.edgeLabelText}>
                   {displayLen}м
                 </text>
               </g>
@@ -405,14 +387,14 @@ export default function RoomPolygonEditor() {
               stroke="var(--accent)"
               strokeWidth={vb.w * 0.003}
               onPointerDown={(e) => handleDeletePoint(i, e)}
-              style={{ cursor: "grab" }}
+              className={styles.vertexCircle}
             />
           ))}
         </svg>
       </div>
 
       {hasBadEdges && (
-        <div style={{ marginTop: "10px", padding: "8px 12px", background: "var(--error-bg)", border: "1px solid var(--error-border)", borderRadius: "4px", color: "var(--error)", fontSize: "13px" }}>
+        <div className={styles.errorBox}>
           Контур самопересекается — площадь будет неверной. Исправьте форму комнаты.
         </div>
       )}

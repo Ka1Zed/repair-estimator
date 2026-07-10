@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import type { BlueprintResult } from "./BlueprintUpload";
+import styles from "./BlueprintReview.module.css";
 
 interface NormPoint {
   nx: number;
@@ -191,37 +192,27 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
 
   const isCalibrated = mPerPx !== null;
 
-  const btn = (accent?: boolean, disabled?: boolean): React.CSSProperties => ({
-    padding: "6px 12px", fontSize: "12px", borderRadius: "3px",
-    cursor: disabled ? "default" : "pointer",
-    background: accent && !disabled ? "var(--text-h)" : "var(--bg)",
-    color: accent && !disabled ? "#fff" : "var(--text-h)",
-    border: accent && !disabled ? "none" : "1px solid var(--border)",
-    opacity: disabled ? 0.5 : 1,
-  });
+  const btnClass = (accent?: boolean, disabled?: boolean) =>
+    [styles.btn, accent && !disabled && styles.btnAccent, disabled && styles.btnDisabled]
+      .filter(Boolean)
+      .join(" ");
 
   return (
-    <div style={{ marginTop: "12px" }}>
-      <div style={{
-        fontSize: "11px", letterSpacing: ".16em", textTransform: "uppercase",
-        color: "var(--text)", marginBottom: "8px", display: "flex", gap: "12px", alignItems: "center",
-      }}>
+    <div className={styles.wrapper}>
+      <div className={styles.titleRow}>
         Проверка чертежа
         {!isCalibrated && (
-          <span style={{ color: "#ff9800", letterSpacing: 0, fontStyle: "italic", textTransform: "none" }}>
+          <span className={styles.calibWarning}>
             ⚠ нужна калибровка
           </span>
         )}
       </div>
 
-      <div style={{
-        border: "1px solid var(--border)", borderRadius: "4px", overflow: "hidden",
-        cursor: calibMode ? "crosshair" : "default",
-      }}>
+      <div className={`${styles.canvasFrame} ${calibMode ? styles.canvasFrameCalib : ""}`}>
         <svg
           ref={svgRef}
           viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-          style={{ display: "block", width: "100%", height: "auto", touchAction: "none" }}
+          className={styles.svgRoot}
           onPointerDown={handleSvgPointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -243,7 +234,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
             if (editingEdge === i) {
               return (
                 <foreignObject key={`ei-${i}`} x={midX - 35} y={midY - 14} width="70" height="28"
-                  style={{ overflow: "visible" }}>
+                  className={styles.foreignObjectVisible}>
                   <input
                     autoFocus type="text" value={edgeInput}
                     onChange={(e) => setEdgeInput(e.target.value)}
@@ -253,11 +244,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
                       if (e.key === "Enter") submitEdge(i);
                       if (e.key === "Escape") { setEditingEdge(null); setEdgeInput(""); }
                     }}
-                    style={{
-                      width: "100%", height: "100%", textAlign: "center", fontSize: "11px",
-                      border: "1px solid var(--accent)", borderRadius: "3px",
-                      background: "#fff", color: "var(--text-h)", outline: "none", boxSizing: "border-box",
-                    }}
+                    className={styles.edgeInput}
                   />
                 </foreignObject>
               );
@@ -266,7 +253,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
             const label = len === null ? "?" : formatLen(len);
             return (
               <g key={`el-${i}`}
-                style={{ cursor: isCalibrated && !calibMode ? "pointer" : "default" }}
+                className={isCalibrated && !calibMode ? styles.edgeLabelGroupActive : styles.edgeLabelGroup}
                 onClick={() => {
                   if (!isCalibrated || calibMode || draggingIdx !== null) return;
                   setEditingEdge(i);
@@ -291,7 +278,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
                 fill={snapped ? "#4caf50" : draggingIdx === i ? "var(--accent)" : "#fff"}
                 stroke={snapped ? "#4caf50" : "var(--accent)"}
                 strokeWidth="1.5"
-                style={{ cursor: calibMode ? "crosshair" : "grab" }}
+                className={calibMode ? styles.vertexCircleCalib : styles.vertexCircle}
                 onPointerDown={(e) => handleVertexDown(e, i)} />
             );
           })}
@@ -311,45 +298,38 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
 
       {/* Панель калибровки */}
       {calibMode && (
-        <div style={{
-          marginTop: "8px", padding: "8px", background: "#edf6ed",
-          border: "1px solid #c8e6c9", borderRadius: "4px", fontSize: "12px", color: "#2e7d32",
-        }}>
+        <div className={styles.calibPanel}>
           {calibPts.length === 0 && "Кликните на первую вершину"}
           {calibPts.length === 1 && "Кликните на вторую вершину"}
           {calibPts.length === 2 && (
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <div className={styles.calibDistanceRow}>
               <span>Расстояние (м):</span>
               <input autoFocus type="text" value={calibInput}
                 onChange={(e) => setCalibInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && applyCalibration()}
-                style={{
-                  width: "60px", padding: "3px 6px", fontSize: "12px",
-                  background: "#fff", border: "1px solid #4caf50",
-                  borderRadius: "3px", color: "var(--text-h)", outline: "none",
-                }} />
-              <button onClick={applyCalibration} style={btn()}>OK</button>
+                className={styles.calibInput} />
+              <button onClick={applyCalibration} className={btnClass()}>OK</button>
               <button onClick={() => { setCalibMode(false); setCalibPts([]); setCalibInput(""); }}
-                style={btn()}>Отмена</button>
+                className={btnClass()}>Отмена</button>
             </div>
           )}
         </div>
       )}
 
-      <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap", alignItems: "center" }}>
+      <div className={styles.controlsRow}>
         {!calibMode && (
-          <button onClick={() => { setCalibMode(true); setCalibPts([]); }} style={btn()}>
+          <button onClick={() => { setCalibMode(true); setCalibPts([]); }} className={btnClass()}>
             {isCalibrated ? "Перекалибровать" : "Калибровка масштаба"}
           </button>
         )}
         <button onClick={handleApply} disabled={!isCalibrated || points.length < 3}
-          style={{ ...btn(true, !isCalibrated || points.length < 3), marginLeft: "auto" }}>
+          className={`${btnClass(true, !isCalibrated || points.length < 3)} ${styles.btnApply}`}>
           Применить
         </button>
-        <button onClick={onCancel} style={btn()}>Отмена</button>
+        <button onClick={onCancel} className={btnClass()}>Отмена</button>
       </div>
 
-      <p style={{ margin: "8px 0 0", fontSize: "11px", color: "var(--text)", fontStyle: "italic" }}>
+      <p className={styles.footerHint}>
         {isCalibrated
           ? "Тащи вершины · кликай на подпись ребра для точного ввода длины"
           : "Сначала откалибруй — кликни на две вершины и введи реальное расстояние"}

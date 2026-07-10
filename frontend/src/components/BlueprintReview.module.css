@@ -1,0 +1,139 @@
+.wrapper {
+  margin-top: 12px;
+}
+
+.titleRow {
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin-bottom: 8px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.calibWarning {
+  color: #ff9800;
+  letter-spacing: 0;
+  font-style: italic;
+  text-transform: none;
+}
+
+.canvasFrame {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: default;
+}
+
+.canvasFrameCalib {
+  cursor: crosshair;
+}
+
+.svgRoot {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: none;
+}
+
+.foreignObjectVisible {
+  overflow: visible;
+}
+
+.edgeInput {
+  width: 100%;
+  height: 100%;
+  text-align: center;
+  font-size: 11px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: #fff;
+  color: var(--text-h);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.edgeLabelGroup {
+  cursor: default;
+}
+
+.edgeLabelGroupActive {
+  cursor: pointer;
+}
+
+.vertexCircle {
+  cursor: grab;
+}
+
+.vertexCircleCalib {
+  cursor: crosshair;
+}
+
+.calibPanel {
+  margin-top: 8px;
+  padding: 8px;
+  background: #edf6ed;
+  border: 1px solid #c8e6c9;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #2e7d32;
+}
+
+.calibDistanceRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.calibInput {
+  width: 60px;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: #fff;
+  border: 1px solid #4caf50;
+  border-radius: 3px;
+  color: var(--text-h);
+  outline: none;
+}
+
+.controlsRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  background: var(--bg);
+  color: var(--text-h);
+  border: 1px solid var(--border);
+}
+
+.btnAccent {
+  background: var(--text-h);
+  color: #fff;
+  border: none;
+}
+
+.btnDisabled {
+  cursor: default;
+  opacity: .5;
+}
+
+.btnApply {
+  margin-left: auto;
+}
+
+.footerHint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text);
+  font-style: italic;
+}

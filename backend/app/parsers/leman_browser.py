@@ -5,11 +5,10 @@ logger = logging.getLogger(__name__)
 
 # lemanapro.ru стоит за Qrator с JS proof-of-work: голый requests и обычный
 # playwright (даже headed настоящий Chrome) получают 401/"Server error" — Qrator
-# палит CDP-утечки (Runtime.enable). Единственный подтверждённый рабочий рецепт
-# (см. память project_leman_qrator_patchright, plans/2026-07-10-leman-browser-fetch.md):
-# patchright (пропатченный playwright) + channel="chrome" + headed + РФ-IP.
-# Поэтому здесь — не cookie-харвест с последующим requests, а фетч HTML целиком
-# внутри браузерной сессии.
+# палит CDP-утечки (Runtime.enable). Рабочий рецепт, подтверждённый ручными
+# прогонами: patchright (пропатченный playwright) + channel="chrome" + headed +
+# РФ-IP. Поэтому здесь — не cookie-харвест с последующим requests, а фетч HTML
+# целиком внутри браузерной сессии.
 CARD_SELECTOR = '[data-qa="product"]'
 NAV_TIMEOUT_MS = 30_000
 PAGE_PAUSE_SECONDS = 1.0  # вежливая пауза между страницами, не долбить сайт

@@ -1,5 +1,5 @@
 # app/tests/test_leman_parser.py
-# Разбор HTML каталога Лемана без сети/браузера (#276, plans/2026-07-10-leman-browser-fetch.md):
+# Разбор HTML каталога Лемана без сети/браузера (#276):
 # _parse_page разбирает уже готовый HTML одной страницы, fetch_price агрегирует
 # страницы, полученные от leman_browser.fetch_pages (мокается ниже — реальный
 # patchright-браузер требует РФ-IP и не бежит в CI, см. test_live_parsers.py).

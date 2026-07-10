@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / ".cache"
 
 # Кэш clearance-cookie DDoS-Guard на диске: харвестим headless-браузером редко
-# (см. результаты прогона в plans/2026-06-30-beta-headless-parser.md — ключевые
-# DDoS-Guard куки живут ~53ч, не минуты), а не на каждый запрос update_prices.
+# (по результатам ручного прогона ключевые DDoS-Guard куки живут ~53ч, не
+# минуты), а не на каждый запрос update_prices.
 CACHE_PATH = CACHE_DIR / "megastroy_cookie.json"
 
 # Запас сильно меньше эмпирически замеренного TTL (~53ч у __ddg8_/9_/10_),
@@ -69,7 +69,7 @@ def _collect_cookies(
     # None, чтобы вызывающий код спокойно ушёл в обычный путь без cookie.
     # patchright (не playwright) — drop-in замена с патчами против CDP-детекта;
     # используем везде, включая Мегастрой, чтобы не тащить оба пакета разом
-    # (конфликт версии pyee, см. plans/2026-07-10-leman-browser-fetch.md).
+    # (конфликт версии pyee — pip check ругался при обоих одновременно).
     try:
         from patchright.sync_api import sync_playwright
     except ImportError:

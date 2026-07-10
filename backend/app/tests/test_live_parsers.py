@@ -27,8 +27,7 @@ def test_leman_returns_positive_price_for_paint():
 
     Требует LEMAN_LIVE=1, patchright (requirements-headless.txt, patchright install
     chrome) и РФ-резидентный IP (VPN OFF) — прогон открывает headed Chrome и обходит
-    Qrator, см. plans/2026-07-10-leman-browser-fetch.md. Без LEMAN_LIVE=1 упадёт
-    сразу с RuntimeError (сеть не трогается).
+    Qrator. Без LEMAN_LIVE=1 упадёт сразу с RuntimeError (сеть не трогается).
     """
     parsed = LemanParser().fetch_price("Краска для стен")
 

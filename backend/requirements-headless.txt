@@ -1,6 +1,5 @@
 # Опциональная зависимость beta-парсеров через браузер (MEGASTROY_HEADLESS=1,
-# LEMAN_LIVE=1 — plans/2026-06-30-beta-headless-parser.md,
-# plans/2026-07-10-leman-browser-fetch.md).
+# LEMAN_LIVE=1).
 # Не входит в requirements.txt, чтобы не тащить Chromium в обязательный
 # прод-образ. patchright — drop-in замена playwright с патчами против
 # CDP-детекта (нужна для обхода Qrator у Лемана); используем её и для

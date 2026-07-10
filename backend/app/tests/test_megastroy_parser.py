@@ -1,9 +1,12 @@
 # app/tests/test_megastroy_parser.py
 # Разбор HTML каталога Мегастроя без сети (#197, #277): парсер материалов отдаёт
 # source_url конкретной карточки товара (та, чья цена ближе к показанной avg), при
-# отсутствии ссылки деградирует до URL категории, а для категорий с несколькими
-# витринными единицами (замазка/добавки затесались в шпаклёвку/затирку) отсекает
-# позиции с чужой единицей. Сетевой смоук — в test_live_parsers.py.
+# отсутствии ссылки деградирует до URL категории. Мегастрой почти нигде не считает
+# цену за базовую единицу сам — у веса/объёма (краска, шпаклёвка, грунтовка, клей,
+# затирка) цена всегда "₽/шт" за упаковку целиком, а вес/объём зашит в названии
+# ("(10л)", "25 кг") — парсер вычисляет базовую цену сам. Только там, где сайт
+# явно считает цену за м²/рулон (плитка, ламинат, обои), берётся текст рядом с
+# ценой напрямую. Сетевой смоук — в test_live_parsers.py.
 
 from decimal import Decimal
 
@@ -17,33 +20,23 @@ from app.parsers.megastroy_parser import (
     _build_headers,
     _length_m_from_title,
     _parse_page,
+    _quantity_from_title,
     _site_unit,
 )
 
 PAINT_URL = CATEGORY_MAP["Краска для стен"].urls[0]
 
 
-def _item(price: str, href: str | None) -> str:
+def _item(price: str, href: str | None, title: str = "Краска для стен 1л", unit: str = "шт") -> str:
     # Карточка Мегастроя: первыми идут кнопки-заглушки с href="javascript:"
     # (сравнить/избранное), реальная ссылка на товар — .js-search-product-link.
-    # Без блока цены/названия — эти тесты про краску (site_unit=None, фильтр не идёт).
-    link = f'<a class="js-search-product-link" href="{href}">товар</a>' if href else ""
+    # Название по умолчанию несёт "1л" — для материалов с title_unit это делает
+    # деление на фасовку no-op'ом, не ломая старые числовые ожидания тестов.
+    link = f'<a class="js-search-product-link" href="{href}">{title}</a>' if href else ""
     return (
         '<div class="products-list__item">'
         '<a class="js-compare-product" href="javascript:"></a>'
         '<a class="js-favorite" href="javascript:"></a>'
-        f"{link}"
-        f'<meta itemprop="price" content="{price}">'
-        "</div>"
-    )
-
-
-def _priced_item(price: str, unit: str, title: str = "", href: str | None = "/products/1") -> str:
-    # Полная карточка — с названием и текстом витринной единицы рядом с ценой,
-    # как её реально пишет Мегастрой ("179 ₽/шт").
-    link = f'<a class="js-search-product-link" href="{href}">товар</a>' if href else ""
-    return (
-        '<div class="products-list__item">'
         '<div class="products-list__content-title">'
         f'<a href="{href or "#"}" title="{title}">{title}</a>'
         "</div>"
@@ -61,15 +54,15 @@ def _page(*items: str) -> str:
     return "<html><body>" + "".join(items) + "</body></html>"
 
 
-def test_parse_page_returns_price_and_absolute_url():
+def test_parse_page_returns_price_url_and_title():
     html = _page(
-        _item("150", "/catalog/kraski-dlya-vnutrennih-rabot/kraska-a"),
-        _item("250", "https://kazan.megastroy.com/catalog/x/kraska-b"),
+        _item("150", "/catalog/kraski-dlya-vnutrennih-rabot/kraska-a", title="Краска А 1л"),
+        _item("250", "https://kazan.megastroy.com/catalog/x/kraska-b", title="Краска Б 1л"),
     )
     items = _parse_page(html, PAINT_URL)
-    assert [(p, u) for p, u, _unit, _title in items] == [
-        (Decimal("150"), "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot/kraska-a"),
-        (Decimal("250"), "https://kazan.megastroy.com/catalog/x/kraska-b"),
+    assert [(p, u, t) for p, u, _unit, t in items] == [
+        (Decimal("150"), "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot/kraska-a", "Краска А 1л"),
+        (Decimal("250"), "https://kazan.megastroy.com/catalog/x/kraska-b", "Краска Б 1л"),
     ]
 
 
@@ -79,20 +72,10 @@ def test_parse_page_skips_items_without_price():
     assert [(p, u) for p, u, _unit, _title in items] == [(Decimal("100"), "https://kazan.megastroy.com/catalog/x/ok")]
 
 
-def test_parse_page_extracts_site_unit_and_title():
-    html = _page(_priced_item("179", "шт", "Замазка строительная универсальная 1,4кг ведро"))
-    price, url, unit, title = _parse_page(html, PAINT_URL)[0]
-    assert price == Decimal("179")
-    assert url == "https://kazan.megastroy.com/products/1"
-    assert unit == "шт"
-    assert title == "Замазка строительная универсальная 1,4кг ведро"
-
-
 def test_site_unit_parses_known_aliases():
     assert _site_unit("179 ₽/шт") == "шт"
     assert _site_unit("399 ₽/м2") == "м²"
     assert _site_unit("1 295 ₽/рул") == "рулон"
-    assert _site_unit("20 ₽/кг") == "кг"
     assert _site_unit("нет цены рядом") is None
 
 
@@ -107,6 +90,37 @@ def test_length_from_title_handles_triple_dimension():
 
 def test_length_from_title_missing_dimension_returns_none():
     assert _length_m_from_title("Товар без размеров в названии") is None
+
+
+# Фасовка в названии (#277): Мегастрой пишет цену за упаковку ("₽/шт"), вес/объём
+# зашит только в названии — "(10л)", "25 кг", "280мл", запятая как разделитель.
+
+
+def test_quantity_from_title_finds_liters_in_parens():
+    assert _quantity_from_title("Грунтовка глубокого проникновения QUALLY (10л)", "л") == Decimal("10")
+
+
+def test_quantity_from_title_finds_kg_with_space():
+    assert _quantity_from_title("Клей для плитки Церезит CM14 Extra 25 кг", "кг") == Decimal("25")
+
+
+def test_quantity_from_title_does_not_confuse_ml_with_liters():
+    # "280мл" не должно засчитаться как литры.
+    assert _quantity_from_title("Затирка силиконовая CS 25 Церезит 280мл №04", "л") is None
+    assert _quantity_from_title("Затирка силиконовая CS 25 Церезит 280мл №04", "мл") == Decimal("280")
+
+
+def test_quantity_from_title_ignores_unrelated_numbers():
+    # "CM14", "25" (артикул серии) без единицы рядом не должны засчитаться.
+    assert _quantity_from_title("Клей Церезит CM14 Extra 25 кг", "кг") == Decimal("25")
+
+
+def test_quantity_from_title_handles_decimal_comma():
+    assert _quantity_from_title("Замазка универсальная 1,4кг ведро", "кг") == Decimal("1.4")
+
+
+def test_quantity_from_title_missing_unit_returns_none():
+    assert _quantity_from_title("Товар без фасовки в названии", "кг") is None
 
 
 def _patch_pages(monkeypatch, page_html: str):
@@ -128,8 +142,30 @@ def _patch_pages(monkeypatch, page_html: str):
     monkeypatch.setattr(megastroy_parser.time, "sleep", lambda *a, **k: None)
 
 
+# Краска (#277): баг — раньше цена бралась как есть (за банку), теперь делится
+# на объём из названия ("(Nл)"), иначе вилка завышалась в разы.
+
+
+def test_paint_divides_price_by_liters_from_title(monkeypatch):
+    html = _page(_item("2232", "/products/1", title="Краска латексная Dufa 10 л"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Краска для стен")
+
+    assert parsed.price_avg == Decimal("223")  # round(2232 / 10)
+    assert parsed.price_min == Decimal("223.2")
+
+
+def test_paint_without_liters_in_title_is_skipped(monkeypatch):
+    html = _page(_item("2232", "/products/1", title="Краска латексная Dufa без объёма"))
+    _patch_pages(monkeypatch, html)
+
+    with pytest.raises(RuntimeError):
+        MegastroyParser().fetch_price("Краска для стен")
+
+
 def test_source_url_points_to_product_closest_to_avg(monkeypatch):
-    # Цены 100/200/300 → avg=200 → представитель — карточка за 200.
+    # Цены 100/200/300 (все "1л", деление не меняет числа) → avg=200 → представитель за 200.
     html = _page(
         _item("100", "/catalog/x/kraska-a"),
         _item("200", "/catalog/x/kraska-b"),
@@ -203,26 +239,54 @@ def test_unknown_material_raises():
         MegastroyParser().fetch_price("Нет такого материала")
 
 
-# Фильтр по витринной единице (#277): категория "Шпаклевка" мешает мешковый товар
-# (кг) с "замазкой" в ведре (шт) — берём только совпадающую с материалом единицу.
+# Шпаклёвка/клей/затирка/грунтовка (#277): та же логика деления на фасовку из
+# названия, что и у краски, просто с единицей "кг"/"л".
 
 
-def test_putty_category_drops_items_priced_per_piece(monkeypatch):
-    html = _page(
-        _priced_item("30", "кг", "Шпаклевка ЕК К300 20 кг", href="/products/putty"),
-        _priced_item("179", "шт", "Замазка строительная универсальная 1,4кг ведро", href="/products/zamazka"),
-    )
+def test_putty_divides_price_by_kg_from_title(monkeypatch):
+    html = _page(_item("841", "/products/putty", title="Шпаклёвка Knauf Фуген 25 кг"))
     _patch_pages(monkeypatch, html)
 
     parsed = MegastroyParser().fetch_price("Шпаклевка финишная")
 
-    assert parsed.price_avg == Decimal("30")
-    assert "zamazka" not in (parsed.source_url or "")
+    assert parsed.price_avg == Decimal("34")  # round(841/25)
 
 
-def test_material_without_matching_unit_raises(monkeypatch):
-    # Ни одна позиция не подошла по единице → RuntimeError → агрегатор уйдёт в seed.
-    html = _page(_priced_item("179", "шт", "Замазка строительная", href="/products/zamazka"))
+def test_glue_divides_price_by_kg_from_title(monkeypatch):
+    html = _page(_item("905", "/products/glue", title="Клей для плитки Церезит CM14 Extra 25 кг"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Плиточный клей")
+
+    assert parsed.price_avg == Decimal("36")  # round(905/25)
+
+
+def test_primer_divides_price_by_liters_from_title(monkeypatch):
+    html = _page(_item("699", "/products/grunt", title="Грунтовка глубокого проникновения QUALLY (10л)"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Грунтовка")
+
+    assert parsed.price_avg == Decimal("70")  # round(699/10)
+
+
+def test_grout_excludes_items_priced_in_milliliters(monkeypatch):
+    # Силиконовая затирка в мл (герметик-тюбик) — другая форма товара, не считаем.
+    html = _page(
+        _item("2850", "/products/epoxy", title="Затирка эпоксидная STARLIKE (1кг)"),
+        _item("1045", "/products/silicone", title="Затирка силиконовая CS 25 280мл №04"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Затирка")
+
+    assert parsed.price_avg == Decimal("2850")
+    assert "silicone" not in (parsed.source_url or "")
+
+
+def test_material_without_matching_quantity_raises(monkeypatch):
+    # Ни одна позиция не дала распознаваемую фасовку → RuntimeError → seed.
+    html = _page(_item("179", "/products/x", title="Товар без фасовки в названии"))
     _patch_pages(monkeypatch, html)
 
     with pytest.raises(RuntimeError):
@@ -234,11 +298,7 @@ def test_material_without_matching_unit_raises(monkeypatch):
 
 
 def test_plintus_normalizes_price_per_piece_to_price_per_meter(monkeypatch):
-    html = _page(
-        _priced_item(
-            "560", "шт", "Плинтус напольный ПВХ Lima 72х2500мм Белый", href="/products/plintus-a"
-        )
-    )
+    html = _page(_item("560", "/products/plintus-a", title="Плинтус напольный ПВХ Lima 72х2500мм Белый"))
     _patch_pages(monkeypatch, html)
 
     parsed = MegastroyParser().fetch_price("Плинтус")
@@ -248,8 +308,8 @@ def test_plintus_normalizes_price_per_piece_to_price_per_meter(monkeypatch):
 
 def test_plintus_skips_items_without_parsable_length(monkeypatch):
     html = _page(
-        _priced_item("560", "шт", "Плинтус напольный ПВХ Lima 72х2500мм Белый", href="/products/ok"),
-        _priced_item("400", "шт", "Плинтус без размера в названии", href="/products/no-size"),
+        _item("560", "/products/ok", title="Плинтус напольный ПВХ Lima 72х2500мм Белый"),
+        _item("400", "/products/no-size", title="Плинтус без размера в названии"),
     )
     _patch_pages(monkeypatch, html)
 
@@ -259,13 +319,31 @@ def test_plintus_skips_items_without_parsable_length(monkeypatch):
     assert "no-size" not in (parsed.source_url or "")
 
 
-# Плитка (#277): размазана по двум категориям Мегастроя — керамогранит и
-# керамическая плитка, — обе должны попасть в общую выборку.
+# Плитка/ламинат/обои (#277): сайт сам считает цену за м²/рулон и пишет её текстом
+# рядом с ценой — тут фильтруем по этому тексту напрямую, без вычислений.
+
+
+def test_tile_and_laminate_use_site_computed_unit(monkeypatch):
+    html = _page(_item("399", "/products/laminate", title="Ламинат Дуб", unit="м2"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Ламинат")
+
+    assert parsed.price_avg == Decimal("399")
+
+
+def test_wallpaper_uses_site_computed_unit(monkeypatch):
+    html = _page(_item("1295", "/products/oboi", title="Обои декоративные", unit="рул"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Обои")
+
+    assert parsed.price_avg == Decimal("1295")
 
 
 def test_tile_combines_two_categories(monkeypatch):
-    granit_html = _page(_priced_item("1000", "м2", "Керамогранит А", href="/products/granit"))
-    keramika_html = _page(_priced_item("1200", "м2", "Плитка керамическая Б", href="/products/keramika"))
+    granit_html = _page(_item("1000", "/products/granit", title="Керамогранит А", unit="м2"))
+    keramika_html = _page(_item("1200", "/products/keramika", title="Плитка керамическая Б", unit="м2"))
 
     class FakeResponse:
         def __init__(self, text: str, status_code: int = 200):

@@ -4,7 +4,7 @@ import re
 import statistics
 import time
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urljoin
 
 import requests
@@ -23,38 +23,55 @@ class MaterialCategory:
     # Одна или несколько категорий Мегастроя, откуда берём цены материала
     # (плитка размазана по "керамогранит" и "керамическая плитка", #277).
     urls: tuple[str, ...]
-    # Мегастрой сам приводит цену к "витринной единице" конкретного товара и
-    # пишет её текстом рядом с ценой ("179 ₽/шт", "399 ₽/м2") — категория при
-    # этом мешает разнородные позиции (замазка "₽/шт" в разделе шпаклёвки,
-    # добавки к затирке в мл). Указываем ожидаемую единицу — не совпало,
-    # позиция отбрасывается. None — не фильтровать (краска, старое поведение).
+    # Единица, которую сайт САМ показывает текстом рядом с ценой ("399 ₽/м2",
+    # "1295 ₽/рул") и которая уже верна без вычислений — это касается только
+    # категорий, где Мегастрой явно считает цену за м²/рулон (плитка, ламинат,
+    # обои). Для остальных материалов (краска, шпаклёвка, грунтовка, клей,
+    # затирка) сайт вне зависимости от фасовки всегда пишет "₽/шт" — там
+    # нормализуем сами по названию (см. title_unit).
     site_unit: str | None = None
-    # Плинтус продаётся поштучно (рейка фикс. длины, витринная единица "шт"),
-    # а наша база — метр: делим цену на длину, извлечённую из названия товара.
-    normalize_length: bool = False
-
-
-def _cat(url: str, site_unit: str | None = None, normalize_length: bool = False) -> MaterialCategory:
-    return MaterialCategory(urls=(url,), site_unit=site_unit, normalize_length=normalize_length)
+    # Единица фасовки, которую ищем в НАЗВАНИИ товара ("(10л)", "25 кг"), чтобы
+    # посчитать цену за базовую единицу делением на неё самим.
+    title_unit: str | None = None
+    # Плинтус — особый разбор: размерный блок "72х2500мм" в названии, а не
+    # "число+кг/л" — длина рейки берётся отдельной функцией (_length_m_from_title).
+    normalize_length_mm: bool = False
 
 
 _SHPAKLEVKA = "https://kazan.megastroy.com/catalog/shpaklevka"
 
 # Карта: материал в БД -> категория(и) Мегастроя (Казань) с фильтром, где нужен.
 CATEGORY_MAP: dict[str, MaterialCategory] = {
-    "Краска для стен": _cat("https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"),
-    "Краска потолочная": _cat(
-        "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot?field142[]=для потолков"
+    "Краска для стен": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot",),
+        title_unit="л",
     ),
-    "Шпаклевка стартовая": _cat(
-        f"{_SHPAKLEVKA}?field206[]=для заделки щелей, выбоин, трещин", site_unit="кг"
+    "Краска потолочная": MaterialCategory(
+        urls=(
+            "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot?field142[]=для потолков",
+        ),
+        title_unit="л",
     ),
-    "Шпаклевка финишная": _cat(
-        f"{_SHPAKLEVKA}?field206[]=под окраску и оклейку обоями", site_unit="кг"
+    "Шпаклевка стартовая": MaterialCategory(
+        urls=(f"{_SHPAKLEVKA}?field206[]=для заделки щелей, выбоин, трещин",),
+        title_unit="кг",
     ),
-    "Грунтовка": _cat("https://kazan.megastroy.com/catalog/grunty", site_unit="л"),
-    "Плиточный клей": _cat("https://kazan.megastroy.com/catalog/kley-dlya-plitki-2", site_unit="кг"),
-    "Затирка": _cat("https://kazan.megastroy.com/catalog/zatirki-dlya-plitki", site_unit="кг"),
+    "Шпаклевка финишная": MaterialCategory(
+        urls=(f"{_SHPAKLEVKA}?field206[]=под окраску и оклейку обоями",),
+        title_unit="кг",
+    ),
+    "Грунтовка": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/grunty",),
+        title_unit="л",
+    ),
+    "Плиточный клей": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/kley-dlya-plitki-2",),
+        title_unit="кг",
+    ),
+    "Затирка": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/zatirki-dlya-plitki",),
+        title_unit="кг",
+    ),
     "Плитка": MaterialCategory(
         urls=(
             "https://kazan.megastroy.com/catalog/keramogranit",
@@ -62,10 +79,17 @@ CATEGORY_MAP: dict[str, MaterialCategory] = {
         ),
         site_unit="м²",
     ),
-    "Ламинат": _cat("https://kazan.megastroy.com/catalog/laminat", site_unit="м²"),
-    "Обои": _cat("https://kazan.megastroy.com/catalog/dekorativnye-oboi", site_unit="рулон"),
-    "Плинтус": _cat(
-        "https://kazan.megastroy.com/catalog/plintusy", site_unit="шт", normalize_length=True
+    "Ламинат": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/laminat",),
+        site_unit="м²",
+    ),
+    "Обои": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/dekorativnye-oboi",),
+        site_unit="рулон",
+    ),
+    "Плинтус": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/plintusy",),
+        normalize_length_mm=True,
     ),
 }
 
@@ -93,6 +117,12 @@ _PRICE_UNIT_RE = re.compile(r"₽\s*/\s*(\S+)")
 # доски всегда наибольшее число (сечение — десятки мм, рейка/доска — сотни-тысячи).
 _DIMENSION_MM_RE = re.compile(r"(\d+)\s*[xх]\s*(\d+)(?:\s*[xх]\s*(\d+))?\s*мм", re.IGNORECASE)
 
+# Фасовка в названии товара ("(10л)", "25 кг", "280мл", "(9л)") — Мегастрой
+# почти всегда пишет цену за упаковку целиком ("₽/шт"), а вес/объём даёт только
+# в названии. "мл" проверяется до "л", иначе "л" внутри "мл" даёт ложное
+# совпадение (граница слова спасает не всегда при переборе альтернатив).
+_QUANTITY_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(кг|мл|л)\b", re.IGNORECASE)
+
 
 def _site_unit(price_text: str) -> str | None:
     match = _PRICE_UNIT_RE.search(price_text)
@@ -107,6 +137,17 @@ def _length_m_from_title(title: str) -> Decimal | None:
         return None
     values = [int(g) for g in match.groups() if g]
     return Decimal(max(values)) / Decimal(1000)
+
+
+def _quantity_from_title(title: str, unit: str) -> Decimal | None:
+    for value_str, found_unit in _QUANTITY_RE.findall(title):
+        if found_unit.lower() != unit:
+            continue
+        try:
+            return Decimal(value_str.replace(",", "."))
+        except InvalidOperation:
+            continue
+    return None
 
 
 def _build_headers(url: str | None = None) -> dict[str, str]:
@@ -244,15 +285,25 @@ class MegastroyParser(BaseParser):
         if not raw_items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (возможно, урезанная страница)")
 
-        # Отсекаем позиции с чужой витринной единицей — категория мешает разное
-        # (замазка "₽/шт" в шпаклёвке, добавки к затирке в мл, #277).
+        items: list[tuple[Decimal, str | None]]
         if category.site_unit is not None:
-            raw_items = [it for it in raw_items if it[2] == category.site_unit]
-
-        if category.normalize_length:
+            # Категория смешивает разнородные позиции (замазка "₽/шт" в шпаклёвке,
+            # добавки в мл в затирке) — отсекаем всё, чья витринная единица не
+            # совпадает с ожидаемой (#277).
+            items = [(price, url) for price, url, unit, _title in raw_items if unit == category.site_unit]
+        elif category.title_unit is not None:
+            # Мегастрой у весовых/объёмных материалов всегда пишет цену за
+            # упаковку целиком ("₽/шт") — вес/объём достаём из названия и
+            # считаем базовую цену сами.
+            items = []
+            for price, url, _unit, title in raw_items:
+                qty = _quantity_from_title(title, category.title_unit)
+                if qty:
+                    items.append((price / qty, url))
+        elif category.normalize_length_mm:
             # Плинтус продаётся рейкой ("72х2500мм") по цене за шт — приводим
             # к ₽/м делением на длину рейки из названия.
-            items: list[tuple[Decimal, str | None]] = []
+            items = []
             for price, url, _unit, title in raw_items:
                 length_m = _length_m_from_title(title)
                 if length_m:

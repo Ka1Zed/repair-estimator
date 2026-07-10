@@ -124,15 +124,18 @@ class LemanBrowserSession:
             return self
 
         self._playwright_cm = sync_playwright()
-        playwright = self._playwright_cm.__enter__()
         try:
+            playwright = self._playwright_cm.__enter__()
             # headless=False + channel="chrome" обязательны: headless и/или
             # ванильный Chromium Qrator режет ещё на JS-challenge.
             self._browser = playwright.chromium.launch(headless=False, channel="chrome")
             self._context = self._browser.new_context(locale="ru-RU")
         except Exception:
             logger.exception("Леман: не удалось поднять браузер для сессии")
-            self._playwright_cm.__exit__(None, None, None)
+            try:
+                self._playwright_cm.__exit__(None, None, None)
+            except Exception:
+                logger.debug("Леман: playwright уже недоступен при откате сессии")
             self._playwright_cm = None
         return self
 

@@ -154,8 +154,12 @@ def _block_candidate(block) -> tuple[Decimal, str] | None:
     value = block.get("value")
     if not value:
         return None
+    # value может прийти с форматированием (пробелы/nbsp как разделитель тысяч,
+    # запятая-десятичная) — нормализуем перед Decimal, иначе валидная цена
+    # молча отсеется и вся выборка может схлопнуться в "не найдено цен".
+    normalized = value.replace("\xa0", "").replace(" ", "").replace(",", ".")
     try:
-        price = Decimal(value)
+        price = Decimal(normalized)
     except InvalidOperation:
         return None
     if price <= 0:

@@ -77,6 +77,18 @@ def test_parse_page_skips_items_without_any_price_block():
     assert items[0][0] == [(Decimal("100"), "шт.")]
 
 
+def test_parse_page_normalizes_formatted_price():
+    # value может прийти с разделителем тысяч (nbsp/пробел) и запятой-десятичной
+    # — не должно молча отсеяться, иначе вся выборка схлопнется в "не найдено цен".
+    html = _page(
+        _item("/product/a/", price="1\xa0500,50", price_unit="шт."),
+        _item("/product/b/", price="2 300", price_unit="шт."),
+    )
+    items = _parse_page(html, PAGE_URL)
+    assert items[0][0] == [(Decimal("1500.50"), "шт.")]
+    assert items[1][0] == [(Decimal("2300"), "шт.")]
+
+
 def test_length_from_title_takes_number_before_standalone_m():
     # "8 см" не должно спутаться с "2.2 м" — "м" внутри "см" не граничит словом.
     assert _length_m_from_title('Плинтус напольный «Белый» 8 см 2.2 м') == Decimal("2.2")

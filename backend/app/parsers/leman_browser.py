@@ -12,6 +12,12 @@ logger = logging.getLogger(__name__)
 CARD_SELECTOR = '[data-qa="product"]'
 NAV_TIMEOUT_MS = 30_000
 PAGE_PAUSE_SECONDS = 1.0  # вежливая пауза между страницами, не долбить сайт
+# Каталог за Qrator тянет аналитику/qauth постоянными коннектами — networkidle
+# на нём почти никогда не наступает и раньше съедал полный NAV_TIMEOUT (~30с) на
+# КАЖДОЙ странице (×MAX_PAGES = десятки минут). Карточки уже дождались по
+# CARD_SELECTOR, скролл нужен лишь чтобы дорисовать «хвост» ленивых карточек —
+# для этого хватает короткой фиксированной паузы, а не ожидания тишины сети.
+LAZY_SETTLE_MS = 1_500
 
 
 def fetch_pages(base_url: str, max_pages: int) -> list[str]:
@@ -56,13 +62,11 @@ def fetch_pages(base_url: str, max_pages: int) -> list[str]:
                         logger.info(f"  Леман браузер стр.{page_num}: карточки не дождались, стоп")
                         break
 
-                    # Небольшой скролл + networkidle — часть карточек на каталоге
-                    # Лемана дорисовывается лениво при скролле/гидратации.
+                    # Небольшой скролл дорисовывает лениво-подгружаемые карточки;
+                    # даём им короткую фиксированную паузу вместо networkidle (см.
+                    # LAZY_SETTLE_MS — networkidle на Qrator-SPA не наступает).
                     page.mouse.wheel(0, 4000)
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
-                    except Exception:
-                        pass
+                    page.wait_for_timeout(LAZY_SETTLE_MS)
 
                     pages_html.append(page.content())
                     time.sleep(PAGE_PAUSE_SECONDS)

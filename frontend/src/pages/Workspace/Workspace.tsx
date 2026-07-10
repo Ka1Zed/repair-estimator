@@ -9,11 +9,11 @@ import OpeningsForm from "../../components/OpeningsForm";
 import { RoomTypeSelector } from "../../components/RoomTypeSelector";
 import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
-import type { MaterialItem, LaborItem } from "../../types/estimate";
+import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
 import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/EstimateLedger";
 
-import { useProjectStore } from "../../store/projectStore";
+import { useProjectStore, type EstimateScope } from "../../store/projectStore";
 import { useBackendStatus } from "../../store/backendStatus";
 import { roomHasInvalidOpenings } from "../../utils/openingValidation";
 import { hasSelfIntersection, validateHeight } from "../../utils/polygonValidation";
@@ -33,8 +33,15 @@ interface EstimateResponse {
   geometry: GeometryData;
   materials: MaterialItem[];
   labor: LaborItem[];
-  scope?: string; // <-- Добавлено новое поле с сервера
+  scope?: EstimateScope;
+  hidden_works?: HiddenWorks;
 }
+
+const STAGE_LABELS: Record<LaborStage, string> = {
+  rough: "Черновые работы",
+  pre_finish: "Предчистовые работы",
+  finish: "Чистовые работы",
+};
 
 const formatPrice = (price: number) => `${Math.round(price).toLocaleString("ru-RU")} ₽`;
 const formatNum = (n: number) =>
@@ -51,13 +58,12 @@ export function Workspace() {
   const rooms = useProjectStore((s) => s.rooms);
   const city = useProjectStore((s) => s.city);
   const setCity = useProjectStore((s) => s.setCity);
+  const scope = useProjectStore((s) => s.scope);
+  const setScope = useProjectStore((s) => s.setScope);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
-  
- // Достаем scope безопасным способом без использования any
-const storeState = useProjectStore((s) => s);
-const scope = "scope" in storeState ? (storeState as unknown as Record<string, unknown>).scope as string : undefined;
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<EstimateResponse | null>(null);
@@ -138,6 +144,7 @@ const scope = "scope" in storeState ? (storeState as unknown as Record<string, u
       try {
         const payload = {
           city,
+          scope,
           rooms: rooms.map((room) => ({
             name: room.name,
             room_type: room.room_type,
@@ -163,7 +170,7 @@ const scope = "scope" in storeState ? (storeState as unknown as Record<string, u
         setIsLoading(false);
       }
     },
-    [rooms, city],
+    [rooms, city, scope],
   );
 
   // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
@@ -269,67 +276,92 @@ const scope = "scope" in storeState ? (storeState as unknown as Record<string, u
     : avgPos;
 
   // --- price scaling ---
-  const priceScale = useMemo(() => {
-    if (!data) return 1;
-    const { total_min, total_avg, total_max } = data.summary;
-    if (total_avg === 0) return 1;
-    if (priceMode === "min") return total_min / total_avg;
-    if (priceMode === "max") return total_max / total_avg;
-    return 1;
-  }, [data, priceMode]);
+  // Множитель выбранного режима СВОЙ для каждого раздела: берётся из min/avg/max
+  // именно этого раздела. У позиций нет своих min/max (в контракте только
+  // total_avg), поэтому масштабируем средние. Общий total-коэффициент здесь не
+  // годится — у материалов и работ разный разброс, и «Итого по разделу» разошлось
+  // бы с вилкой в сводной таблице выше.
+  const priceScale = useCallback(
+    (category: "materials" | "labor") => {
+      if (!data) return 1;
+      const s = data.summary;
+      const avg = category === "materials" ? s.materials_avg : s.labor_avg;
+      if (avg === 0) return 1;
+      const min = category === "materials" ? s.materials_min : s.labor_min;
+      const max = category === "materials" ? s.materials_max : s.labor_max;
+      if (priceMode === "min") return min / avg;
+      if (priceMode === "max") return max / avg;
+      return 1;
+    },
+    [data, priceMode],
+  );
 
   const sectionTotal = useMemo(() => {
     if (!data) return 0;
     const items = tab === "materials" ? data.materials : data.labor;
     const sum = items.reduce((s, i) => s + (i.total_avg ?? 0), 0);
-    return Math.round(sum * priceScale);
+    return Math.round(sum * priceScale(tab));
   }, [data, tab, priceScale]);
 
-  const materialRows: LedgerRow[] = useMemo(
-    () =>
-      (data?.materials ?? ([] as MaterialItem[])).map((m) => ({
-        name: m.name,
-        volume: `${formatQty(m.quantity)} ${m.unit}`,
-        price: rub(Math.round(m.price_avg * priceScale)),
-        details: [
-          { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
-          { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
-          { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
-          { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
-          { label: "Цена за единицу", value: rub(Math.round(m.price_avg * priceScale)) },
-          { label: "Итог по позиции", value: rub(Math.round(m.total_avg * priceScale)) },
-          { label: "Источник цены", value: m.source, url: m.source_url },
-          { label: "Регион", value: regionLabel(m.region) },
-          ...(m.updated_at
-            ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
-            : []),
-        ],
-      })),
-    [data, priceScale],
-  );
+  const materialRows: LedgerRow[] = useMemo(() => {
+    const scale = priceScale("materials");
+    return (data?.materials ?? []).map((m) => ({
+      name: m.name,
+      volume: `${formatQty(m.quantity)} ${m.unit}`,
+      price: rub(Math.round(m.price_avg * scale)),
+      details: [
+        { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
+        { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
+        { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
+        { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
+        { label: "Цена за единицу", value: rub(Math.round(m.price_avg * scale)) },
+        { label: "Итог по позиции", value: rub(Math.round(m.total_avg * scale)) },
+        { label: "Источник цены", value: m.source, url: m.source_url },
+        { label: "Регион", value: regionLabel(m.region) },
+        ...(m.updated_at
+          ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
+          : []),
+      ],
+    }));
+  }, [data, priceScale]);
 
   const toLedgerRow = useCallback(
-    (l: LaborItem): LedgerRow => ({
-      name: l.service,
-      subtitle: l.specialist,
-      volume: `${formatQty(l.volume)} ${l.unit}`,
-      price: rub(Math.round(l.price_avg * priceScale)),
-      details: [
-        { label: "Специалист", value: l.specialist },
-        { label: "Цена за единицу", value: rub(Math.round(l.price_avg * priceScale)) },
-        { label: "Итог по позиции", value: rub(Math.round(l.total_avg * priceScale)) },
-        { label: "Источник цены", value: l.source, url: l.source_url },
-        { label: "Регион", value: regionLabel(l.region) },
-      ],
-    }),
+    (l: LaborItem): LedgerRow => {
+      const scale = priceScale("labor");
+      return {
+        name: l.service,
+        subtitle: l.specialist,
+        volume: `${formatQty(l.volume)} ${l.unit}`,
+        price: rub(Math.round(l.price_avg * scale)),
+        details: [
+          { label: "Специалист", value: l.specialist },
+          { label: "Цена за единицу", value: rub(Math.round(l.price_avg * scale)) },
+          { label: "Итог по позиции", value: rub(Math.round(l.total_avg * scale)) },
+          { label: "Источник цены", value: l.source, url: l.source_url },
+          { label: "Регион", value: regionLabel(l.region) },
+        ],
+      };
+    },
     [priceScale],
   );
 
-  // <-- ВЕРНУЛИ ПОТЕРЯННУЮ ПЕРЕМЕННУЮ ДЛЯ РАБОТ -->
   const laborRows: LedgerRow[] = useMemo(
-    () => (data?.labor ?? ([] as LaborItem[])).map(toLedgerRow),
+    () => (data?.labor ?? []).map(toLedgerRow),
     [data, toLedgerRow],
   );
+
+  // Работы, сгруппированные по стадиям (черновая/предчистовая/чистовая) — для
+  // сметы «Черновая + чистовая». В режиме «только чистовая» группировки нет.
+  const laborByStage = useMemo(() => {
+    const labor = data?.labor ?? [];
+    const groups = new Map<LaborStage, LaborItem[]>();
+    for (const item of labor) {
+      const stage: LaborStage = item.stage ?? "finish";
+      if (!groups.has(stage)) groups.set(stage, []);
+      groups.get(stage)!.push(item);
+    }
+    return groups;
+  }, [data]);
 
   return (
     <div className={styles.page} ref={containerRef}>
@@ -381,6 +413,23 @@ const scope = "scope" in storeState ? (storeState as unknown as Record<string, u
                 {heightError}
               </div>
             )}
+          </div>
+          <div>
+            <div className={styles.blockLabel}>Объём ремонта</div>
+            <div className={styles.scopeToggle}>
+              <button
+                className={`${styles.scopeBtn} ${scope === "finish_only" ? styles.scopeBtnActive : ""}`}
+                onClick={() => setScope("finish_only")}
+              >
+                Только чистовая
+              </button>
+              <button
+                className={`${styles.scopeBtn} ${scope === "rough_and_finish" ? styles.scopeBtnActive : ""}`}
+                onClick={() => setScope("rough_and_finish")}
+              >
+                Черновая + чистовая
+              </button>
+            </div>
           </div>
         </div>
 
@@ -640,7 +689,27 @@ const scope = "scope" in storeState ? (storeState as unknown as Record<string, u
                 </button>
               </div>
 
-              <EstimateLedger rows={tab === "materials" ? materialRows : laborRows} />
+              {tab === "materials" || (data.scope ?? scope) === "finish_only" || laborByStage.size <= 1 ? (
+                <EstimateLedger rows={tab === "materials" ? materialRows : laborRows} />
+              ) : (
+                <>
+                  {(["rough", "pre_finish", "finish"] as LaborStage[])
+                    .filter((stage) => laborByStage.has(stage))
+                    .map((stage) => {
+                      const items = laborByStage.get(stage)!;
+                      const stageTotalAvg = items.reduce((s, i) => s + i.total_avg, 0);
+                      return (
+                        <div key={stage}>
+                          <div className={styles.stageHeader}>{STAGE_LABELS[stage]}</div>
+                          <EstimateLedger rows={items.map(toLedgerRow)} />
+                          <div className={styles.stageSubtotal}>
+                            {rub(Math.round(stageTotalAvg * priceScale("labor")))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </>
+              )}
 
               <div className={styles.sectionTotal}>
                 <span className={styles.sectionTotalLabel}>
@@ -648,6 +717,43 @@ const scope = "scope" in storeState ? (storeState as unknown as Record<string, u
                 </span>
                 <span className={styles.sectionTotalValue}>{formatPrice(sectionTotal)}</span>
               </div>
+
+              {data.hidden_works && data.hidden_works.items.length > 0 && (
+                <div className={styles.hiddenSection}>
+                  <div className={styles.blockLabel}>Скрытые работы · возможные доплаты</div>
+                  <p className={styles.hiddenNote}>{data.hidden_works.note}</p>
+                  <table className={styles.hiddenTable}>
+                    <thead>
+                      <tr>
+                        <th>Работа</th>
+                        <th>Причина</th>
+                        <th>Объём</th>
+                        <th>Ориентировочная вилка</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.hidden_works.items.map((item, i) => (
+                        <tr key={i}>
+                          <td>{item.service}</td>
+                          <td className={styles.hiddenReason}>{item.reason}</td>
+                          <td className={styles.hiddenVol}>
+                            {formatQty(item.volume)} {item.unit}
+                          </td>
+                          <td className={styles.hiddenRange}>
+                            {formatPrice(item.total_min)} — {formatPrice(item.total_max)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className={styles.hiddenTotal}>
+                    <span>Итого возможных доплат</span>
+                    <span>
+                      {formatPrice(data.hidden_works.total_min)} — {formatPrice(data.hidden_works.total_max)}
+                    </span>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

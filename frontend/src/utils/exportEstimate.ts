@@ -117,6 +117,20 @@ const MODE_LABELS: Record<PriceMode, string> = {
   max: 'Максимальный'
 };
 
+// Множитель уровня цен, СВОЙ для каждого раздела: у позиций нет своих min/max
+// (в контракте только total_avg), поэтому масштабируем средние коэффициентом из
+// вилки этого раздела. Общий total-множитель дал бы расхождение с «Итоговой
+// стоимостью» — у материалов и работ разный разброс. Совпадает с priceScale в UI.
+const scaleFor = (s: SummaryData, priceMode: PriceMode, category: 'materials' | 'labor') => {
+  const avg = category === 'materials' ? s.materials_avg : s.labor_avg;
+  if (avg === 0) return 1;
+  const min = category === 'materials' ? s.materials_min : s.labor_min;
+  const max = category === 'materials' ? s.materials_max : s.labor_max;
+  if (priceMode === 'min') return min / avg;
+  if (priceMode === 'max') return max / avg;
+  return 1;
+};
+
 // Excel-версия сметы в одном стиле с PDF: акцентная шапка, зебра, рамки,
 // город/дата, геометрия, кликабельные источники (синие подчёркнутые ячейки),
 // детализация количества и запаса. Оформление ячеек даёт xlsx-js-style.
@@ -124,10 +138,12 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
   const wb = XLSX.utils.book_new();
   const today = new Date().toLocaleDateString('ru-RU');
   const s = data.summary;
-  
-  // Расчет множителя на основе выбранного уровня цен
-  const scale = s.total_avg === 0 ? 1 : priceMode === 'min' ? s.total_min / s.total_avg : priceMode === 'max' ? s.total_max / s.total_avg : 1;
-  const p = (val: number) => Math.round(val * scale);
+
+  // Множители уровня цен — раздельные для материалов и работ (см. scaleFor).
+  const scaleMat = scaleFor(s, priceMode, 'materials');
+  const scaleLab = scaleFor(s, priceMode, 'labor');
+  const pMat = (val: number) => Math.round(val * scaleMat);
+  const pLab = (val: number) => Math.round(val * scaleLab);
 
   const metaLine = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${today}`;
 
@@ -183,7 +199,7 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
     [],
     ['Наименование', 'Кол-во', 'Ед. изм.', 'Цена за ед.', 'Итого', 'Источник', 'Дата цены'],
     ...data.materials.map(m => [
-      m.name, m.quantity, m.unit, p(m.price_avg), p(m.total_avg),
+      m.name, m.quantity, m.unit, pMat(m.price_avg), pMat(m.total_avg),
       sourceLabel(m.source, m.region), fmtDate(m.updated_at),
     ]),
   ];
@@ -218,7 +234,7 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
     [],
     ['Услуга', 'Специалист', 'Объём', 'Ед. изм.', 'Цена за ед.', 'Итого', 'Источник'],
     ...data.labor.map(l => [
-      l.service, l.specialist, l.volume, l.unit, p(l.price_avg), p(l.total_avg),
+      l.service, l.specialist, l.volume, l.unit, pLab(l.price_avg), pLab(l.total_avg),
       sourceLabel(l.source, l.region),
     ]),
   ];
@@ -278,6 +294,45 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
   }
   XLSX.utils.book_append_sheet(wb, detSheet, 'Детализация');
 
+  // ---------- Скрытые работы (справочно, вилка не масштабируется) ----------
+  if (data.hidden_works && data.hidden_works.items.length > 0) {
+    const hw = data.hidden_works;
+    const hwAoa: (string | number)[][] = [
+      ['Скрытые работы · возможные доплаты'],
+      [hw.note],
+      [],
+      ['Работа', 'Специалист', 'Причина', 'Объём', 'Ед.', 'Мин.', 'Ср.', 'Макс.'],
+      ...hw.items.map(item => [
+        item.service, item.specialist, item.reason,
+        item.volume, item.unit,
+        item.total_min, item.total_avg, item.total_max,
+      ]),
+      [],
+      ['Итого возможных доплат', '', '', '', '', hw.total_min, hw.total_avg, hw.total_max],
+    ];
+    const hwSheet = XLSX.utils.aoa_to_sheet(hwAoa);
+    const hwFirst = 4;
+    const hwLast = hwFirst + hw.items.length - 1;
+    hwSheet['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 8 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
+    hwSheet['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
+    ];
+    cellAt(hwSheet, 0, 0).s = titleStyle;
+    cellAt(hwSheet, 1, 0).s = noteStyle;
+    if (hw.items.length) {
+      styleTable(hwSheet, {
+        headerRow: 3, firstData: hwFirst, lastData: hwLast, firstCol: 0, lastCol: 7,
+        moneyCols: [5, 6, 7],
+      });
+    }
+    const totalRow = hwLast + 2;
+    for (let c = 0; c <= 7; c++) {
+      cellAt(hwSheet, totalRow, c).s = { ...totalStyle, ...(c >= 5 ? { numFmt: MONEY_FMT, alignment: { horizontal: 'right', vertical: 'center' } } : {}) };
+    }
+    XLSX.utils.book_append_sheet(wb, hwSheet, 'Скрытые работы');
+  }
+
   XLSX.writeFile(wb, 'Смета.xlsx');
 };
 
@@ -310,8 +365,11 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
   const doc = new jsPDF();
   const s = data.summary;
 
-  const scale = s.total_avg === 0 ? 1 : priceMode === 'min' ? s.total_min / s.total_avg : priceMode === 'max' ? s.total_max / s.total_avg : 1;
-  const p = (val: number) => Math.round(val * scale);
+  // Множители уровня цен — раздельные для материалов и работ (см. scaleFor).
+  const scaleMat = scaleFor(s, priceMode, 'materials');
+  const scaleLab = scaleFor(s, priceMode, 'labor');
+  const pMat = (val: number) => Math.round(val * scaleMat);
+  const pLab = (val: number) => Math.round(val * scaleLab);
 
   try {
     const response = await fetch('/Roboto-Regular.ttf');
@@ -414,7 +472,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
     startY: currentY + 4,
     head: [['Наименование', 'Кол-во', 'Ед.', 'Цена', 'Итого', 'Источник']],
     body: data.materials.map(m => [
-      m.name, m.quantity, m.unit, formatPricePDF(p(m.price_avg)), formatPricePDF(p(m.total_avg)), sourceLabel(m.source, m.region)
+      m.name, m.quantity, m.unit, formatPricePDF(pMat(m.price_avg)), formatPricePDF(pMat(m.total_avg)), sourceLabel(m.source, m.region)
     ]),
     columnStyles: {
       0: { halign: 'left', cellWidth: 58 },
@@ -434,7 +492,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
     startY: currentY + 4,
     head: [['Услуга', 'Специалист', 'Объём', 'Ед.', 'Цена', 'Итого', 'Источник']],
     body: data.labor.map(l => [
-      l.service, l.specialist, l.volume, l.unit, formatPricePDF(p(l.price_avg)), formatPricePDF(p(l.total_avg)), sourceLabel(l.source, l.region)
+      l.service, l.specialist, l.volume, l.unit, formatPricePDF(pLab(l.price_avg)), formatPricePDF(pLab(l.total_avg)), sourceLabel(l.source, l.region)
     ]),
     columnStyles: {
       0: { halign: 'left', cellWidth: 40 },

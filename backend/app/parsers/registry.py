@@ -9,17 +9,20 @@
 from app.parsers.base import BaseParser
 from app.parsers.garantstroikompleks_parser import GarantStroiParser
 from app.parsers.kaz_stroyka_parser import KazStroykaParser
+from app.parsers.leman_parser import LemanParser
 from app.parsers.megastroy_parser import MegastroyParser
 from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
 from app.parsers.prorabneva_parser import ProrabnevaParser
 from app.parsers.rembrigada_parser import RembrigadaParser
 from app.parsers.remont_uroven_parser import RemontUrovenParser
 
-# Парсеры цен материалов. Сейчас один источник (Мегастрой); calc-код
-# (estimates.get_material_parser) читает первый элемент — при добавлении
-# второго источника логику выбора/комбинирования цен добавит сам #276.
+# Парсеры цен материалов. Два источника (Мегастрой, Леман); calc-код
+# (estimates.get_material_parser) пока читает только первый элемент — выбор/
+# комбинирование цен между несколькими источниками в самой смете вне scope #276,
+# это отдельная будущая задача поверх уже готового списка ниже.
 MATERIAL_PARSERS: list[BaseParser] = [
     MegastroyParser(),
+    LemanParser(),
 ]
 
 # Базовый (безрегиональный) прайс работ.

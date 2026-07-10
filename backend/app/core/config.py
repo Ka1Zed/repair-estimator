@@ -29,6 +29,10 @@ class DBSettings(BaseSettings):
     # включается по умолчанию, чтобы не раздувать обязательные зависимости/образ.
     MEGASTROY_HEADLESS: bool = False
 
+    # Beta: headless-харвестер cookie для Лемана (#276), тот же принцип, что у
+    # Мегастроя выше — по умолчанию выключен, требует playwright + chromium.
+    LEMAN_HEADLESS: bool = False
+
     model_config = SettingsConfigDict(env_file=ENV_PATH, env_file_encoding="utf8", extra="ignore")
 
     @property

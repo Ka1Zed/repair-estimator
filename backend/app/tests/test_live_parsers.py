@@ -5,6 +5,7 @@
 
 import pytest
 
+from app.parsers.leman_parser import LemanParser
 from app.parsers.megastroy_parser import MegastroyParser
 
 pytestmark = pytest.mark.live
@@ -13,6 +14,17 @@ pytestmark = pytest.mark.live
 def test_megastroy_returns_positive_price_for_paint():
     """Живой Мегастрой отдаёт валидную вилку цен для краски (min ≤ avg ≤ max, все > 0)."""
     parsed = MegastroyParser().fetch_price("Краска для стен")
+
+    assert parsed is not None
+    assert parsed.price_min > 0
+    assert parsed.price_avg > 0
+    assert parsed.price_max > 0
+    assert parsed.price_min <= parsed.price_avg <= parsed.price_max
+
+
+def test_leman_returns_positive_price_for_paint():
+    """Живой Леман отдаёт валидную вилку цен для краски (min ≤ avg ≤ max, все > 0)."""
+    parsed = LemanParser().fetch_price("Краска для стен")
 
     assert parsed is not None
     assert parsed.price_min > 0

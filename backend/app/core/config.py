@@ -29,9 +29,14 @@ class DBSettings(BaseSettings):
     # включается по умолчанию, чтобы не раздувать обязательные зависимости/образ.
     MEGASTROY_HEADLESS: bool = False
 
-    # Beta: headless-харвестер cookie для Лемана (#276), тот же принцип, что у
-    # Мегастроя выше — по умолчанию выключен, требует playwright + chromium.
-    LEMAN_HEADLESS: bool = False
+    # Beta: живой браузерный фетч каталога Лемана (#276, plans/2026-07-10-leman-browser-fetch.md).
+    # В отличие от Мегастроя, cookie-харвест + requests тут не работает — Qrator
+    # ловит CDP даже у headed настоящего Chrome без patchright. Поэтому это не
+    # харвест cookie, а полноценный browser-fetch (app/parsers/leman_browser.py)
+    # через patchright, и он же требует РФ-резидентный IP (не сработает в GCP US),
+    # поэтому включаем только для ручного локального наполнения кэша цен.
+    # По умолчанию выключен: fetch_price не ходит в сеть → seed-fallback.
+    LEMAN_LIVE: bool = False
 
     model_config = SettingsConfigDict(env_file=ENV_PATH, env_file_encoding="utf8", extra="ignore")
 

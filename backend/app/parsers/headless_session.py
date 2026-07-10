@@ -104,7 +104,7 @@ def _collect_cookies(
 
 def _harvest(url: str, user_agent: str) -> str | None:
     # DDoS-Guard сам перезагружает страницу после прохождения JS-challenge —
-    # готовность определяем по смене title (не networkidle, как для Лемана).
+    # готовность определяем по смене title (у Лемана — по снятию Qrator-скрипта).
     cookies = _collect_cookies(
         url, user_agent,
         site_label="Мегастрой",
@@ -135,20 +135,32 @@ def get_megastroy_cookie(url: str, user_agent: str) -> str | None:
     return cookie
 
 
-def get_leman_cookie(url: str, user_agent: str) -> str | None:
-    """Clearance-cookie для Лемана: из кэша, иначе headless-харвест.
+def _qrator_challenge_cleared(page: object) -> bool:
+    # Qrator отдаёт страницу-заглушку с <script src="/__qrator/qauth.js">, JS
+    # считает clearance-cookie и перезагружает страницу на реальный контент.
+    # Готовность = challenge-скрипта на странице больше нет. Ловим момент ПОСЛЕ
+    # решения, иначе снимем только временную qrator_jsr (Max-Age=300), а не
+    # валидную сессионную куку.
+    return page.query_selector("script[src*='qauth.js']") is None
 
-    В отличие от Мегастроя нет эмпирики о конкретном WAF/challenge Лемана —
-    поэтому готовность страницы определяем по networkidle (без title-проверки),
-    а куки берём все из контекста, не сужая по префиксам (сузить нечем без
-    фактического прогона). Как и get_megastroy_cookie — никогда не бросает
-    исключения, сбой headless значит просто None.
+
+def get_leman_cookie(url: str, user_agent: str) -> str | None:
+    """Clearance-cookie Qrator для Лемана: из кэша, иначе headless-харвест.
+
+    WAF Лемана — Qrator с JS-challenge (server: QRATOR, /__qrator/qauth.js):
+    голый requests получает 401, валидную куку отдаёт только после исполнения
+    JS в реальном движке. Поэтому готовность ждём по снятию challenge-скрипта
+    (не networkidle — та сработала бы на самой заглушке), а куки берём все из
+    контекста, не сужая по префиксам. Как и get_megastroy_cookie — никогда не
+    бросает исключения, сбой headless значит просто None.
     """
     cached = _read_cache(LEMAN_CACHE_PATH)
     if cached:
         return cached
 
-    cookies = _collect_cookies(url, user_agent, site_label="Леман")
+    cookies = _collect_cookies(
+        url, user_agent, site_label="Леман", ready_check=_qrator_challenge_cleared
+    )
     if not cookies:
         return None
 

@@ -3,13 +3,17 @@ import logging
 import os
 import time
 from pathlib import Path
+from typing import Callable
 
 logger = logging.getLogger(__name__)
+
+CACHE_DIR = Path(__file__).resolve().parent.parent.parent / ".cache"
 
 # Кэш clearance-cookie DDoS-Guard на диске: харвестим headless-браузером редко
 # (см. результаты прогона в plans/2026-06-30-beta-headless-parser.md — ключевые
 # DDoS-Guard куки живут ~53ч, не минуты), а не на каждый запрос update_prices.
-CACHE_PATH = Path(__file__).resolve().parent.parent.parent / ".cache" / "megastroy_cookie.json"
+CACHE_PATH = CACHE_DIR / "megastroy_cookie.json"
+LEMAN_CACHE_PATH = CACHE_DIR / "leman_cookie.json"
 
 # Запас сильно меньше эмпирически замеренного TTL (~53ч у __ddg8_/9_/10_),
 # чтобы не словить протухший cookie на старте долгого прогона update_prices.
@@ -29,11 +33,11 @@ _KEEP_PREFIXES = (
 )
 
 
-def _read_cache() -> str | None:
-    if not CACHE_PATH.exists():
+def _read_cache(cache_path: Path) -> str | None:
+    if not cache_path.exists():
         return None
     try:
-        data = json.loads(CACHE_PATH.read_text())
+        data = json.loads(cache_path.read_text())
     except (OSError, ValueError):
         return None
     if time.time() - data.get("harvested_at", 0) > COOKIE_TTL_SECONDS:
@@ -41,23 +45,34 @@ def _read_cache() -> str | None:
     return data.get("cookie") or None
 
 
-def _write_cache(cookie: str) -> None:
+def _write_cache(cache_path: Path, cookie: str) -> None:
     # Пишем через temp-файл с уникальным суффиксом (pid) + rename: rename атомарен
     # на одной ФС, поэтому параллельный update_prices не увидит "разорванный"
     # частично записанный JSON. Права 0600 — cookie не должна быть читаема всем.
-    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = CACHE_PATH.with_name(f"{CACHE_PATH.name}.{os.getpid()}.tmp")
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = cache_path.with_name(f"{cache_path.name}.{os.getpid()}.tmp")
     tmp_path.write_text(json.dumps({"cookie": cookie, "harvested_at": time.time()}))
     tmp_path.chmod(0o600)
-    tmp_path.replace(CACHE_PATH)
+    tmp_path.replace(cache_path)
 
 
-def _harvest(url: str, user_agent: str) -> str | None:
+def _collect_cookies(
+    url: str,
+    user_agent: str,
+    *,
+    site_label: str,
+    ready_check: Callable[[object], bool] | None = None,
+) -> dict[str, str] | None:
+    # Общая Playwright-механика для всех сайтов: запустить headless Chromium,
+    # открыть страницу, дождаться готовности (по умолчанию — networkidle; сайты
+    # с JS-challenge вроде Мегастроя передают свою проверку через ready_check) и
+    # забрать куки контекста. Ошибка/отсутствие playwright — не исключение, а
+    # None, чтобы вызывающий код спокойно ушёл в обычный путь без cookie.
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         logger.warning(
-            "MEGASTROY_HEADLESS=1, но playwright не установлен "
+            f"{site_label}: headless включён, но playwright не установлен "
             "(pip install -r requirements-headless.txt && playwright install chromium)"
         )
         return None
@@ -68,20 +83,34 @@ def _harvest(url: str, user_agent: str) -> str | None:
             try:
                 context = browser.new_context(user_agent=user_agent, locale="ru-RU")
                 page = context.new_page()
-                page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-                # DDoS-Guard сам перезагружает страницу после прохождения JS-challenge.
-                for _ in range(20):
-                    if page.title() != "DDoS-Guard":
-                        break
-                    time.sleep(1)
+                if ready_check is not None:
+                    page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                    for _ in range(20):
+                        if ready_check(page):
+                            break
+                        time.sleep(1)
+                    else:
+                        logger.warning(f"{site_label}: headless не прошёл проверку готовности за 20с")
+                        return None
                 else:
-                    logger.warning("Мегастрой: headless не прошёл JS-challenge за 20с")
-                    return None
-                cookies = {c["name"]: c["value"] for c in context.cookies()}
+                    page.goto(url, wait_until="networkidle", timeout=30_000)
+                return {c["name"]: c["value"] for c in context.cookies()}
             finally:
                 browser.close()
     except Exception:
-        logger.exception("Мегастрой: ошибка headless-харвестера cookie")
+        logger.exception(f"{site_label}: ошибка headless-харвестера cookie")
+        return None
+
+
+def _harvest(url: str, user_agent: str) -> str | None:
+    # DDoS-Guard сам перезагружает страницу после прохождения JS-challenge —
+    # готовность определяем по смене title (у Лемана — по снятию Qrator-скрипта).
+    cookies = _collect_cookies(
+        url, user_agent,
+        site_label="Мегастрой",
+        ready_check=lambda page: page.title() != "DDoS-Guard",
+    )
+    if not cookies:
         return None
 
     minimal = {k: v for k, v in cookies.items() if k.startswith(_KEEP_PREFIXES)}
@@ -96,11 +125,45 @@ def get_megastroy_cookie(url: str, user_agent: str) -> str | None:
     Никогда не бросает исключения — сбой headless значит просто None
     (вызывающий код уходит в обычный путь без cookie -> 403 -> seed-fallback).
     """
-    cached = _read_cache()
+    cached = _read_cache(CACHE_PATH)
     if cached:
         return cached
 
     cookie = _harvest(url, user_agent)
     if cookie:
-        _write_cache(cookie)
+        _write_cache(CACHE_PATH, cookie)
+    return cookie
+
+
+def _qrator_challenge_cleared(page: object) -> bool:
+    # Qrator отдаёт страницу-заглушку с <script src="/__qrator/qauth.js">, JS
+    # считает clearance-cookie и перезагружает страницу на реальный контент.
+    # Готовность = challenge-скрипта на странице больше нет. Ловим момент ПОСЛЕ
+    # решения, иначе снимем только временную qrator_jsr (Max-Age=300), а не
+    # валидную сессионную куку.
+    return page.query_selector("script[src*='qauth.js']") is None
+
+
+def get_leman_cookie(url: str, user_agent: str) -> str | None:
+    """Clearance-cookie Qrator для Лемана: из кэша, иначе headless-харвест.
+
+    WAF Лемана — Qrator с JS-challenge (server: QRATOR, /__qrator/qauth.js):
+    голый requests получает 401, валидную куку отдаёт только после исполнения
+    JS в реальном движке. Поэтому готовность ждём по снятию challenge-скрипта
+    (не networkidle — та сработала бы на самой заглушке), а куки берём все из
+    контекста, не сужая по префиксам. Как и get_megastroy_cookie — никогда не
+    бросает исключения, сбой headless значит просто None.
+    """
+    cached = _read_cache(LEMAN_CACHE_PATH)
+    if cached:
+        return cached
+
+    cookies = _collect_cookies(
+        url, user_agent, site_label="Леман", ready_check=_qrator_challenge_cleared
+    )
+    if not cookies:
+        return None
+
+    cookie = "; ".join(f"{k}={v}" for k, v in cookies.items())
+    _write_cache(LEMAN_CACHE_PATH, cookie)
     return cookie

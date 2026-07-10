@@ -1,6 +1,7 @@
 import logging
 import re
 import statistics
+from contextlib import nullcontext
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urljoin
@@ -206,6 +207,26 @@ def _select_price(candidates: list[tuple[Decimal, str]], spec: UnitSpec) -> Deci
 class LemanParser(BaseParser):
     source_name = "Леман"
 
+    def __init__(self):
+        # Опциональная общая браузерная сессия (см. leman_browser.LemanBrowserSession) —
+        # update_prices() открывает её один раз на весь прогон материалов Лемана
+        # и подставляет через set_session, чтобы не поднимать Chrome заново на
+        # каждую категорию (материалов 11+, у затирки ещё и 4 подкатегории, #277).
+        # None — прежнее поведение: каждый fetch_price сам открывает и закрывает
+        # свою сессию через модульную leman_browser.fetch_pages.
+        self._session = None
+
+    def set_session(self, session) -> None:
+        self._session = session
+
+    def open_session(self):
+        # Раз даже с общей сессией фетч идёт через реальный браузер, нет смысла
+        # поднимать Chrome, если живой фетч всё равно выключен — fetch_price
+        # ниже сразу упадёт в RuntimeError на каждом материале.
+        if not settings.LEMAN_LIVE:
+            return nullcontext(None)
+        return leman_browser.LemanBrowserSession()
+
     def known_materials(self) -> list[str]:
         return list(CATEGORY_MAP.keys())
 
@@ -225,13 +246,14 @@ class LemanParser(BaseParser):
 
         spec = MATERIAL_UNITS[material_name]
         base_urls = CATEGORY_MAP[material_name]
+        fetch_pages = self._session.fetch_pages if self._session is not None else leman_browser.fetch_pages
 
         items: list[tuple[Decimal, str | None, str | None]] = []
         seen_ids: set[str] = set()
         any_pages_loaded = False
 
         for base_url in base_urls:
-            pages_html = leman_browser.fetch_pages(base_url, MAX_PAGES)
+            pages_html = fetch_pages(base_url, MAX_PAGES)
             if not pages_html:
                 logger.warning(f"  Леман '{material_name}' {base_url}: браузер не вернул ни одной страницы")
                 continue

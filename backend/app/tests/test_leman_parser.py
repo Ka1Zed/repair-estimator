@@ -434,3 +434,123 @@ def test_page_signature_empty_when_no_products():
     # Пустая/урезанная страница → пустая сигнатура; она не должна ложно
     # срабатывать как «повтор» (в fetch_pages стоп только на непустом совпадении).
     assert leman_browser._page_signature("<html><body></body></html>") == frozenset()
+
+
+# Переиспользование браузера (#277): без общей сессии на каждую категорию
+# (материалов 11+, у затирки ещё 4 подкатегории) заново поднимался бы целый
+# процесс Chrome. LemanBrowserSession держит один браузер/контекст и открывает
+# по НОВОЙ ВКЛАДКЕ на каждый fetch_pages вместо нового процесса.
+
+
+class _FakePage:
+    def __init__(self, html_pages: list[str]):
+        self._html_pages = html_pages
+        self.goto_calls: list[str] = []
+        self.closed = False
+        self.mouse = self
+
+    def goto(self, url, **kwargs):
+        self.goto_calls.append(url)
+
+    def wait_for_selector(self, *a, **k):
+        pass
+
+    def wait_for_timeout(self, *a, **k):
+        pass
+
+    def wheel(self, *a, **k):
+        pass
+
+    def content(self):
+        idx = len(self.goto_calls) - 1
+        if idx >= len(self._html_pages):
+            raise RuntimeError("больше страниц нет")
+        return self._html_pages[idx]
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeContext:
+    def __init__(self, html_pages: list[str]):
+        self._html_pages = html_pages
+        self.pages_created: list[_FakePage] = []
+
+    def new_page(self):
+        page = _FakePage(self._html_pages)
+        self.pages_created.append(page)
+        return page
+
+
+def test_fetch_pages_with_context_returns_pages_and_closes_tab():
+    context = _FakeContext(["<html>стр1</html>"])
+
+    pages = leman_browser._fetch_pages_with_context(context, "https://kazan.lemanapro.ru/catalogue/x/", 5)
+
+    assert pages == ["<html>стр1</html>"]
+    assert len(context.pages_created) == 1
+    assert context.pages_created[0].closed is True
+
+
+def test_fetch_pages_with_context_opens_new_tab_per_call_not_new_browser():
+    # Одна и та же сессия (context) используется дважды подряд — как это будет
+    # в update_prices на двух разных категориях: должно быть две вкладки, а не
+    # два новых процесса браузера (тут проверяем ровно факт вкладки на вызов).
+    context = _FakeContext([])
+
+    leman_browser._fetch_pages_with_context(context, "https://kazan.lemanapro.ru/catalogue/a/", 3)
+    leman_browser._fetch_pages_with_context(context, "https://kazan.lemanapro.ru/catalogue/b/", 3)
+
+    assert len(context.pages_created) == 2
+    assert all(p.closed for p in context.pages_created)
+
+
+def test_browser_session_fetch_pages_returns_empty_when_context_unavailable():
+    # __enter__ не вызывался (patchright не установлен / браузер не поднялся) —
+    # _context остаётся None, fetch_pages не должен падать, только вернуть [].
+    session = leman_browser.LemanBrowserSession()
+
+    assert session.fetch_pages("https://kazan.lemanapro.ru/catalogue/x/", 5) == []
+
+
+def test_leman_parser_open_session_is_null_when_live_disabled(monkeypatch):
+    # Незачем поднимать Chrome, если LEMAN_LIVE выключен — fetch_price всё равно
+    # сразу упадёт в RuntimeError на каждом материале.
+    monkeypatch.setattr(leman_parser.settings, "LEMAN_LIVE", False)
+
+    with LemanParser().open_session() as session:
+        assert session is None
+
+
+def test_leman_parser_open_session_returns_browser_session_when_live_enabled(monkeypatch):
+    monkeypatch.setattr(leman_parser.settings, "LEMAN_LIVE", True)
+
+    session = LemanParser().open_session()
+
+    assert isinstance(session, leman_browser.LemanBrowserSession)
+
+
+def test_fetch_price_uses_injected_session_instead_of_module_fetch_pages(monkeypatch):
+    # update_prices подставляет общую сессию через set_session — fetch_price
+    # должен звать её, а не открывать (или закрывать) браузер сам по себе.
+    monkeypatch.setattr(leman_parser.settings, "LEMAN_LIVE", True)
+
+    def fail_module_fetch_pages(base_url, max_pages):
+        raise AssertionError("не должен звать модульную fetch_pages, когда сессия задана")
+
+    monkeypatch.setattr(leman_parser.leman_browser, "fetch_pages", fail_module_fetch_pages)
+
+    html = _page(
+        _item("/product/kraska-a-1/", price="1000", price_unit="шт.", unitprice="200", unitprice_unit="л"),
+    )
+
+    class _FakeSession:
+        def fetch_pages(self, base_url, max_pages):
+            return [html]
+
+    parser = LemanParser()
+    parser.set_session(_FakeSession())
+
+    parsed = parser.fetch_price("Краска для стен")
+
+    assert parsed.price_avg == Decimal("200")

@@ -1,5 +1,6 @@
 import sys
 import logging
+from contextlib import nullcontext
 
 from app.db.session import SessionLocal
 from app.parsers.labor_table_parser import LABOR_SERVICE_MAP
@@ -37,19 +38,31 @@ def update_prices():
                 f"Обновление цен материалов ({parser.source_name}): "
                 f"{len(material_names)} позиций"
             )
-            for name in material_names:
+            # Браузерные парсеры (Леман) умеют отдать общую сессию — один Chrome
+            # на все материалы вместо нового процесса на каждую категорию (#277).
+            # Парсеры без такого метода (Мегастрой, requests-based) не затронуты.
+            open_session = getattr(parser, "open_session", None)
+            session_cm = open_session() if open_session else nullcontext(None)
+            with session_cm as session:
+                if session is not None and hasattr(parser, "set_session"):
+                    parser.set_session(session)
                 try:
-                    price = get_price(name, db=db, parser=parser, force_refresh=True)
-                    if price:
-                        logger.info(f"  ✓ {name}: avg={price.price_avg}")
-                        success += 1
-                    else:
-                        logger.warning(f"  ✗ {name}: цена не найдена (нет в БД)")
-                        failed += 1
-                except Exception as e:
-                    # агрегатор и так глотает ошибки парсера, но на всякий случай
-                    logger.error(f"  ✗ {name}: непредвиденная ошибка — {e}")
-                    failed += 1
+                    for name in material_names:
+                        try:
+                            price = get_price(name, db=db, parser=parser, force_refresh=True)
+                            if price:
+                                logger.info(f"  ✓ {name}: avg={price.price_avg}")
+                                success += 1
+                            else:
+                                logger.warning(f"  ✗ {name}: цена не найдена (нет в БД)")
+                                failed += 1
+                        except Exception as e:
+                            # агрегатор и так глотает ошибки парсера, но на всякий случай
+                            logger.error(f"  ✗ {name}: непредвиденная ошибка — {e}")
+                            failed += 1
+                finally:
+                    if hasattr(parser, "set_session"):
+                        parser.set_session(None)
 
         # услуги по прайсам ремонтных компаний
 

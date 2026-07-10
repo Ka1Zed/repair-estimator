@@ -33,6 +33,7 @@ interface EstimateResponse {
   geometry: GeometryData;
   materials: MaterialItem[];
   labor: LaborItem[];
+  scope?: string; // <-- Добавлено новое поле с сервера
 }
 
 const formatPrice = (price: number) => `${Math.round(price).toLocaleString("ru-RU")} ₽`;
@@ -53,7 +54,10 @@ export function Workspace() {
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
-
+  
+ // Достаем scope безопасным способом без использования any
+const storeState = useProjectStore((s) => s);
+const scope = "scope" in storeState ? (storeState as unknown as Record<string, unknown>).scope as string : undefined;
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<EstimateResponse | null>(null);
@@ -304,22 +308,27 @@ export function Workspace() {
     [data, priceScale],
   );
 
+  const toLedgerRow = useCallback(
+    (l: LaborItem): LedgerRow => ({
+      name: l.service,
+      subtitle: l.specialist,
+      volume: `${formatQty(l.volume)} ${l.unit}`,
+      price: rub(Math.round(l.price_avg * priceScale)),
+      details: [
+        { label: "Специалист", value: l.specialist },
+        { label: "Цена за единицу", value: rub(Math.round(l.price_avg * priceScale)) },
+        { label: "Итог по позиции", value: rub(Math.round(l.total_avg * priceScale)) },
+        { label: "Источник цены", value: l.source, url: l.source_url },
+        { label: "Регион", value: regionLabel(l.region) },
+      ],
+    }),
+    [priceScale],
+  );
+
+  // <-- ВЕРНУЛИ ПОТЕРЯННУЮ ПЕРЕМЕННУЮ ДЛЯ РАБОТ -->
   const laborRows: LedgerRow[] = useMemo(
-    () =>
-      (data?.labor ?? ([] as LaborItem[])).map((l) => ({
-        name: l.service,
-        subtitle: l.specialist,
-        volume: `${formatQty(l.volume)} ${l.unit}`,
-        price: rub(Math.round(l.price_avg * priceScale)),
-        details: [
-          { label: "Специалист", value: l.specialist },
-          { label: "Цена за единицу", value: rub(Math.round(l.price_avg * priceScale)) },
-          { label: "Итог по позиции", value: rub(Math.round(l.total_avg * priceScale)) },
-          { label: "Источник цены", value: l.source, url: l.source_url },
-          { label: "Регион", value: regionLabel(l.region) },
-        ],
-      })),
-    [data, priceScale],
+    () => (data?.labor ?? ([] as LaborItem[])).map(toLedgerRow),
+    [data, toLedgerRow],
   );
 
   return (
@@ -528,6 +537,12 @@ export function Workspace() {
                 </tbody>
               </table>
 
+              {(data.scope ?? scope) === "finish_only" && (
+                <p className={styles.scopeNote}>
+                  Смета охватывает только чистовую отделку — черновые работы не включены.
+                </p>
+              )}
+
               {/* Блок: Переключатель уровней цен + кнопки экспорта */}
               <div className={styles.exportControlsWrapper}>
                 <div className={styles.rangeWrapper}>
@@ -566,6 +581,7 @@ export function Workspace() {
                     onPointerMove={handleTrackPointerMove}
                     onPointerUp={handleTrackPointerUp}
                     onPointerCancel={handleTrackPointerUp}
+                    style={{ marginBottom: '8px' }}
                   >
                     <span
                       className={`${styles.rangeEnd} ${priceMode === "min" && !isDragging ? styles.rangeEndActive : ""}`}

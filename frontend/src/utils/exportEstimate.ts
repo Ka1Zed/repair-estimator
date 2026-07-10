@@ -3,7 +3,7 @@ import autoTable, { type CellHookData } from 'jspdf-autotable';
 import * as XLSX from 'xlsx-js-style';
 
 import type { SummaryData } from '../components/EstimateSummary';
-import type { MaterialItem, LaborItem } from '../types/estimate';
+import type { MaterialItem, LaborItem, HiddenWorks } from '../types/estimate';
 import type { PriceMode } from '../pages/Workspace/Workspace';
 
 export interface EstimateExportData {
@@ -16,6 +16,7 @@ export interface EstimateExportData {
   };
   materials: MaterialItem[];
   labor: LaborItem[];
+  hidden_works?: HiddenWorks; // <--- Добавили эту строку
 }
 
 const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
@@ -503,6 +504,57 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
       5: { halign: 'right', cellWidth: 26 }
     }
   });
+
+  // Скрытые работы (справочно, не входят в итоговую смету)
+  if (data.hidden_works && data.hidden_works.items.length > 0) {
+    const hw = data.hidden_works;
+    currentY = getFinalY(doc) + 14;
+    if (currentY > pageH - 45) {
+      doc.addPage();
+      currentY = 20;
+    }
+    sectionHeading('Скрытые работы · возможные доплаты', currentY);
+    doc.setFontSize(8);
+    doc.setTextColor(...PDF_MUTED);
+    const noteLines = doc.splitTextToSize(hw.note, pageW - marginX * 2);
+    doc.text(noteLines, marginX, currentY + 5);
+    autoTable(doc, {
+      ...tableBase,
+      startY: currentY + 5 + noteLines.length * 4,
+      head: [['Работа', 'Специалист', 'Причина', 'Объём', 'Мин.', 'Макс.']],
+      body: hw.items.map((item: {
+        service: string;
+        specialist: string;
+        reason: string;
+        volume: number;
+        unit: string;
+        total_min: number;
+        total_max: number;
+      }) => [
+        item.service,
+        item.specialist,
+        item.reason,
+        `${fmtQty(item.volume)} ${item.unit}`,
+        formatPricePDF(item.total_min),
+        formatPricePDF(item.total_max),
+      ]),
+      foot: [['Итого возможных доплат', '', '', '', formatPricePDF(hw.total_min), formatPricePDF(hw.total_max)]],
+      footStyles: {
+        fillColor: PDF_BORDER,
+        textColor: PDF_HEADING,
+        fontStyle: 'normal' as const,
+        halign: 'right' as const,
+      },
+      columnStyles: {
+        0: { halign: 'left', cellWidth: 32 },
+        1: { halign: 'left', cellWidth: 24 },
+        2: { halign: 'left', cellWidth: 52 },
+        3: { halign: 'right', cellWidth: 18 },
+        4: { halign: 'right', cellWidth: 24 },
+        5: { halign: 'right', cellWidth: 32 },
+      },
+    });
+  }
 
   // Футер: подпись слева, нумерация справа — на каждой странице
   const pageCount = doc.getNumberOfPages();

@@ -368,7 +368,14 @@ def update_labor_price(service_name: str, parser, db: Session, region: str | Non
     price.source_url = parsed.source_url
     price.updated_at = datetime.now(timezone.utc)
 
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        # Без rollback транзакция остаётся aborted, и все последующие запросы по
+        # общей сессии падают с InFailedSqlTransaction. Откатываем и пробрасываем
+        # настоящую ошибку вызывающему (он залогирует и пойдёт дальше по чистой сессии).
+        session.rollback()
+        raise
     session.refresh(price)
     logger.info(f"Цена услуги '{service_name}' обновлена от {parser.source_name}")
     return price

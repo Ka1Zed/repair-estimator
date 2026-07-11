@@ -1,4 +1,5 @@
 import { useProjectStore } from "../store/projectStore";
+import styles from "./RoomsList.module.css";
 
 export default function RoomsList() {
   const rooms = useProjectStore((state) => state.rooms);
@@ -10,32 +11,14 @@ export default function RoomsList() {
   const updateRoomName = useProjectStore((state) => state.updateRoomName);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        flexWrap: "wrap",
-        marginBottom: "32px",
-      }}
-    >
+    <div className={styles.list}>
       {rooms.map((room, index) => {
         const active = activeRoomIndex === index;
         return (
           <div
             key={room.id}
             onClick={() => setActiveRoom(index)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "7px 13px",
-              border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
-              background: active ? "var(--bg-canvas)" : "transparent",
-              borderRadius: "3px",
-              cursor: "pointer",
-              transition: "all .15s",
-            }}
+            className={`${styles.room} ${active ? styles.roomActive : ""}`}
           >
             <input
               type="text"
@@ -45,15 +28,8 @@ export default function RoomsList() {
                 e.stopPropagation();
                 setActiveRoom(index);
               }}
-              style={{
-                background: "transparent",
-                border: "none",
-                outline: "none",
-                fontSize: "12.5px",
-                letterSpacing: ".01em",
-                color: active ? "var(--text-h)" : "#6B6B6B",
-                width: Math.max(64, room.name.length * 8),
-              }}
+              className={`${styles.nameInput} ${active ? styles.nameInputActive : ""}`}
+              style={{ width: Math.max(64, room.name.length * 8) }}
             />
 
             {rooms.length > 1 && (
@@ -62,12 +38,7 @@ export default function RoomsList() {
                   e.stopPropagation();
                   deleteRoom(index);
                 }}
-                style={{
-                  fontSize: "13px",
-                  color: "#C4C4C4",
-                  lineHeight: 1,
-                  cursor: "pointer",
-                }}
+                className={styles.deleteBtn}
               >
                 ×
               </span>
@@ -76,18 +47,7 @@ export default function RoomsList() {
         );
       })}
 
-      <button
-        onClick={addRoom}
-        style={{
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          fontSize: "12.5px",
-          color: "#9A9A9A",
-          padding: "7px 6px",
-          letterSpacing: ".01em",
-        }}
-      >
+      <button onClick={addRoom} className={styles.addBtn}>
         + комната
       </button>
     </div>

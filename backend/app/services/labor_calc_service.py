@@ -225,6 +225,7 @@ def calculate_labor(
     repair_options: Dict[str, Any],
     db: Session,
     sources_by_id: Dict[int, str] | None = None,
+    include_finish: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Объём и стоимость отделочных работ для одной комнаты (пол/стены/потолок).
@@ -235,15 +236,19 @@ def calculate_labor(
     geometry: floor_area, ceiling_area, wall_area
     repair_options: {floor, walls, ceiling, ...}
     sources_by_id: предзагруженный словарь PriceSource id->name (см. _labor_rows).
+    include_finish: False при scope=rough_only (#303) — отбрасывает строки stage="finish"
+        (покраска/обои/плитка/ламинат/откосы/натяжной потолок), но оставляет "Шпаклевку
+        стен" (stage="pre_finish") — она не входит в жёсткие связки scope, см.
+        docs/estimation-rules.md.
 
     Возвращает строки по контракту api.md:
         service, specialist, volume, unit,
         price_min/avg/max (за единицу), total_min/avg/max (= volume * price), source
     """
-    return _labor_rows(
-        _labor_selections(repair_options, geometry), db, _seed_source_id(db),
-        sources_by_id=sources_by_id,
-    )
+    selections = _labor_selections(repair_options, geometry)
+    if not include_finish:
+        selections = [(slug, vol) for slug, vol in selections if stage_of(slug) != "finish"]
+    return _labor_rows(selections, db, _seed_source_id(db), sources_by_id=sources_by_id)
 
 
 def calculate_rough_labor(
@@ -291,6 +296,7 @@ def calculate_engineering_labor(
     pipe_m: Any,
     db: Session,
     sources_by_id: Dict[int, str] | None = None,
+    include_finish: bool = True,
 ) -> List[Dict[str, Any]]:
     """Работы электрики/сантехники по явным числам из works (#222).
 
@@ -298,6 +304,10 @@ def calculate_engineering_labor(
         cable_m → Прокладка кабеля, sockets → Монтаж розетки,
         lights → Монтаж светильника, pipe_m → Монтаж труб,
         plumbing.points → Сантехнические работы (подключение приборов).
+
+    include_finish: False при scope=rough_only (#303) — оставляет только разводку
+        (cable_lay/pipe_mount, stage="rough", не гейтится scope и без этого флага),
+        убирает монтаж приборов (socket_mount/light_mount/plumbing_works, stage="finish").
     """
     selections = [
         (S_CABLE_LAY, cable_m),
@@ -306,4 +316,6 @@ def calculate_engineering_labor(
         (S_PIPE_MOUNT, pipe_m),
         (S_PLUMBING, plumbing_points),
     ]
+    if not include_finish:
+        selections = [(slug, vol) for slug, vol in selections if stage_of(slug) != "finish"]
     return _labor_rows(selections, db, _seed_source_id(db), sources_by_id=sources_by_id)

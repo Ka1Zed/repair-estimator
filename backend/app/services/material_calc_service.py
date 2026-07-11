@@ -44,6 +44,20 @@ M_LIGHT         = "light"
 M_CABLE         = "cable"
 M_PIPE          = "pipe"
 
+# ---- стадии материалов (#303): rough / finish ----
+# Только грунт и стартовая (выравнивающая) шпаклёвка — ближайший существующий аналог
+# «штукатурки» из чек-листа issue; стяжка/штукатурка как отдельные материалы пока не
+# заведены (labor-only, см. calculate_rough_labor). Слаг без записи — finish (дефолт).
+STAGE_BY_MATERIAL = {
+    M_PRIMER:      "rough",
+    M_PUTTY_START: "rough",
+}
+
+
+def material_stage_of(slug: str) -> str:
+    """Стадия материала по slug; дефолт — finish (чистовая)."""
+    return STAGE_BY_MATERIAL.get(slug, "finish")
+
 
 def packs_to_buy(pack_quantity: Decimal) -> int:
     """ceil до целых упаковок. Вызывать на агрегации (B1-5), не на комнате."""
@@ -228,12 +242,16 @@ def calculate_materials(
     geometry: Dict[str, Any],
     repair_options: Dict[str, Any],
     db: Session,
+    include_finish: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Считает материалы для одной комнаты по геометрии и выбранной отделке.
 
     geometry: floor_area, ceiling_area, wall_area, perimeter, door_width_sum
     repair_options: {floor, walls, ceiling, electric, plumbing} (контракт api.md)
+    include_finish: False при scope=rough_only (#303) — отбрасывает материалы со
+        stage="finish" (краска/обои/плитка+клей+затирка/ламинат-линолеум-паркет+плинтус,
+        финишная шпаклёвка), оставляет грунт и стартовую шпаклёвку (STAGE_BY_MATERIAL).
 
     Возвращает позиции с ДРОБНЫМ pack_quantity (округление — в B1-5):
         material_id, name, quantity (Decimal), base_quantity, waste_factor,
@@ -242,6 +260,8 @@ def calculate_materials(
     result: List[Dict[str, Any]] = []
 
     for material_slug, area in _selections(repair_options, geometry):
+        if not include_finish and material_stage_of(material_slug) == "finish":
+            continue
         material = db.query(Material).filter(Material.slug == material_slug).first()
         if material is None:
             # материала нет в БД (например, не засидован) — пропускаем

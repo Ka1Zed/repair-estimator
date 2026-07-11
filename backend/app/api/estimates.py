@@ -181,16 +181,20 @@ def calculate_estimate(
             hidden['has_floor'] = True
         if finish_options["walls"]:
             hidden['has_walls'] = True
+        # rough_only (#303): чистовая отделка и её материалы не считаются, остаётся
+        # предчистовая подготовка (шпаклёвка стен, грунт/стартовая шпаклёвка материалом).
+        include_finish = request.scope != "rough_only"
         all_materials.extend(calculate_materials(
-            geometry=geometry, repair_options=finish_options, db=db
+            geometry=geometry, repair_options=finish_options, db=db,
+            include_finish=include_finish,
         ))
         all_labor.extend(calculate_labor(
             geometry=geometry, repair_options=finish_options, db=db,
-            sources_by_id=sources_by_id,
+            sources_by_id=sources_by_id, include_finish=include_finish,
         ))
 
-        # --- черновые работы (#190): только при scope=rough_and_finish ---
-        if request.scope == "rough_and_finish":
+        # --- черновые работы (#190, #303): при rough_and_finish и rough_only ---
+        if request.scope in ("rough_and_finish", "rough_only"):
             all_labor.extend(calculate_rough_labor(
                 geometry=geometry, repair_options=finish_options,
                 room_type=room.room_type, db=db,
@@ -215,7 +219,7 @@ def calculate_estimate(
         all_labor.extend(calculate_engineering_labor(
             sockets=sockets, lights=lights, cable_m=cable_m,
             plumbing_points=points, pipe_m=pipe_m, db=db,
-            sources_by_id=sources_by_id,
+            sources_by_id=sources_by_id, include_finish=include_finish,
         ))
 
     # Множитель строк детализации: непредвиденные расходы (avg). Класса ремонта больше нет (#222).

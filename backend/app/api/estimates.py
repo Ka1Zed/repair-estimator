@@ -198,7 +198,7 @@ def calculate_estimate(
         include_finish = request.scope != "rough_only"
         all_materials.extend(calculate_materials(
             geometry=geometry, repair_options=finish_options, db=db,
-            include_finish=include_finish, tier=request.tier,  
+            include_finish=include_finish,
         ))
         all_labor.extend(calculate_labor(
             geometry=geometry, repair_options=finish_options, db=db,

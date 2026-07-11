@@ -69,7 +69,7 @@ def packs_to_buy(pack_quantity: Decimal) -> int:
     return int(pack_quantity.to_integral_value(rounding=ROUND_CEILING))
 
 
-def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any], tier: str) -> List[tuple]:
+def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tuple]:
     """
     Разворачивает repair_options ({floor, walls, ceiling, ...}) в список
     позиций (material_slug, area) — какую площадь использовать для материала.
@@ -259,7 +259,6 @@ def calculate_materials(
     repair_options: Dict[str, Any],
     db: Session,
     include_finish: bool = True,
-    tier: str = "avg",
 ) -> List[Dict[str, Any]]:
     """
     Считает материалы для одной комнаты по геометрии и выбранной отделке.
@@ -276,7 +275,7 @@ def calculate_materials(
     """
     result: List[Dict[str, Any]] = []
 
-    for material_slug, area in _selections(repair_options, geometry, tier):
+    for material_slug, area in _selections(repair_options, geometry):
         if not include_finish and material_stage_of(material_slug) == "finish":
             continue
         material = db.query(Material).filter(Material.slug == material_slug).first()

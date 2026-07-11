@@ -106,11 +106,14 @@ def _collect_cookies(
 
 def _harvest(url: str, user_agent: str) -> str | None:
     # DDoS-Guard сам перезагружает страницу после прохождения JS-challenge —
-    # готовность определяем по смене title.
+    # готовность определяем по смене title. Регистр title не гарантирован
+    # (видели и "DDoS-Guard", и "DDOS-GUARD" — интерактивная капча) — сравниваем
+    # без учёта регистра, иначе ready_check ложно считает капчу пройденной и
+    # харвест кэширует нерабочий cookie как успешный.
     cookies = _collect_cookies(
         url, user_agent,
         site_label="Мегастрой",
-        ready_check=lambda page: page.title() != "DDoS-Guard",
+        ready_check=lambda page: page.title().strip().lower() != "ddos-guard",
     )
     if not cookies:
         return None

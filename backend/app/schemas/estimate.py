@@ -70,6 +70,7 @@ class RoomInput(BaseModel):
 class EstimateRequest(BaseModel):
     city: str
     rooms: List[RoomInput]
+    tier: str = Field("avg", pattern="^(min|avg|max)$")  # уровень комплектации
     # Стадийность сметы (#190, #303). finish_only (дефолт) — только чистовая отделка;
     # rough_and_finish — черновая + чистовая; rough_only — черновая + предчистовая,
     # БЕЗ чистовой отделки и её материалов (ремонт под чистовую сдачу). Класса ремонта
@@ -86,6 +87,19 @@ class GeometrySummary(BaseModel):
 class MaterialItem(BaseModel):
     name: str
     quantity: float
+    # Уровень комплектации (min/avg/max) — эхо запроса
+    tier: str  # "min" | "avg" | "max"
+    # Цена за единицу для выбранного уровня
+    price: float
+    # Итог для выбранного уровня
+    total: float
+    # Полная вилка (min/avg/max) для отображения коридора
+    price_min: float
+    price_avg: float
+    price_max: float
+    total_min: float
+    total_avg: float
+    total_max: float
     # Из чего складывается quantity (#176): base_quantity — площадь/длина × норма
     # расхода, ДО запаса; waste_factor — применённый коэффициент запаса
     # (совмещает waste_factor материала и, для обоев под рисунок, раппорт);
@@ -96,8 +110,6 @@ class MaterialItem(BaseModel):
     # Число упаковок, до которого округлили: packs × package_size == quantity.
     packs: int
     unit: str
-    price_avg: float
-    total_avg: float
     source: str
     # Ссылка на карточку/категорию товара у источника цены: задана для парсерных
     # цен, null для seed и для позиций без цены. Фронт (F2-8) делает из неё ссылку.
@@ -116,9 +128,21 @@ class LaborItem(BaseModel):
     stage: Literal["rough", "pre_finish", "finish"]
     volume: float
     unit: str
+    # Уровень комплектации (min/avg/max) — эхо запроса
+    tier: str  # "min" | "avg" | "max"
+    # Цена за единицу для выбранного уровня
+    price: float
+    # Итог для выбранного уровня
+    total: float
+    # Полная вилка (min/avg/max) для отображения коридора
+    price_min: float
     price_avg: float
+    price_max: float
+    total_min: float
     total_avg: float
+    total_max: float
     source: str
+    updated_at: str
     # Ссылка на страницу услуги у источника цены: задана для парсерных цен, null для seed.
     source_url: Optional[str] = None
     region: Optional[str] = None

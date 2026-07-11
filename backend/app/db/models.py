@@ -87,3 +87,22 @@ class RoomType(Base):
     key: Mapped[str] = mapped_column(unique=True)   # living / kitchen / bathroom / hallway
     label: Mapped[str]
     rules: Mapped[dict] = mapped_column(JSONB)       # весь объект правил типа (floor/walls/.../plumbing)
+
+
+class Project(Base):
+    """Сохранённый план ремонта (#295): комнаты/точки/проёмы/отделки + метаданные.
+
+    Без auth/user (в проекте их нет) — доступ к CRUD по id, публичная read-only
+    ссылка-шеринг по отдельному share_token."""
+    __tablename__ = "projects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str]
+    city: Mapped[str]
+    # План комнат — тот же контракт, что EstimateRequest.rooms (app/schemas/estimate.py:
+    # RoomInput), храним как есть без нормализации в отдельные таблицы.
+    rooms: Mapped[list] = mapped_column(JSONB)
+    scope: Mapped[str] = mapped_column(default="finish_only")
+    share_token: Mapped[str] = mapped_column(unique=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())

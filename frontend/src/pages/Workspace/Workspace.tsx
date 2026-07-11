@@ -11,8 +11,7 @@ import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
 import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
-import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/EstimateLedger";
-
+import { EstimateLedger, type LedgerRow, type LedgerRowVariant } from "../../components/EstimateLedger/EstimateLedger";
 import { useProjectStore, type EstimateScope } from "../../store/projectStore";
 import { useBackendStatus } from "../../store/backendStatus";
 import { roomHasInvalidOpenings } from "../../utils/openingValidation";
@@ -304,13 +303,14 @@ export function Workspace() {
   }, [data, tab, priceScale]);
 
   const materialRows: LedgerRow[] = useMemo(() => {
-    const scale = priceScale("materials");
+    const scale = priceScale("materials"); // Оставляем только как запасной вариант на случай старых данных бэка
+    
     return (data?.materials ?? []).map((m) => {
-      const variants = [];
+      const variants: LedgerRowVariant[] = [];
       
       if (m.min_item) {
         variants.push({
-          mode: "min" as const,
+          mode: "min",
           title: "Эконом",
           name: m.min_item.name,
           price: rub(Math.round(m.min_item.price)),
@@ -320,7 +320,7 @@ export function Workspace() {
       
       if (m.avg_item) {
         variants.push({
-          mode: "avg" as const,
+          mode: "avg",
           title: "Стандарт",
           name: m.avg_item.name,
           price: rub(Math.round(m.avg_item.price)),
@@ -330,7 +330,7 @@ export function Workspace() {
       
       if (m.max_item) {
         variants.push({
-          mode: "max" as const,
+          mode: "max",
           title: "Премиум",
           name: m.max_item.name,
           price: rub(Math.round(m.max_item.price)),
@@ -338,26 +338,43 @@ export function Workspace() {
         });
       }
 
-      // Меняем основное название в строке на конкретный бренд/материал для выбранного уровня
+      // Определяем РЕАЛЬНЫЕ значения для выбранного уровня (имя, цена, итого, ссылка)
       let activeName = m.name;
-      if (priceMode === "min" && m.min_item) activeName = m.min_item.name;
-      if (priceMode === "avg" && m.avg_item) activeName = m.avg_item.name;
-      if (priceMode === "max" && m.max_item) activeName = m.max_item.name;
+      let activePrice = m.price_avg * scale; // фоллбэк
+      let activeTotal = m.total_avg * scale; // фоллбэк
+      let activeUrl = m.source_url;
+
+      if (priceMode === "min" && m.min_item) {
+        activeName = m.min_item.name;
+        activePrice = m.min_item.price;
+        activeTotal = m.min_item.total;
+        activeUrl = m.min_item.source_url || m.source_url;
+      } else if (priceMode === "avg" && m.avg_item) {
+        activeName = m.avg_item.name;
+        activePrice = m.avg_item.price;
+        activeTotal = m.avg_item.total;
+        activeUrl = m.avg_item.source_url || m.source_url;
+      } else if (priceMode === "max" && m.max_item) {
+        activeName = m.max_item.name;
+        activePrice = m.max_item.price;
+        activeTotal = m.max_item.total;
+        activeUrl = m.max_item.source_url || m.source_url;
+      }
 
       return {
         name: activeName,
         volume: `${formatQty(m.quantity)} ${m.unit}`,
-        price: rub(Math.round(m.price_avg * scale)), 
-        activeMode: priceMode, // Передаем активный режим для подсветки нужной карточки
+        price: rub(Math.round(activePrice)), // <-- Теперь тут РЕАЛЬНАЯ цена
+        activeMode: priceMode,
         variants: variants.length > 0 ? variants : undefined,
         details: [
           { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
           { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
           { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
           { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
-          { label: "Цена за единицу", value: rub(Math.round(m.price_avg * scale)) },
-          { label: "Итог по позиции", value: rub(Math.round(m.total_avg * scale)) },
-          { label: "Источник цены", value: m.source, url: m.source_url },
+          { label: "Цена за единицу", value: rub(Math.round(activePrice)) }, // <-- И тут
+          { label: "Итог по позиции", value: rub(Math.round(activeTotal)) }, // <-- И тут РЕАЛЬНЫЙ итог по позиции
+          { label: "Источник цены", value: m.source, url: activeUrl }, // <-- И ссылка ведет на выбранный уровень
           { label: "Регион", value: regionLabel(m.region) },
           ...(m.updated_at
             ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
@@ -365,7 +382,7 @@ export function Workspace() {
         ],
       };
     });
-  }, [data, priceScale, priceMode]); // Обязательно добавляем priceMode в зависимости!
+  }, [data, priceScale, priceMode]);
 
   const toLedgerRow = useCallback(
     (l: LaborItem): LedgerRow => {

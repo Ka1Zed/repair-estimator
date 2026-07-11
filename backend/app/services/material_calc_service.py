@@ -59,6 +59,14 @@ FK_TILE           = "tile"
 FK_WALLS_WALLPAPER = "walls.wallpaper"
 FK_SOCKET         = "socket"
 
+# Ровно эти ключи _selections отдаёт как finish_key (позиции с вариантами) —
+# по ним резолвим SKU через variant_tier. Всё остальное — обычные slug, ищем
+# одной строкой по slug, без лишнего запроса по finish_key на каждый материал.
+_FINISH_KEYS = frozenset({
+    FK_FLOOR_LAMINATE, FK_WALLS_PAINT, FK_CEILING_PAINT,
+    FK_TILE, FK_WALLS_WALLPAPER, FK_SOCKET,
+})
+
 # Порядок fallback, если у finish_key нет варианта запрошенного tier (#331):
 # ближайший уровень, затем стандарт как последний резерв (он есть всегда —
 # родовые материалы мигрировали в variant_tier=avg миграцией d8b3c1f4a927).
@@ -72,14 +80,13 @@ _FALLBACK_ORDER = {
 def _resolve_material(db: Session, key: str, tier: str) -> Material | None:
     """Материал по (finish_key, tier) с fallback на ближайший уровень, либо по slug.
 
-    key — либо finish_key позиции с вариантами (FK_*), либо обычный slug (для
-    материалов без вариантов). Сначала пробуем finish_key: если у позиции есть
-    варианты — выбираем нужный tier или ближайший по _FALLBACK_ORDER. Если
-    вариантов нет вообще (finish_key никому не проставлен, либо key — это
-    slug материала без вариантов) — ищем обычной строкой по slug, как раньше.
+    key — либо finish_key позиции с вариантами (FK_*, см. _FINISH_KEYS), либо
+    обычный slug (для материалов без вариантов). Для finish_key выбираем нужный
+    tier или ближайший по _FALLBACK_ORDER; для остальных — обычной строкой по
+    slug, как раньше (без лишнего запроса по finish_key на каждый материал).
     """
-    variants = db.query(Material).filter(Material.finish_key == key).all()
-    if variants:
+    if key in _FINISH_KEYS:
+        variants = db.query(Material).filter(Material.finish_key == key).all()
         by_tier = {m.variant_tier: m for m in variants}
         for t in _FALLBACK_ORDER.get(tier, _FALLBACK_ORDER["avg"]):
             if t in by_tier:

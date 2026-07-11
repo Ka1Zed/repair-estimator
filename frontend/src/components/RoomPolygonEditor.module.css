@@ -137,9 +137,8 @@
   width: 100%;
   height: 100%;
   text-align: center;
-  font-size: 12px;
-  border: 1px solid var(--accent);
-  border-radius: 3px;
+  border-style: solid;
+  border-color: var(--accent);
   background: #fff;
   color: var(--text-h);
   outline: none;

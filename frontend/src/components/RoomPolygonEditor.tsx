@@ -146,7 +146,16 @@ export default function RoomPolygonEditor() {
     if (currentLen === 0) { setEditingEdge(null); return; }
     const nx = (p2.x - p1.x) / currentLen;
     const ny = (p2.y - p1.y) / currentLen;
-    updatePoint(nextIndex, Math.round((p1.x + nx * newLen) * 1000) / 1000, Math.round((p1.y + ny * newLen) * 1000) / 1000);
+    let newX = p1.x + nx * newLen;
+    let newY = p1.y + ny * newLen;
+    if (snapToGrid) {
+      newX = Math.round(newX / GRID_STEP) * GRID_STEP;
+      newY = Math.round(newY / GRID_STEP) * GRID_STEP;
+    } else {
+      newX = Math.round(newX * 1000) / 1000;
+      newY = Math.round(newY * 1000) / 1000;
+    }
+    updatePoint(nextIndex, newX, newY);
     setEditingEdge(null);
     setEdgeInputValue("");
   };
@@ -358,6 +367,11 @@ export default function RoomPolygonEditor() {
                       if (e.key === "Escape") { setEdgeInputValue(""); setEditingEdge(null); }
                     }}
                     className={styles.edgeInput}
+                    style={{
+                      fontSize,
+                      borderWidth: vb.w * 0.003,
+                      borderRadius: vb.w * 0.008,
+                    }}
                   />
                 </foreignObject>
               );

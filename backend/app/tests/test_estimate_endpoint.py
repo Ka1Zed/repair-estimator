@@ -629,6 +629,64 @@ def test_rough_scope_adds_rough_works():
     assert labor["Гидроизоляция"]["volume"] == pytest.approx(4.0)
 
 
+def test_rough_only_excludes_finish_labor():
+    """scope=rough_only: черновая+предчистовая есть, чистовой отделки нет (#303)."""
+    response = client.post("/api/estimates/calculate",
+                           json={**PAINT_PAYLOAD, "scope": "rough_only"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "rough_only"
+
+    labor = {x["service"]: x for x in data["labor"]}
+    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Грунтование",
+                  "Прокладка кабеля"):
+        assert rough in labor, f"нет черновой работы «{rough}»"
+        assert labor[rough]["stage"] == "rough"
+
+    # Шпаклёвка стен (предчистовая) не входит в жёсткие связки scope — остаётся всегда.
+    assert "Шпаклевка стен" in labor
+    assert labor["Шпаклевка стен"]["stage"] == "pre_finish"
+
+    for finish in ("Покраска стен", "Покраска потолка", "Укладка ламината",
+                   "Монтаж розетки", "Монтаж светильника"):
+        assert finish not in labor, f"чистовая работа «{finish}» не должна попасть в rough_only"
+
+    assert all(x["stage"] != "finish" for x in data["labor"])
+
+
+def test_rough_only_excludes_finish_materials():
+    """scope=rough_only: остаются грунт/стартовая шпаклёвка, чистовых материалов нет (#303)."""
+    response = client.post("/api/estimates/calculate",
+                           json={**PAINT_PAYLOAD, "scope": "rough_only"})
+    assert response.status_code == 200
+    data = response.json()
+
+    names = {m["name"] for m in data["materials"]}
+    assert {"Грунтовка", "Шпаклевка стартовая"} <= names
+    # Разводка (кабель) — черновой этап, материал остаётся; приборы (розетка/светильник) —
+    # чистовые, их монтажа в rough_only нет, значит и закупки быть не должно (#303).
+    assert "Кабель электрический" in names
+    for finish in ("Ламинат", "Краска для стен", "Краска потолочная", "Плинтус",
+                   "Шпаклевка финишная", "Розетка", "Светильник"):
+        assert finish not in names, f"чистовой материал «{finish}» не должен попасть в rough_only"
+
+
+def test_rough_only_bathroom_keeps_waterproof_no_tile():
+    """scope=rough_only в мокрой зоне: гидроизоляция есть, плитка/клей/затирка — нет (#303)."""
+    response = client.post("/api/estimates/calculate",
+                           json=_bathroom_payload("rough_only"))
+    assert response.status_code == 200
+    data = response.json()
+
+    labor = {x["service"]: x for x in data["labor"]}
+    assert "Гидроизоляция" in labor
+    assert labor["Гидроизоляция"]["stage"] == "rough"
+    assert "Укладка плитки" not in labor
+
+    names = {m["name"] for m in data["materials"]}
+    assert not ({"Плитка", "Плиточный клей", "Затирка"} & names)
+
+
 def test_hidden_works_block_present_and_not_in_summary():
     """Блок скрытых работ есть, помечен, но НЕ влияет на summary основной сметы (#239)."""
     response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
@@ -701,7 +759,7 @@ def test_hidden_works_waterproof_only_wet_floor():
 
 
 def test_hidden_works_independent_of_scope():
-    """Блок скрытых работ одинаков при finish_only и rough_and_finish (#239).
+    """Блок скрытых работ одинаков при всех трёх scope (#239, #303).
 
     Скрытые работы — риск неизвестного основания, ортогональный глубине сметы:
     в summary они не входят ни при каком scope, состав от scope не зависит.
@@ -710,17 +768,25 @@ def test_hidden_works_independent_of_scope():
                          json=_bathroom_payload("finish_only")).json()
     rough = client.post("/api/estimates/calculate",
                         json=_bathroom_payload("rough_and_finish")).json()
+    rough_only = client.post("/api/estimates/calculate",
+                             json=_bathroom_payload("rough_only")).json()
 
     def services(d):
         return {x["service"] for x in d["hidden_works"]["items"]}
 
-    assert services(finish) == services(rough)
+    assert services(finish) == services(rough) == services(rough_only)
     assert finish["hidden_works"]["total_avg"] == pytest.approx(
         rough["hidden_works"]["total_avg"])
+    assert finish["hidden_works"]["total_avg"] == pytest.approx(
+        rough_only["hidden_works"]["total_avg"])
 
 
 def test_invalid_scope_rejected():
-    """Неизвестный scope отклоняется валидацией (422)."""
+    """rough_only — валидный scope; неизвестная строка отклоняется (422)."""
+    response = client.post("/api/estimates/calculate",
+                           json=_bathroom_payload("rough_only"))
+    assert response.status_code == 200
+
     response = client.post("/api/estimates/calculate",
                            json=_bathroom_payload("only_rough"))
     assert response.status_code == 422

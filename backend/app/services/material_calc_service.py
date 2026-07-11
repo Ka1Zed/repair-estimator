@@ -44,6 +44,25 @@ M_LIGHT         = "light"
 M_CABLE         = "cable"
 M_PIPE          = "pipe"
 
+# ---- стадии материалов (#303): rough / finish ----
+# Только грунт и стартовая (выравнивающая) шпаклёвка — ближайший существующий аналог
+# «штукатурки» из чек-листа issue; стяжка/штукатурка как отдельные материалы пока не
+# заведены (labor-only, см. calculate_rough_labor). Кабель и труба — разводка, черновой
+# этап (как cable_lay/pipe_mount в labor). Розетка/светильник — приборы: их дефолтная
+# стадия finish, в rough_only не закупаются (монтаж socket_mount/light_mount тоже finish).
+# Слаг без записи — finish (дефолт).
+STAGE_BY_MATERIAL = {
+    M_PRIMER:      "rough",
+    M_PUTTY_START: "rough",
+    M_CABLE:       "rough",
+    M_PIPE:        "rough",
+}
+
+
+def material_stage_of(slug: str) -> str:
+    """Стадия материала по slug; дефолт — finish (чистовая)."""
+    return STAGE_BY_MATERIAL.get(slug, "finish")
+
 
 def packs_to_buy(pack_quantity: Decimal) -> int:
     """ceil до целых упаковок. Вызывать на агрегации (B1-5), не на комнате."""
@@ -191,6 +210,7 @@ def calculate_engineering_materials(
     cable_m: Any,
     pipe_m: Any,
     db: Session,
+    include_finish: bool = True,
 ) -> List[Dict[str, Any]]:
     """Материалы электрики/сантехники по явным числам из works (не через quantity_of).
 
@@ -199,6 +219,10 @@ def calculate_engineering_materials(
     труба округляется вверх до хлыста 2 м на общей агрегации (package_size = 2).
     Мелочёвка (подрозетники, фитинги) отдельными строками не заводится — она в стоимости
     работ. См. docs/estimation-rules.md.
+
+    include_finish: False при scope=rough_only (#303) — оставляет разводку (кабель/труба,
+        stage="rough"), убирает приборы (розетка/светильник, stage="finish"): их монтаж
+        (socket_mount/light_mount) в rough_only тоже не считается.
     """
     result: List[Dict[str, Any]] = []
     # (имя, количество, применять ли waste_factor) — штучные без запаса, погонаж с запасом.
@@ -209,6 +233,8 @@ def calculate_engineering_materials(
         (M_PIPE, pipe_m, True),
     ]
     for slug, count, with_waste in specs:
+        if not include_finish and material_stage_of(slug) == "finish":
+            continue
         qty = D(count)
         if qty <= 0:
             continue
@@ -228,12 +254,16 @@ def calculate_materials(
     geometry: Dict[str, Any],
     repair_options: Dict[str, Any],
     db: Session,
+    include_finish: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Считает материалы для одной комнаты по геометрии и выбранной отделке.
 
     geometry: floor_area, ceiling_area, wall_area, perimeter, door_width_sum
     repair_options: {floor, walls, ceiling, electric, plumbing} (контракт api.md)
+    include_finish: False при scope=rough_only (#303) — отбрасывает материалы со
+        stage="finish" (краска/обои/плитка+клей+затирка/ламинат-линолеум-паркет+плинтус,
+        финишная шпаклёвка), оставляет грунт и стартовую шпаклёвку (STAGE_BY_MATERIAL).
 
     Возвращает позиции с ДРОБНЫМ pack_quantity (округление — в B1-5):
         material_id, name, quantity (Decimal), base_quantity, waste_factor,
@@ -242,6 +272,8 @@ def calculate_materials(
     result: List[Dict[str, Any]] = []
 
     for material_slug, area in _selections(repair_options, geometry):
+        if not include_finish and material_stage_of(material_slug) == "finish":
+            continue
         material = db.query(Material).filter(Material.slug == material_slug).first()
         if material is None:
             # материала нет в БД (например, не засидован) — пропускаем

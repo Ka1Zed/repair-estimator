@@ -88,7 +88,7 @@ export interface Room {
   works: RoomWorks;
 }
 
-export type EstimateScope = "finish_only" | "rough_and_finish";
+export type EstimateScope = "finish_only" | "rough_and_finish" | "rough_only";
 
 export function getDefaultRoomName(room_type: RoomTypeKey, rooms: Room[]): string {
   const label = roomTypes[room_type].label;

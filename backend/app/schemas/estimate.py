@@ -70,11 +70,11 @@ class RoomInput(BaseModel):
 class EstimateRequest(BaseModel):
     city: str
     rooms: List[RoomInput]
-    # Стадийность сметы (#190). finish_only (дефолт) — только чистовая отделка;
-    # rough_and_finish — добавить черновые работы (демонтаж, выравнивание, стяжка,
-    # гидроизоляция, грунт). Класса ремонта в контракте нет (#222) — объём задаётся
-    # составом works, а глубину (черновая+чистовая vs только финиш) задаёт scope.
-    scope: Literal["finish_only", "rough_and_finish"] = "finish_only"
+    # Стадийность сметы (#190, #303). finish_only (дефолт) — только чистовая отделка;
+    # rough_and_finish — черновая + чистовая; rough_only — черновая + предчистовая,
+    # БЕЗ чистовой отделки и её материалов (ремонт под чистовую сдачу). Класса ремонта
+    # в контракте нет (#222) — объём задаётся составом works, а глубину сметы — scope.
+    scope: Literal["finish_only", "rough_and_finish", "rough_only"] = "finish_only"
 
 
 class GeometrySummary(BaseModel):

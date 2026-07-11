@@ -359,6 +359,42 @@ def test_parser_source_url_in_response(stub_material_parser):
         assert lab["source_url"] is None
 
 
+def test_parser_package_size_overrides_static_and_stays_consistent_with_quantity(stub_material_parser):
+    """package_size (#306): парсер отдал фасовку КОНКРЕТНОГО товара (2.5 л) —
+    отличную от статичной Material.package_size (9 л, см. conftest). В ответе
+    package_size должен быть от парсера, а не статика, и инвариант из api.md
+    (quantity == packs × package_size) обязан сойтись — иначе source_url на
+    странице (product за 2.5 л) и число упаковок в смете снова разъедутся."""
+    from decimal import Decimal
+    from app.parsers.base import ParsedPrice
+
+    card_url = "https://kazan.megastroy.com/products/kraska-2.5l"
+
+    def fake_fetch(material_name):
+        if material_name != "Краска для стен":
+            raise ValueError(f"нет категории для '{material_name}'")
+        return ParsedPrice(
+            price_min=Decimal("500"),
+            price_avg=Decimal("700"),
+            price_max=Decimal("900"),
+            source_url=card_url,
+            package_size=Decimal("2.5"),
+        )
+
+    stub_material_parser(fake_fetch)
+
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    materials = response.json()["materials"]
+    paint = next((m for m in materials if m["name"] == "Краска для стен"), None)
+
+    assert paint is not None
+    assert paint["source_url"] == card_url
+    assert paint["package_size"] == pytest.approx(2.5)
+    assert paint["package_size"] != 9  # не статика из materials.json
+    assert paint["quantity"] == pytest.approx(paint["packs"] * paint["package_size"], rel=1e-6)
+
+
 def test_parser_fallback_on_error():
     """Когда парсер падает, расчёт не ломается и source остаётся 'seed'.
     Парсер по умолчанию заглушён падающим stub_material_parser → seed."""

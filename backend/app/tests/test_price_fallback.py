@@ -109,6 +109,43 @@ def test_force_refresh_fetches_even_when_live_fetch_disabled(db_session, monkeyp
     assert _megastroy_price_row(db_session, "Краска для стен") is not None  # кэш записан
 
 
+class _PackageSizeParser(BaseParser):
+    """Отдаёт валидную цену вместе с фасовкой конкретного товара (#306)."""
+    source_name = "Мегастрой"
+
+    def fetch_price(self, material_name: str) -> ParsedPrice:
+        return ParsedPrice(
+            price_min=Decimal("200"), price_avg=Decimal("250"), price_max=Decimal("300"),
+            source_url="https://kazan.megastroy.com/products/kraska-2.5l",
+            package_size=Decimal("2.5"),
+        )
+
+
+@pytest.mark.usefixtures("setup_test_db")
+def test_package_size_from_parser_is_persisted_to_price_row(db_session):
+    """package_size (#306) из ParsedPrice уходит в MaterialPrice — не теряется
+    между парсером и БД, откуда его читает estimates.py."""
+    price = get_price("Краска для стен", db=db_session, parser=_PackageSizeParser(), force_refresh=True)
+
+    assert price is not None
+    assert price.package_size == 2.5
+    row = _megastroy_price_row(db_session, "Краска для стен")
+    assert row.package_size == 2.5
+
+
+@pytest.mark.usefixtures("setup_test_db")
+def test_seed_price_has_no_package_size(db_session):
+    """seed-цена не несёт фасовку конкретного товара — вызывающий код (estimates.py)
+    откатывается на статичный Material.package_size. Материал взят другой (не
+    "Краска для стен"), чтобы не попасть в свежий parser-кэш, записанный
+    test_package_size_from_parser_is_persisted_to_price_row выше (БД в этом
+    файле session-scoped, между тестами не пересоздаётся)."""
+    price = get_price("Грунтовка", db=db_session, parser=_RaisingParser())
+
+    assert price is not None
+    assert price.package_size is None
+
+
 @pytest.mark.usefixtures("setup_test_db")
 def test_labor_prefers_parser_over_seed(db_session):
     """get_labor_price отдаёт валидную спарсенную (не-seed) цену вместо seed."""

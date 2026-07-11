@@ -156,6 +156,17 @@ def test_paint_divides_price_by_liters_from_title(monkeypatch):
     assert parsed.price_min == Decimal("223.2")
 
 
+def test_paint_package_size_matches_source_product(monkeypatch):
+    # package_size (#306) — фасовка ИМЕННО товара-представителя (10 л из его
+    # названия), не справочное значение из materials.json (там для краски — 9).
+    html = _page(_item("2232", "/products/1", title="Краска латексная Dufa 10 л"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Краска для стен")
+
+    assert parsed.package_size == Decimal("10")
+
+
 def test_paint_without_liters_in_title_is_skipped(monkeypatch):
     html = _page(_item("2232", "/products/1", title="Краска латексная Dufa без объёма"))
     _patch_pages(monkeypatch, html)
@@ -306,6 +317,17 @@ def test_plintus_normalizes_price_per_piece_to_price_per_meter(monkeypatch):
     assert parsed.price_avg == Decimal("224")  # 560 / 2.5 м
 
 
+def test_plintus_package_size_equals_rail_length(monkeypatch):
+    # package_size (#306) — длина рейки товара-представителя, а не справочная
+    # константа (в materials.json у плинтуса package_size=1).
+    html = _page(_item("560", "/products/plintus-a", title="Плинтус напольный ПВХ Lima 72х2500мм Белый"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Плинтус")
+
+    assert parsed.package_size == Decimal("2.5")
+
+
 def test_plintus_skips_items_without_parsable_length(monkeypatch):
     html = _page(
         _item("560", "/products/ok", title="Плинтус напольный ПВХ Lima 72х2500мм Белый"),
@@ -330,6 +352,10 @@ def test_tile_and_laminate_use_site_computed_unit(monkeypatch):
     parsed = MegastroyParser().fetch_price("Ламинат")
 
     assert parsed.price_avg == Decimal("399")
+    # package_size (#306): страница категории не показывает отдельную "цену за
+    # коробку" для site_unit-материалов — фасовку взять неоткуда, откатываемся
+    # на статичный Material.package_size выше по стеку (estimates.py).
+    assert parsed.package_size is None
 
 
 def test_wallpaper_uses_site_computed_unit(monkeypatch):

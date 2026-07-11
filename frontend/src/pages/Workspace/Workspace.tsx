@@ -305,25 +305,67 @@ export function Workspace() {
 
   const materialRows: LedgerRow[] = useMemo(() => {
     const scale = priceScale("materials");
-    return (data?.materials ?? []).map((m) => ({
-      name: m.name,
-      volume: `${formatQty(m.quantity)} ${m.unit}`,
-      price: rub(Math.round(m.price_avg * scale)),
-      details: [
-        { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
-        { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
-        { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
-        { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
-        { label: "Цена за единицу", value: rub(Math.round(m.price_avg * scale)) },
-        { label: "Итог по позиции", value: rub(Math.round(m.total_avg * scale)) },
-        { label: "Источник цены", value: m.source, url: m.source_url },
-        { label: "Регион", value: regionLabel(m.region) },
-        ...(m.updated_at
-          ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
-          : []),
-      ],
-    }));
-  }, [data, priceScale]);
+    return (data?.materials ?? []).map((m) => {
+      const variants = [];
+      
+      if (m.min_item) {
+        variants.push({
+          mode: "min" as const,
+          title: "Эконом",
+          name: m.min_item.name,
+          price: rub(Math.round(m.min_item.price)),
+          url: m.min_item.source_url,
+        });
+      }
+      
+      if (m.avg_item) {
+        variants.push({
+          mode: "avg" as const,
+          title: "Стандарт",
+          name: m.avg_item.name,
+          price: rub(Math.round(m.avg_item.price)),
+          url: m.avg_item.source_url,
+        });
+      }
+      
+      if (m.max_item) {
+        variants.push({
+          mode: "max" as const,
+          title: "Премиум",
+          name: m.max_item.name,
+          price: rub(Math.round(m.max_item.price)),
+          url: m.max_item.source_url,
+        });
+      }
+
+      // Меняем основное название в строке на конкретный бренд/материал для выбранного уровня
+      let activeName = m.name;
+      if (priceMode === "min" && m.min_item) activeName = m.min_item.name;
+      if (priceMode === "avg" && m.avg_item) activeName = m.avg_item.name;
+      if (priceMode === "max" && m.max_item) activeName = m.max_item.name;
+
+      return {
+        name: activeName,
+        volume: `${formatQty(m.quantity)} ${m.unit}`,
+        price: rub(Math.round(m.price_avg * scale)), 
+        activeMode: priceMode, // Передаем активный режим для подсветки нужной карточки
+        variants: variants.length > 0 ? variants : undefined,
+        details: [
+          { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
+          { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
+          { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
+          { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
+          { label: "Цена за единицу", value: rub(Math.round(m.price_avg * scale)) },
+          { label: "Итог по позиции", value: rub(Math.round(m.total_avg * scale)) },
+          { label: "Источник цены", value: m.source, url: m.source_url },
+          { label: "Регион", value: regionLabel(m.region) },
+          ...(m.updated_at
+            ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
+            : []),
+        ],
+      };
+    });
+  }, [data, priceScale, priceMode]); // Обязательно добавляем priceMode в зависимости!
 
   const toLedgerRow = useCallback(
     (l: LaborItem): LedgerRow => {

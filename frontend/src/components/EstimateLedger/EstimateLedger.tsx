@@ -1,12 +1,22 @@
 import { useState } from "react";
 import styles from "./EstimateLedger.module.css";
 
+export interface LedgerRowVariant {
+  mode: "min" | "avg" | "max";
+  title: string;
+  name: string;
+  price: string;
+  url?: string | null;
+}
+
 export interface LedgerRow {
   name: string;
   subtitle?: string;
   volume: string;
   price: string;
   details: { label: string; value: string; url?: string | null }[];
+  variants?: LedgerRowVariant[];
+  activeMode?: "min" | "avg" | "max";
 }
 
 interface EstimateLedgerProps {
@@ -55,8 +65,37 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
               </span>
             </button>
 
-            {/* Теперь мы рендерим детали всегда, но прячем закрытые через CSS класс hiddenOnScreen */}
+            {/* Детали прячем через CSS класс hiddenOnScreen */}
             <div className={`${styles.details} ${!isOpen ? styles.hiddenOnScreen : ""}`}>
+              
+              {/* Блок вариантов материалов (если они переданы бэкендом) */}
+              {row.variants && row.variants.length > 0 && (
+                <div className={styles.variantsBlock}>
+                  <div className={styles.variantsTitle}>Варианты материалов:</div>
+                  {row.variants.map((v, idx) => (
+                    <div 
+                      key={idx} 
+                      className={`${styles.variantItem} ${v.mode === row.activeMode ? styles.variantActive : ""}`}
+                    >
+                      <div className={styles.variantHeader}>
+                        <span className={styles.variantBadge}>{v.title}</span>
+                        <span className={styles.variantPrice}>{v.price}</span>
+                      </div>
+                      <div className={styles.variantName}>
+                        {v.url ? (
+                          <a href={v.url} target="_blank" rel="noopener noreferrer" className={styles.sourceLink}>
+                            {v.name} ↗
+                          </a>
+                        ) : (
+                          v.name
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Стандартные детали (кол-во, упаковки, запас и т.д.) */}
               {row.details.map((d, j) => (
                 <div key={j} className={styles.detailItem}>
                   <span className={styles.detailLabel}>{d.label}</span>

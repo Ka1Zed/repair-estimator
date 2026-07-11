@@ -1,3 +1,11 @@
+export interface PriceVariant {
+  name: string;
+  price: number;
+  total: number;
+  source: string;
+  source_url?: string | null;
+}
+
 export interface MaterialItem {
   name: string;
   quantity: number;
@@ -12,6 +20,11 @@ export interface MaterialItem {
   region?: string | null;
   updated_at?: string;
   source_url?: string | null;
+  
+  // Новые поля для задачи #291 (варианты по уровням)
+  min_item?: PriceVariant | null;
+  avg_item?: PriceVariant | null;
+  max_item?: PriceVariant | null;
 }
 
 export type LaborStage = "rough" | "pre_finish" | "finish";

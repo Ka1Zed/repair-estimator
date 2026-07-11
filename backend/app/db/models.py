@@ -105,4 +105,4 @@ class Project(Base):
     scope: Mapped[str] = mapped_column(default="finish_only")
     share_token: Mapped[str] = mapped_column(unique=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())

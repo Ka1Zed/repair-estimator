@@ -1,5 +1,4 @@
 import secrets
-from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -89,7 +88,6 @@ def update_project(project_id: int, body: ProjectUpdate, db: Session = Depends(g
     project.city = body.city
     project.rooms = [r.model_dump() for r in body.rooms]
     project.scope = body.scope
-    project.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(project)
     return _to_response(project)

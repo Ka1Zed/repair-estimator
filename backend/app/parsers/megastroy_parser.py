@@ -151,6 +151,14 @@ REQUEST_TIMEOUT = DEFAULT_REQUEST_TIMEOUT      # таймаут запроса, 
 REQUEST_DELAY = 1.0       # пауза между страницами, чтобы не долбить сайт
 MAX_PAGES = 20            # защита от бесконечного цикла
 
+# Вариантные материалы (эконом/премиум, #331) указывают на тот же urls, что и
+# стандарт — кэш сырых цен категории по urls (#341), чтобы update_prices не
+# качал одну и ту же выдачу 2-3 раза подряд для трёх вариантов. TTL небольшой:
+# нужен только на время обработки одной группы вариантов в рамках одного
+# прогона, а не на весь процесс (иначе живой фетч мог бы отдавать данные
+# многочасовой давности при PARSER_LIVE_FETCH).
+_CATEGORY_CACHE_TTL_SECONDS = 600
+
 # Витринные обозначения единиц у Мегастроя -> наши коды единиц из materials.json.
 _UNIT_ALIASES = {
     "кг": "кг",
@@ -296,21 +304,34 @@ def _parse_page(html: str, page_url: str) -> list[tuple[Decimal, str | None, str
 class MegastroyParser(BaseParser):
     source_name = "Мегастрой"
 
+    def __init__(self):
+        # Кэш сырых цен по urls категории (#341) — см. _CATEGORY_CACHE_TTL_SECONDS.
+        self._raw_cache: dict[tuple[str, ...], tuple[float, list]] = {}
+
     def known_materials(self) -> list[str]:
         return list(CATEGORY_MAP.keys())
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
-        if material_name not in CATEGORY_MAP:
-            raise ValueError(f"Нет категории Мегастроя для материала '{material_name}'")
-
-        category = CATEGORY_MAP[material_name]
-        headers = _build_headers(_encode_url(category.urls[0]))
-
+    def _fetch_raw_items(
+        self, urls: tuple[str, ...], material_name: str
+    ) -> list[tuple[Decimal, str | None, str | None, str]]:
         # Кортежи (цена, ссылка на карточку, витринная единица, название) со всех
         # категорий материала — плитка, например, размазана по двум разделам.
+        # Вариантные материалы (эконом/премиум) шлют один и тот же urls — при
+        # повторном вызове в пределах TTL отдаём уже скачанное, не ходя в сеть.
+        cached = self._raw_cache.get(urls)
+        if cached is not None:
+            fetched_at, raw_items = cached
+            if time.monotonic() - fetched_at < _CATEGORY_CACHE_TTL_SECONDS:
+                logger.info(
+                    f"  Мегастрой '{material_name}': категория {urls[0]} из кэша "
+                    f"({len(raw_items)} цен, без повторного фетча)"
+                )
+                return raw_items
+
+        headers = _build_headers(_encode_url(urls[0]))
         raw_items: list[tuple[Decimal, str | None, str | None, str]] = []
 
-        for base_url in category.urls:
+        for base_url in urls:
             base_url = _encode_url(base_url)
             sep = "&" if "?" in base_url else "?"
 
@@ -332,6 +353,16 @@ class MegastroyParser(BaseParser):
 
                 raw_items.extend(page_items)
                 logger.info(f"  Мегастрой '{material_name}' {base_url} стр.{page}: +{len(page_items)} цен")
+
+        self._raw_cache[urls] = (time.monotonic(), raw_items)
+        return raw_items
+
+    def fetch_price(self, material_name: str) -> ParsedPrice:
+        if material_name not in CATEGORY_MAP:
+            raise ValueError(f"Нет категории Мегастроя для материала '{material_name}'")
+
+        category = CATEGORY_MAP[material_name]
+        raw_items = self._fetch_raw_items(category.urls, material_name)
 
         if not raw_items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (возможно, урезанная страница)")

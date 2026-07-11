@@ -396,6 +396,59 @@ def test_fetch_price_economy_and_premium_return_different_products(monkeypatch):
     assert standard.price_max == Decimal("900")
 
 
+def test_fetch_price_shares_category_fetch_across_variants(monkeypatch):
+    """#341: 'Краска для стен'/'эконом'/'премиум' указывают на тот же base_urls —
+    браузер должен дёргаться один раз на весь update_prices, а не по разу на вариант."""
+    def _paint(href, unitprice):
+        return _item(href, price="1", price_unit="шт.", unitprice=unitprice, unitprice_unit="л")
+
+    html = _page(
+        _paint("/product/paint-a/", "400"),
+        _paint("/product/paint-b/", "500"),
+        _paint("/product/paint-c/", "600"),
+        _paint("/product/paint-d/", "700"),
+        _paint("/product/paint-e/", "800"),
+        _paint("/product/paint-f/", "900"),
+    )
+    monkeypatch.setattr(leman_parser.settings, "LEMAN_LIVE", True)
+    calls = []
+
+    def fake_fetch_pages(base_url, max_pages):
+        calls.append(base_url)
+        return [html]
+
+    monkeypatch.setattr(leman_parser.leman_browser, "fetch_pages", fake_fetch_pages)
+
+    parser = LemanParser()
+    parser.fetch_price("Краска для стен")
+    parser.fetch_price("Краска для стен эконом")
+    parser.fetch_price("Краска для стен премиум")
+
+    # Один браузерный фетч категории на все три материала, не три.
+    assert len(calls) == 1
+
+
+def test_fetch_price_does_not_share_cache_across_different_categories(monkeypatch):
+    # Разные категории (краска vs плитка) не должны путать кэш друг с другом.
+    paint_html = _page(_item("/product/paint-a/", price="1", price_unit="шт.", unitprice="400", unitprice_unit="л"))
+    tile_html = _page(_item("/product/tile-a/", price="500", price_unit="м²"))
+
+    def _pages_by_url(base_url, max_pages):
+        if "napolnaya-plitka" in base_url:
+            return [tile_html]
+        return [paint_html]
+
+    monkeypatch.setattr(leman_parser.settings, "LEMAN_LIVE", True)
+    monkeypatch.setattr(leman_parser.leman_browser, "fetch_pages", _pages_by_url)
+
+    parser = LemanParser()
+    paint = parser.fetch_price("Краска для стен")
+    tile = parser.fetch_price("Плитка")
+
+    assert paint.price_avg == Decimal("400")
+    assert tile.price_avg == Decimal("500")
+
+
 def test_fetch_price_excludes_irrelevant_subtypes_by_name(monkeypatch):
     # Пробник за 30 ₽ и колеровочная паста — семантический мусор, который роняет
     # min и перекашивает вилку. Отсекаются по имени до статистики: min уже не 30.

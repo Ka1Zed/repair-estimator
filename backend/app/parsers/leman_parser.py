@@ -1,6 +1,7 @@
 import logging
 import re
 import statistics
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -116,6 +117,13 @@ CATEGORY_MAP: dict[str, tuple[str, ...]] = {
 # осмысленных страниц ещё меньше — ранний стоп в leman_browser обычно срабатывает
 # раньше этого потолка.
 MAX_PAGES = 15
+
+# Вариантные материалы (эконом/премиум, #331) указывают на тот же base_urls, что
+# и стандарт — кэш карточек категории по base_urls (#341), чтобы update_prices не
+# гонял браузер за одной и той же выдачей 2-3 раза подряд для трёх вариантов.
+# TTL небольшой — нужен только на время обработки одной группы вариантов в
+# рамках одного прогона (см. megastroy_parser._CATEGORY_CACHE_TTL_SECONDS).
+_CATEGORY_CACHE_TTL_SECONDS = 600
 
 CARD_SELECTOR = '[data-qa="product"]'
 _PRODUCT_ID_RE = re.compile(r"-(\d+)/?$")
@@ -264,6 +272,8 @@ class LemanParser(BaseParser):
         # None — прежнее поведение: каждый fetch_price сам открывает и закрывает
         # свою сессию через модульную leman_browser.fetch_pages.
         self._session = None
+        # Кэш карточек категории по base_urls (#341) — см. _CATEGORY_CACHE_TTL_SECONDS.
+        self._raw_cache: dict[tuple[str, ...], tuple[float, list]] = {}
 
     def set_session(self, session) -> None:
         self._session = session
@@ -279,25 +289,27 @@ class LemanParser(BaseParser):
     def known_materials(self) -> list[str]:
         return list(CATEGORY_MAP.keys())
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
-        if material_name not in CATEGORY_MAP:
-            raise ValueError(f"Нет категории Лемана для материала '{material_name}'")
+    def _fetch_raw_candidates(
+        self, base_urls: tuple[str, ...], material_name: str
+    ) -> list[tuple[list[tuple[Decimal, str]], str | None, str | None]]:
+        # Тройки (кандидаты цены, ссылка, имя) со всех страниц категории, уже
+        # дедуплицированные по id товара — разбор, не зависящий от spec конкретного
+        # варианта (тот применяется выше по стеку в fetch_price). Вариантные
+        # материалы (эконом/премиум) шлют тот же base_urls — при повторном вызове
+        # в пределах TTL отдаём уже скачанное, не поднимая браузер заново.
+        cached = self._raw_cache.get(base_urls)
+        if cached is not None:
+            fetched_at, raw = cached
+            if time.monotonic() - fetched_at < _CATEGORY_CACHE_TTL_SECONDS:
+                logger.info(
+                    f"  Леман '{material_name}': категория {base_urls[0]} из кэша "
+                    f"({len(raw)} карточек, без повторного фетча)"
+                )
+                return raw
 
-        if not settings.LEMAN_LIVE:
-            # Cookie-харвест + requests (как у Мегастроя) для Лемана не работает —
-            # Qrator ловит CDP-утечки даже у headed настоящего Chrome без patchright
-            # (см. app/parsers/leman_browser.py). Без явного включения браузерного
-            # фетча в сеть не ходим вовсе — сразу уходим в seed-fallback, не тратя
-            # время на заведомо безуспешный запрос.
-            raise RuntimeError(
-                f"LEMAN_LIVE выключен — живой фетч Лемана для '{material_name}' пропущен"
-            )
-
-        spec = MATERIAL_UNITS[material_name]
-        base_urls = CATEGORY_MAP[material_name]
         fetch_pages = self._session.fetch_pages if self._session is not None else leman_browser.fetch_pages
 
-        items: list[tuple[Decimal, str | None, str | None, Decimal | None]] = []
+        raw: list[tuple[list[tuple[Decimal, str]], str | None, str | None]] = []
         seen_ids: set[str] = set()
         any_pages_loaded = False
 
@@ -318,32 +330,56 @@ class LemanParser(BaseParser):
                         if product_id in seen_ids:
                             continue
                         seen_ids.add(product_id)
+                    new_items.append((candidates, url, name))
 
-                    price = _select_price(candidates, spec)
-                    if price is None:
-                        # Ни основной, ни вторичный блок не дали нужную единицу
-                        # (напр. клей без price-block-unitprice) — не считаем товар.
-                        continue
-
-                    if spec.normalize_length:
-                        length_m = _length_m_from_title(name)
-                        if not length_m:
-                            continue
-                        # Длина рейки — она же и есть package_size (м на упаковку).
-                        package_size = length_m
-                        price = price / length_m
-                    else:
-                        # package_size (#306) — фасовка ЭТОГО товара, если карточка
-                        # показывает второй ценовой блок (см. _select_package_size).
-                        package_size = _select_package_size(candidates, spec, price)
-
-                    new_items.append((price, url, name, package_size))
-
-                items.extend(new_items)
-                logger.info(f"  Леман '{material_name}' {base_url} стр.{page_num}: +{len(new_items)} цен")
+                raw.extend(new_items)
+                logger.info(f"  Леман '{material_name}' {base_url} стр.{page_num}: +{len(new_items)} карточек")
 
         if not any_pages_loaded:
             raise RuntimeError(f"Леман: браузерный фетч не вернул ни одной страницы для '{material_name}'")
+
+        self._raw_cache[base_urls] = (time.monotonic(), raw)
+        return raw
+
+    def fetch_price(self, material_name: str) -> ParsedPrice:
+        if material_name not in CATEGORY_MAP:
+            raise ValueError(f"Нет категории Лемана для материала '{material_name}'")
+
+        if not settings.LEMAN_LIVE:
+            # Cookie-харвест + requests (как у Мегастроя) для Лемана не работает —
+            # Qrator ловит CDP-утечки даже у headed настоящего Chrome без patchright
+            # (см. app/parsers/leman_browser.py). Без явного включения браузерного
+            # фетча в сеть не ходим вовсе — сразу уходим в seed-fallback, не тратя
+            # время на заведомо безуспешный запрос.
+            raise RuntimeError(
+                f"LEMAN_LIVE выключен — живой фетч Лемана для '{material_name}' пропущен"
+            )
+
+        spec = MATERIAL_UNITS[material_name]
+        base_urls = CATEGORY_MAP[material_name]
+        raw = self._fetch_raw_candidates(base_urls, material_name)
+
+        items: list[tuple[Decimal, str | None, str | None, Decimal | None]] = []
+        for candidates, url, name in raw:
+            price = _select_price(candidates, spec)
+            if price is None:
+                # Ни основной, ни вторичный блок не дали нужную единицу
+                # (напр. клей без price-block-unitprice) — не считаем товар.
+                continue
+
+            if spec.normalize_length:
+                length_m = _length_m_from_title(name)
+                if not length_m:
+                    continue
+                # Длина рейки — она же и есть package_size (м на упаковку).
+                package_size = length_m
+                price = price / length_m
+            else:
+                # package_size (#306) — фасовка ЭТОГО товара, если карточка
+                # показывает второй ценовой блок (см. _select_package_size).
+                package_size = _select_package_size(candidates, spec, price)
+
+            items.append((price, url, name, package_size))
 
         if not items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (единица/размер не распознаны)")

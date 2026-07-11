@@ -283,6 +283,76 @@ def test_fetch_price_economy_and_premium_return_different_products(monkeypatch):
     assert standard.price_max == Decimal("900")
 
 
+def test_fetch_price_shares_category_fetch_across_variants(monkeypatch):
+    """#341: 'Ламинат'/'эконом'/'премиум' указывают на тот же urls — категория
+    должна скачиваться один раз на весь update_prices, а не по разу на вариант."""
+    html = _page(
+        _item("400", "/catalog/x/lam-a", title="Ламинат А", unit="м²"),
+        _item("500", "/catalog/x/lam-b", title="Ламинат Б", unit="м²"),
+        _item("600", "/catalog/x/lam-c", title="Ламинат В", unit="м²"),
+        _item("700", "/catalog/x/lam-d", title="Ламинат Г", unit="м²"),
+        _item("800", "/catalog/x/lam-e", title="Ламинат Д", unit="м²"),
+        _item("900", "/catalog/x/lam-f", title="Ламинат Е", unit="м²"),
+    )
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, text: str, status_code: int = 200):
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(self.status_code)
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        return FakeResponse(html) if "page=" not in url else FakeResponse("", 404)
+
+    monkeypatch.setattr(megastroy_parser.requests, "get", fake_get)
+    monkeypatch.setattr(megastroy_parser.time, "sleep", lambda *a, **k: None)
+
+    parser = MegastroyParser()
+    parser.fetch_price("Ламинат")
+    parser.fetch_price("Ламинат эконом")
+    parser.fetch_price("Ламинат премиум")
+
+    # Один полный фетч категории (стр.1 + стр.2 с 404) на все три материала, не три.
+    assert len(calls) == 2
+
+
+def test_fetch_price_does_not_share_cache_across_different_categories(monkeypatch):
+    # Разные категории (краска vs ламинат) не должны путать кэш друг с другом.
+    laminate_html = _page(_item("400", "/catalog/x/lam-a", title="Ламинат А", unit="м²"))
+    paint_html = _page(_item("223", "/catalog/x/paint-a", title="Краска А 1л"))
+
+    class FakeResponse:
+        def __init__(self, text: str, status_code: int = 200):
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(self.status_code)
+
+    def fake_get(url, **kwargs):
+        if "page=" in url:
+            return FakeResponse("", 404)
+        if "laminat" in url:
+            return FakeResponse(laminate_html)
+        return FakeResponse(paint_html)
+
+    monkeypatch.setattr(megastroy_parser.requests, "get", fake_get)
+    monkeypatch.setattr(megastroy_parser.time, "sleep", lambda *a, **k: None)
+
+    parser = MegastroyParser()
+    laminate = parser.fetch_price("Ламинат")
+    paint = parser.fetch_price("Краска для стен")
+
+    assert laminate.price_avg == Decimal("400")
+    assert paint.price_avg == Decimal("223")
+
+
 def test_unknown_material_raises():
     with pytest.raises(ValueError):
         MegastroyParser().fetch_price("Нет такого материала")

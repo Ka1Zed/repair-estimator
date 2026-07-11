@@ -1,6 +1,8 @@
 import logging
 import re
 import statistics
+import threading
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -116,6 +118,13 @@ CATEGORY_MAP: dict[str, tuple[str, ...]] = {
 # осмысленных страниц ещё меньше — ранний стоп в leman_browser обычно срабатывает
 # раньше этого потолка.
 MAX_PAGES = 15
+
+# Вариантные материалы (эконом/премиум, #331) указывают на тот же base_urls, что
+# и стандарт — кэш карточек категории по base_urls (#341), чтобы update_prices не
+# гонял браузер за одной и той же выдачей 2-3 раза подряд для трёх вариантов.
+# TTL небольшой — нужен только на время обработки одной группы вариантов в
+# рамках одного прогона (см. megastroy_parser._CATEGORY_CACHE_TTL_SECONDS).
+_CATEGORY_CACHE_TTL_SECONDS = 600
 
 CARD_SELECTOR = '[data-qa="product"]'
 _PRODUCT_ID_RE = re.compile(r"-(\d+)/?$")
@@ -264,6 +273,13 @@ class LemanParser(BaseParser):
         # None — прежнее поведение: каждый fetch_price сам открывает и закрывает
         # свою сессию через модульную leman_browser.fetch_pages.
         self._session = None
+        # Кэш карточек категории по base_urls (#341) — см. _CATEGORY_CACHE_TTL_SECONDS.
+        # Инстанс — синглтон в registry.py и переживает весь процесс (в т.ч. live
+        # API-путь), поэтому конкурентные запросы возможны; лок сериализует
+        # проверку кэша и браузерный фетч, чтобы два запроса на одну категорию не
+        # поднимали браузер одновременно.
+        self._raw_cache: dict[tuple[str, ...], tuple[float, list]] = {}
+        self._raw_cache_lock = threading.Lock()
 
     def set_session(self, session) -> None:
         self._session = session
@@ -278,6 +294,59 @@ class LemanParser(BaseParser):
 
     def known_materials(self) -> list[str]:
         return list(CATEGORY_MAP.keys())
+
+    def _fetch_raw_candidates(
+        self, base_urls: tuple[str, ...], material_name: str
+    ) -> list[tuple[list[tuple[Decimal, str]], str | None, str | None]]:
+        # Тройки (кандидаты цены, ссылка, имя) со всех страниц категории, уже
+        # дедуплицированные по id товара — разбор, не зависящий от spec конкретного
+        # варианта (тот применяется выше по стеку в fetch_price). Вариантные
+        # материалы (эконом/премиум) шлют тот же base_urls — при повторном вызове
+        # в пределах TTL отдаём уже скачанное, не поднимая браузер заново.
+        with self._raw_cache_lock:
+            cached = self._raw_cache.get(base_urls)
+            if cached is not None:
+                fetched_at, raw = cached
+                if time.monotonic() - fetched_at < _CATEGORY_CACHE_TTL_SECONDS:
+                    logger.info(
+                        f"  Леман '{material_name}': категория {base_urls[0]} из кэша "
+                        f"({len(raw)} карточек, без повторного фетча)"
+                    )
+                    return raw
+
+            fetch_pages = self._session.fetch_pages if self._session is not None else leman_browser.fetch_pages
+
+            raw: list[tuple[list[tuple[Decimal, str]], str | None, str | None]] = []
+            seen_ids: set[str] = set()
+            any_pages_loaded = False
+
+            for base_url in base_urls:
+                pages_html = fetch_pages(base_url, MAX_PAGES)
+                if not pages_html:
+                    logger.warning(f"  Леман '{material_name}' {base_url}: браузер не вернул ни одной страницы")
+                    continue
+                any_pages_loaded = True
+
+                for page_num, html in enumerate(pages_html, start=1):
+                    page_url = _build_page_url(base_url, page_num)
+                    page_items = _parse_page(html, page_url)
+                    new_items = []
+                    for candidates, url, name in page_items:
+                        product_id = _product_id(url)
+                        if product_id is not None:
+                            if product_id in seen_ids:
+                                continue
+                            seen_ids.add(product_id)
+                        new_items.append((candidates, url, name))
+
+                    raw.extend(new_items)
+                    logger.info(f"  Леман '{material_name}' {base_url} стр.{page_num}: +{len(new_items)} карточек")
+
+            if not any_pages_loaded:
+                raise RuntimeError(f"Леман: браузерный фетч не вернул ни одной страницы для '{material_name}'")
+
+            self._raw_cache[base_urls] = (time.monotonic(), raw)
+            return raw
 
     def fetch_price(self, material_name: str) -> ParsedPrice:
         if material_name not in CATEGORY_MAP:
@@ -295,55 +364,29 @@ class LemanParser(BaseParser):
 
         spec = MATERIAL_UNITS[material_name]
         base_urls = CATEGORY_MAP[material_name]
-        fetch_pages = self._session.fetch_pages if self._session is not None else leman_browser.fetch_pages
+        raw = self._fetch_raw_candidates(base_urls, material_name)
 
         items: list[tuple[Decimal, str | None, str | None, Decimal | None]] = []
-        seen_ids: set[str] = set()
-        any_pages_loaded = False
-
-        for base_url in base_urls:
-            pages_html = fetch_pages(base_url, MAX_PAGES)
-            if not pages_html:
-                logger.warning(f"  Леман '{material_name}' {base_url}: браузер не вернул ни одной страницы")
+        for candidates, url, name in raw:
+            price = _select_price(candidates, spec)
+            if price is None:
+                # Ни основной, ни вторичный блок не дали нужную единицу
+                # (напр. клей без price-block-unitprice) — не считаем товар.
                 continue
-            any_pages_loaded = True
 
-            for page_num, html in enumerate(pages_html, start=1):
-                page_url = _build_page_url(base_url, page_num)
-                page_items = _parse_page(html, page_url)
-                new_items = []
-                for candidates, url, name in page_items:
-                    product_id = _product_id(url)
-                    if product_id is not None:
-                        if product_id in seen_ids:
-                            continue
-                        seen_ids.add(product_id)
+            if spec.normalize_length:
+                length_m = _length_m_from_title(name)
+                if not length_m:
+                    continue
+                # Длина рейки — она же и есть package_size (м на упаковку).
+                package_size = length_m
+                price = price / length_m
+            else:
+                # package_size (#306) — фасовка ЭТОГО товара, если карточка
+                # показывает второй ценовой блок (см. _select_package_size).
+                package_size = _select_package_size(candidates, spec, price)
 
-                    price = _select_price(candidates, spec)
-                    if price is None:
-                        # Ни основной, ни вторичный блок не дали нужную единицу
-                        # (напр. клей без price-block-unitprice) — не считаем товар.
-                        continue
-
-                    if spec.normalize_length:
-                        length_m = _length_m_from_title(name)
-                        if not length_m:
-                            continue
-                        # Длина рейки — она же и есть package_size (м на упаковку).
-                        package_size = length_m
-                        price = price / length_m
-                    else:
-                        # package_size (#306) — фасовка ЭТОГО товара, если карточка
-                        # показывает второй ценовой блок (см. _select_package_size).
-                        package_size = _select_package_size(candidates, spec, price)
-
-                    new_items.append((price, url, name, package_size))
-
-                items.extend(new_items)
-                logger.info(f"  Леман '{material_name}' {base_url} стр.{page_num}: +{len(new_items)} цен")
-
-        if not any_pages_loaded:
-            raise RuntimeError(f"Леман: браузерный фетч не вернул ни одной страницы для '{material_name}'")
+            items.append((price, url, name, package_size))
 
         if not items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (единица/размер не распознаны)")

@@ -243,6 +243,149 @@ def test_wallpaper_accepts_pieces_as_rolls(monkeypatch):
     assert parsed.price_avg == Decimal("2082")
 
 
+def test_socket_accepts_pieces_as_units(monkeypatch):
+    # #335: розетка без вторичного блока — "шт." и есть цена за штуку, как обои.
+    html = _page(_item("/product/rozetka-1/", price="201", price_unit="шт."))
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Розетка")
+
+    assert parsed.price_avg == Decimal("201")
+
+
+def test_socket_economy_takes_lower_tercile(monkeypatch):
+    def _socket(href, price):
+        return _item(href, price=price, price_unit="шт.")
+
+    html = _page(
+        _socket("/product/rozetka-a/", "150"),
+        _socket("/product/rozetka-b/", "250"),
+        _socket("/product/rozetka-c/", "350"),
+        _socket("/product/rozetka-d/", "450"),
+        _socket("/product/rozetka-e/", "550"),
+        _socket("/product/rozetka-f/", "650"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    economy = LemanParser().fetch_price("Розетка эконом")
+    standard = LemanParser().fetch_price("Розетка")
+
+    assert economy.price_max <= Decimal("250")
+    assert standard.price_min == Decimal("150")
+    assert standard.price_max == Decimal("650")
+
+
+def test_linoleum_uses_primary_m2_block_and_ignores_running_meter_secondary(monkeypatch):
+    # #335: вторичный блок у линолеума — "₽/пог.м" (ширина рулона), не "₽/кор."
+    # как у плитки/ламината. Раньше _select_package_size брала ЛЮБУЮ "не свою"
+    # единицу — это протащило бы ширину рулона (3 м) как фиктивный package_size
+    # и сломало бы округление площади в смете. Теперь такая единица не
+    # считается package_size (_PACKAGE_UNITS), должен остаться None.
+    html = _page(
+        _item(
+            "/product/linoleum-1/",
+            name='Линолеум бытовой «Классик Корсар» 21 класс 3 м',
+            price="290",
+            price_unit="м²",
+            unitprice="870.09",
+            unitprice_unit="пог.м",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Линолеум")
+
+    assert parsed.price_avg == Decimal("290")
+    assert parsed.package_size is None
+
+
+def test_parquet_uses_primary_m2_block_and_box_secondary_as_package_size(monkeypatch):
+    # #335: у паркета, в отличие от линолеума, вторичный блок реально "₽/кор."
+    # (как у плитки/ламината) — package_size законно считается.
+    html = _page(
+        _item(
+            "/product/parket-1/",
+            name="Инженерная доска DW Flooring Дуб DW-303U 23 класс 1.24 м²",
+            price="4261.29",
+            price_unit="м²",
+            unitprice="5284",
+            unitprice_unit="кор.",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Паркетная доска")
+
+    # price_avg — round(statistics.mean(...)), сверяем нечувствительный к
+    # округлению price_min вместо него (единственная цена в выборке).
+    assert parsed.price_min == Decimal("4261.29")
+    assert parsed.package_size == Decimal("5284") / Decimal("4261.29")
+
+
+def test_light_accepts_pieces_as_units(monkeypatch):
+    # #335: точечный светильник без вторичного блока — "шт." и есть цена за штуку.
+    html = _page(_item("/product/svetilnik-1/", price="450", price_unit="шт."))
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Светильник")
+
+    assert parsed.price_avg == Decimal("450")
+
+
+def test_cable_uses_primary_meter_price_when_sold_cut_to_order(monkeypatch):
+    # #335: "на отрез" — единственный блок и так уже "₽/м".
+    html = _page(_item("/product/cable-otrez/", price="115", price_unit="м"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Кабель электрический")
+
+    assert parsed.price_avg == Decimal("115")
+    assert parsed.package_size is None
+
+
+def test_cable_uses_secondary_meter_price_and_coil_length_as_package_size(monkeypatch):
+    # #335: бухта — основной блок "₽/шт." (вся бухта), вторичный уже "₽/м"
+    # (сайт сам нормализует, в отличие от Мегастроя, где такого блока нет).
+    html = _page(
+        _item(
+            "/product/cable-coil-100m/",
+            name="Кабель Камкабель ВВГпнг(A)-LS 3x2.5 100 м ГОСТ",
+            price="12627",
+            price_unit="шт.",
+            unitprice="126.27",
+            unitprice_unit="м",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Кабель электрический")
+
+    # price_avg — round(statistics.mean(...)), сверяем нечувствительный к
+    # округлению price_min вместо него (единственная цена в выборке).
+    assert parsed.price_min == Decimal("126.27")
+    # package_size (#306) — длина бухты, "шт." (упаковка целиком) есть в
+    # _PACKAGE_UNITS, в отличие от "пог.м" у линолеума.
+    assert parsed.package_size == Decimal("12627") / Decimal("126.27")
+
+
+def test_pipe_normalizes_price_per_piece_by_length_from_title(monkeypatch):
+    # #335: труба — как плинтус, длина в конце названия, один ценовой блок.
+    html = _page(
+        _item(
+            "/product/truba-1/",
+            name="Труба полипропиленовая MONLID армированная стекловолокном 20x3.4 мм SDR6 PN25 2 м",
+            price="127",
+            price_unit="шт.",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Труба водопроводная")
+
+    assert parsed.price_min == Decimal("63.5")  # 127 / 2 м
+    assert parsed.package_size == Decimal("2")
+
+
 def test_glue_without_unitprice_block_is_skipped(monkeypatch):
     # Клей иногда приходит вообще без price-block-unitprice — раз ни один
     # блок не даёт "кг", позицию не считаем (не берём цену за мешок как есть).

@@ -617,15 +617,19 @@ class TestDifferentRooms:
         # Итого: 31.5
         assert plinth['quantity'] == Decimal('31.5')
 
-        # Проверяем, что грунтовка и шпаклёвка есть только из первой (где стены красятся)
+        # Грунтовка и стартовая шпаклёвка суммируются из обеих комнат: покраска (комната1)
+        # и обои (комната2) обе тянут подготовку основания (#325). Финишная шпаклёвка —
+        # только из первой, под обои она не нужна (полотно скрывает огрехи).
         primer = next((v for k, v in aggregated.items() if v['name'] == 'Грунтовка'), None)
         assert primer is not None
-        assert primer['quantity'] == Decimal('4.5012')  # 34.1 * 0.12 * 1.1
+        # Комната1: 34.1 * 0.12 * 1.1 = 4.5012; комната2: 48.6 * 0.12 * 1.1 = 6.4152
+        assert primer['quantity'] == Decimal('10.9164')
 
         putty = next((v for k, v in aggregated.items() if v['name'] == 'Шпаклевка финишная'), None)
         assert putty is not None
-        assert putty['quantity'] == Decimal('37.51')  # 34.1 * 1.0 * 1.1
+        assert putty['quantity'] == Decimal('37.51')  # 34.1 * 1.0 * 1.1 (только комната1)
 
         putty_start = next((v for k, v in aggregated.items() if v['name'] == 'Шпаклевка стартовая'), None)
         assert putty_start is not None
-        assert putty_start['quantity'] == Decimal('187.55')  # 34.1 * 5.0 * 1.1
+        # Комната1: 34.1 * 5.0 * 1.1 = 187.55; комната2: 48.6 * 5.0 * 1.1 = 267.3
+        assert putty_start['quantity'] == Decimal('454.85')

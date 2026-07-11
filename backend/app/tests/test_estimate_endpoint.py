@@ -711,6 +711,61 @@ def test_rough_only_bathroom_keeps_waterproof_no_tile():
     assert not ({"Плитка", "Плиточный клей", "Затирка"} & names)
 
 
+WALLPAPER_PAYLOAD = {
+    "city": "Казань",
+    "rooms": [
+        {
+            "name": "Комната",
+            "height": 2.7,
+            "points": [
+                {"x": 0, "y": 0}, {"x": 4, "y": 0},
+                {"x": 4, "y": 3}, {"x": 0, "y": 3}
+            ],
+            "room_type": "living",
+            "openings": [],
+            "works": W(walls="wallpaper")
+        }
+    ]
+}
+
+
+def test_wallpaper_adds_wall_prep_materials():
+    """walls=wallpaper: под обои считаются грунт и стартовая шпаклёвка, финишная — нет (#325)."""
+    response = client.post("/api/estimates/calculate", json=WALLPAPER_PAYLOAD)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "finish_only"
+
+    materials = {m["name"]: m for m in data["materials"]}
+    for name in ("Грунтовка", "Шпаклевка стартовая", "Обои"):
+        assert name in materials, f"нет материала «{name}» под обои"
+
+    # Финишная шпаклёвка под обои избыточна — полотно скрывает огрехи (#325).
+    assert "Шпаклевка финишная" not in materials
+
+    # wall_area = (4+3)*2*2.7 = 37.8 (проёмов нет)
+    wall_area = data["geometry"]["wall_area"]
+    assert wall_area == pytest.approx(37.8, 0.01)
+
+    primer = materials["Грунтовка"]
+    assert primer["base_quantity"] == pytest.approx(wall_area * 0.12, rel=0.01)
+
+    putty_start = materials["Шпаклевка стартовая"]
+    assert putty_start["base_quantity"] == pytest.approx(wall_area * 5.0, rel=0.01)
+
+
+def test_wallpaper_rough_only_keeps_prep_drops_wallpaper():
+    """scope=rough_only под обои: грунт/стартовая шпаклёвка остаются, сами обои — нет (#325)."""
+    response = client.post("/api/estimates/calculate",
+                           json={**WALLPAPER_PAYLOAD, "scope": "rough_only"})
+    assert response.status_code == 200
+    data = response.json()
+
+    names = {m["name"] for m in data["materials"]}
+    assert {"Грунтовка", "Шпаклевка стартовая"} <= names
+    assert "Обои" not in names
+
+
 def test_hidden_works_block_present_and_not_in_summary():
     """Блок скрытых работ есть, помечен, но НЕ влияет на summary основной сметы (#239)."""
     response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)

@@ -1,6 +1,7 @@
 import logging
 import re
 import statistics
+import threading
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -273,7 +274,12 @@ class LemanParser(BaseParser):
         # свою сессию через модульную leman_browser.fetch_pages.
         self._session = None
         # Кэш карточек категории по base_urls (#341) — см. _CATEGORY_CACHE_TTL_SECONDS.
+        # Инстанс — синглтон в registry.py и переживает весь процесс (в т.ч. live
+        # API-путь), поэтому конкурентные запросы возможны; лок сериализует
+        # проверку кэша и браузерный фетч, чтобы два запроса на одну категорию не
+        # поднимали браузер одновременно.
         self._raw_cache: dict[tuple[str, ...], tuple[float, list]] = {}
+        self._raw_cache_lock = threading.Lock()
 
     def set_session(self, session) -> None:
         self._session = session
@@ -297,49 +303,50 @@ class LemanParser(BaseParser):
         # варианта (тот применяется выше по стеку в fetch_price). Вариантные
         # материалы (эконом/премиум) шлют тот же base_urls — при повторном вызове
         # в пределах TTL отдаём уже скачанное, не поднимая браузер заново.
-        cached = self._raw_cache.get(base_urls)
-        if cached is not None:
-            fetched_at, raw = cached
-            if time.monotonic() - fetched_at < _CATEGORY_CACHE_TTL_SECONDS:
-                logger.info(
-                    f"  Леман '{material_name}': категория {base_urls[0]} из кэша "
-                    f"({len(raw)} карточек, без повторного фетча)"
-                )
-                return raw
+        with self._raw_cache_lock:
+            cached = self._raw_cache.get(base_urls)
+            if cached is not None:
+                fetched_at, raw = cached
+                if time.monotonic() - fetched_at < _CATEGORY_CACHE_TTL_SECONDS:
+                    logger.info(
+                        f"  Леман '{material_name}': категория {base_urls[0]} из кэша "
+                        f"({len(raw)} карточек, без повторного фетча)"
+                    )
+                    return raw
 
-        fetch_pages = self._session.fetch_pages if self._session is not None else leman_browser.fetch_pages
+            fetch_pages = self._session.fetch_pages if self._session is not None else leman_browser.fetch_pages
 
-        raw: list[tuple[list[tuple[Decimal, str]], str | None, str | None]] = []
-        seen_ids: set[str] = set()
-        any_pages_loaded = False
+            raw: list[tuple[list[tuple[Decimal, str]], str | None, str | None]] = []
+            seen_ids: set[str] = set()
+            any_pages_loaded = False
 
-        for base_url in base_urls:
-            pages_html = fetch_pages(base_url, MAX_PAGES)
-            if not pages_html:
-                logger.warning(f"  Леман '{material_name}' {base_url}: браузер не вернул ни одной страницы")
-                continue
-            any_pages_loaded = True
+            for base_url in base_urls:
+                pages_html = fetch_pages(base_url, MAX_PAGES)
+                if not pages_html:
+                    logger.warning(f"  Леман '{material_name}' {base_url}: браузер не вернул ни одной страницы")
+                    continue
+                any_pages_loaded = True
 
-            for page_num, html in enumerate(pages_html, start=1):
-                page_url = _build_page_url(base_url, page_num)
-                page_items = _parse_page(html, page_url)
-                new_items = []
-                for candidates, url, name in page_items:
-                    product_id = _product_id(url)
-                    if product_id is not None:
-                        if product_id in seen_ids:
-                            continue
-                        seen_ids.add(product_id)
-                    new_items.append((candidates, url, name))
+                for page_num, html in enumerate(pages_html, start=1):
+                    page_url = _build_page_url(base_url, page_num)
+                    page_items = _parse_page(html, page_url)
+                    new_items = []
+                    for candidates, url, name in page_items:
+                        product_id = _product_id(url)
+                        if product_id is not None:
+                            if product_id in seen_ids:
+                                continue
+                            seen_ids.add(product_id)
+                        new_items.append((candidates, url, name))
 
-                raw.extend(new_items)
-                logger.info(f"  Леман '{material_name}' {base_url} стр.{page_num}: +{len(new_items)} карточек")
+                    raw.extend(new_items)
+                    logger.info(f"  Леман '{material_name}' {base_url} стр.{page_num}: +{len(new_items)} карточек")
 
-        if not any_pages_loaded:
-            raise RuntimeError(f"Леман: браузерный фетч не вернул ни одной страницы для '{material_name}'")
+            if not any_pages_loaded:
+                raise RuntimeError(f"Леман: браузерный фетч не вернул ни одной страницы для '{material_name}'")
 
-        self._raw_cache[base_urls] = (time.monotonic(), raw)
-        return raw
+            self._raw_cache[base_urls] = (time.monotonic(), raw)
+            return raw
 
     def fetch_price(self, material_name: str) -> ParsedPrice:
         if material_name not in CATEGORY_MAP:

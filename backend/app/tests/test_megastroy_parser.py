@@ -353,6 +353,39 @@ def test_fetch_price_does_not_share_cache_across_different_categories(monkeypatc
     assert paint.price_avg == Decimal("223")
 
 
+def test_fetch_price_refetches_category_after_ttl_expires(monkeypatch):
+    """#341: кэш живёт не вечно — по истечении TTL повторный вызов идёт в сеть
+    заново, а не отдаёт снимок категории многочасовой давности."""
+    html = _page(_item("400", "/catalog/x/lam-a", title="Ламинат А", unit="м²"))
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, text: str, status_code: int = 200):
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(self.status_code)
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        return FakeResponse(html) if "page=" not in url else FakeResponse("", 404)
+
+    fake_now = [1000.0]
+    monkeypatch.setattr(megastroy_parser.requests, "get", fake_get)
+    monkeypatch.setattr(megastroy_parser.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(megastroy_parser.time, "monotonic", lambda: fake_now[0])
+
+    parser = MegastroyParser()
+    parser.fetch_price("Ламинат")
+    assert len(calls) == 2  # стр.1 + стр.2 с 404
+
+    fake_now[0] += megastroy_parser._CATEGORY_CACHE_TTL_SECONDS + 1
+    parser.fetch_price("Ламинат эконом")
+    assert len(calls) == 4  # TTL истёк — категория скачана заново
+
+
 def test_unknown_material_raises():
     with pytest.raises(ValueError):
         MegastroyParser().fetch_price("Нет такого материала")

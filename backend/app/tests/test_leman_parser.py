@@ -449,6 +449,33 @@ def test_fetch_price_does_not_share_cache_across_different_categories(monkeypatc
     assert tile.price_avg == Decimal("500")
 
 
+def test_fetch_price_refetches_category_after_ttl_expires(monkeypatch):
+    """#341: кэш живёт не вечно — по истечении TTL повторный вызов идёт в браузер
+    заново, а не отдаёт снимок категории многочасовой давности."""
+    def _paint(href, unitprice):
+        return _item(href, price="1", price_unit="шт.", unitprice=unitprice, unitprice_unit="л")
+
+    html = _page(_paint("/product/paint-a/", "400"))
+    monkeypatch.setattr(leman_parser.settings, "LEMAN_LIVE", True)
+    calls = []
+
+    def fake_fetch_pages(base_url, max_pages):
+        calls.append(base_url)
+        return [html]
+
+    fake_now = [1000.0]
+    monkeypatch.setattr(leman_parser.leman_browser, "fetch_pages", fake_fetch_pages)
+    monkeypatch.setattr(leman_parser.time, "monotonic", lambda: fake_now[0])
+
+    parser = LemanParser()
+    parser.fetch_price("Краска для стен")
+    assert len(calls) == 1
+
+    fake_now[0] += leman_parser._CATEGORY_CACHE_TTL_SECONDS + 1
+    parser.fetch_price("Краска для стен эконом")
+    assert len(calls) == 2  # TTL истёк — категория скачана заново
+
+
 def test_fetch_price_excludes_irrelevant_subtypes_by_name(monkeypatch):
     # Пробник за 30 ₽ и колеровочная паста — семантический мусор, который роняет
     # min и перекашивает вилку. Отсекаются по имени до статистики: min уже не 30.

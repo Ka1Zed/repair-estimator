@@ -126,6 +126,18 @@ def _finish_options(room: RoomInput) -> Dict[str, Any]:
         "wall_condition": w.walls.wall_condition if w.walls.enabled else None,
     }
 
+def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> Decimal:
+    """Выбирает значение в зависимости от уровня комплектации."""
+    if tier == "min":
+        return v_min
+    if tier == "max":
+        return v_max
+    return v_avg
+
+# Текущий PR (#293): tier выбирает, какую границу вилки (min/avg/max)
+# показывать в строке как основную цену. Реальные разные бренды/SKU
+# под эконом/премиум (с отдельными ценами и фасовкой) будут добавлены
+# в отдельной задаче #331. Здесь _selections tier-agnostic.
 
 @router.post("/calculate", response_model=EstimateResponse)
 def calculate_estimate(
@@ -186,7 +198,7 @@ def calculate_estimate(
         include_finish = request.scope != "rough_only"
         all_materials.extend(calculate_materials(
             geometry=geometry, repair_options=finish_options, db=db,
-            include_finish=include_finish,
+            include_finish=include_finish, tier=request.tier,  
         ))
         all_labor.extend(calculate_labor(
             geometry=geometry, repair_options=finish_options, db=db,
@@ -255,7 +267,6 @@ def calculate_estimate(
 
         price_obj = get_price(name, db=db, parser=parser, region=request.city)
         if not price_obj:
-            # Цены нет даже в seed — не теряем позицию молча, показываем её с пометкой.
             logger.warning(f"Цена для материала '{name}' не найдена, показываем без цены")
             materials_response.append(MaterialItem(
                 name=name,
@@ -265,12 +276,19 @@ def calculate_estimate(
                 package_size=float(group['package_size']),
                 packs=packs,
                 unit=group['unit'],
+                tier=request.tier,
+                price=0.0,
+                total=0.0,
+                price_min=0.0,
                 price_avg=0.0,
+                price_max=0.0,
+                total_min=0.0,
                 total_avg=0.0,
+                total_max=0.0,
                 source="нет цены",
                 source_url=None,
                 updated_at="",
-                region=None
+                region=None,
             ))
             continue
 
@@ -283,15 +301,8 @@ def calculate_estimate(
         total_avg = final_quantity * price_avg * CONTINGENCY['avg']
         total_max = final_quantity * price_max * CONTINGENCY['max']
 
-        if request.tier == "min":
-            price = price_min
-            total = total_min
-        elif request.tier == "max":
-            price = price_max
-            total = total_max
-        else:
-            price = price_avg
-            total = total_avg
+        price = pick_by_tier(request.tier, price_min, price_avg, price_max)
+        total = pick_by_tier(request.tier, total_min, total_avg, total_max)
 
         materials_response.append(MaterialItem(
             name=name,
@@ -350,15 +361,8 @@ def calculate_estimate(
         total_max = volume * p_max * CONTINGENCY['max']
 
         # Выбор цены и итога для текущего уровня (tier)
-        if request.tier == "min":
-            price = p_min
-            total = total_min
-        elif request.tier == "max":
-            price = p_max
-            total = total_max
-        else:  # "avg"
-            price = p_avg
-            total = total_avg
+        price = pick_by_tier(request.tier, p_min, p_avg, p_max)
+        total = pick_by_tier(request.tier, total_min, total_avg, total_max)
 
         labor_source_name = sources_by_id.get(labor_price.source_id, "seed")
         updated_at = labor_price.updated_at.strftime("%Y-%m-%d") if labor_price.updated_at else ""

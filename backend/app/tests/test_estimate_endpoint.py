@@ -955,7 +955,7 @@ def test_non_positive_opening_depth_rejected():
     assert client.post("/api/estimates/calculate", json=_payload(-0.1)).status_code == 422
 
 
-def test_labor_tier_and_villa_consistency():
+def test_labor_tier_consistency():
     """Проверка, что labor[] содержит полную вилку цен, а сводка согласована со строками."""
     # Базовый payload с одной комнатой
     payload = {
@@ -1047,7 +1047,7 @@ def test_labor_tier_and_villa_consistency():
     assert paint_avg["price_min"] < paint_avg["price_avg"] < paint_avg["price_max"]
 
 
-def test_material_tier_and_villa_consistency():
+def test_material_tier_consistency():
     """Проверка, что materials[] содержит полную вилку цен, а сводка согласована со строками."""
     # Базовый payload с одной комнатой (включая электрику для разнообразия)
     payload = {
@@ -1138,4 +1138,47 @@ def test_material_tier_and_villa_consistency():
     paint_avg = next(item for item in materials_avg if item["name"] == "Краска для стен")
     assert paint_avg["price_min"] < paint_avg["price_avg"] < paint_avg["price_max"]
 
+
+def test_missing_price_handled_gracefully(monkeypatch):
+    """Проверка, что при отсутствии цены у материала (get_price возвращает None)
+    ответ остаётся 200, строка присутствует со source='нет цены' и все ценовые поля = 0.
+    """
+    # Подменяем get_price в модуле app.api.estimates, где она используется
+    def mock_get_price(*args, **kwargs):
+        return None
+    monkeypatch.setattr("app.api.estimates.get_price", mock_get_price)
+
+    payload = {
+        "city": "Казань",
+        "rooms": [{
+            "name": "Спальня",
+            "height": 2.7,
+            "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+            "room_type": "living",
+            "openings": [],
+            "works": {
+                "floor": {"enabled": True, "finish": "laminate"},
+                "walls": {"enabled": True, "finish": "paint"},
+                "ceiling": {"enabled": False, "finish": None},
+                "electric": {"enabled": False},
+                "plumbing": {"enabled": False},
+            }
+        }],
+        "tier": "avg"
+    }
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+
+    for item in data["materials"]:
+        assert item["source"] == "нет цены"
+        assert item["price"] == 0.0
+        assert item["total"] == 0.0
+        assert item["price_min"] == 0.0
+        assert item["price_avg"] == 0.0
+        assert item["price_max"] == 0.0
+        assert item["total_min"] == 0.0
+        assert item["total_avg"] == 0.0
+        assert item["total_max"] == 0.0
+        assert item["tier"] == "avg"
 

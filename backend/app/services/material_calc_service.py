@@ -255,6 +255,7 @@ def calculate_materials(
     repair_options: Dict[str, Any],
     db: Session,
     include_finish: bool = True,
+    tier: str = "avg",
 ) -> List[Dict[str, Any]]:
     """
     Считает материалы для одной комнаты по геометрии и выбранной отделке.
@@ -271,7 +272,7 @@ def calculate_materials(
     """
     result: List[Dict[str, Any]] = []
 
-    for material_slug, area in _selections(repair_options, geometry):
+    for material_slug, area in _selections(repair_options, geometry, tier):
         if not include_finish and material_stage_of(material_slug) == "finish":
             continue
         material = db.query(Material).filter(Material.slug == material_slug).first()

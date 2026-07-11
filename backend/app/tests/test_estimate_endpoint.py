@@ -953,3 +953,189 @@ def test_non_positive_opening_depth_rejected():
 
     assert client.post("/api/estimates/calculate", json=_payload(0)).status_code == 422
     assert client.post("/api/estimates/calculate", json=_payload(-0.1)).status_code == 422
+
+
+def test_labor_tier_and_villa_consistency():
+    """Проверка, что labor[] содержит полную вилку цен, а сводка согласована со строками."""
+    # Базовый payload с одной комнатой
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Спальня",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0},
+                    {"x": 4, "y": 0},
+                    {"x": 4, "y": 3},
+                    {"x": 0, "y": 3}
+                ],
+                "room_type": "living",
+                "openings": [
+                    {"type": "door", "width": 0.8, "height": 2.0},
+                    {"type": "window", "width": 1.5, "height": 1.4}
+                ],
+                "works": {
+                    "floor": {"enabled": True, "finish": "laminate"},
+                    "walls": {"enabled": True, "finish": "paint"},
+                    "ceiling": {"enabled": True, "finish": "paint"},
+                    "electric": {"enabled": True, "sockets": 5, "lights": 3, "cable_m": 20},
+                    "plumbing": {"enabled": False, "pipe_m": 0}
+                }
+            }
+        ],
+        "tier": "avg"   # задаём уровень
+    }
+
+    # 1. Запрос с tier="avg"
+    resp_avg = client.post("/api/estimates/calculate", json=payload)
+    assert resp_avg.status_code == 200
+    data_avg = resp_avg.json()
+    labor_items_avg = data_avg["labor"]
+
+    # Проверяем, что у каждой работы есть все поля вилки
+    for item in labor_items_avg:
+        assert "price_min" in item
+        assert "price_avg" in item
+        assert "price_max" in item
+        assert "total_min" in item
+        assert "total_avg" in item
+        assert "total_max" in item
+        assert item["tier"] == "avg"
+        # Для avg-уровня price и total должны равняться avg
+        assert item["price"] == item["price_avg"]
+        assert item["total"] == item["total_avg"]
+
+    # Проверяем согласованность сводки
+    summary_avg = data_avg["summary"]
+    total_avg_sum = sum(item["total_avg"] for item in labor_items_avg)
+    assert total_avg_sum == pytest.approx(summary_avg["labor_avg"], 0.01)
+
+    total_min_sum = sum(item["total_min"] for item in labor_items_avg)
+    assert total_min_sum == pytest.approx(summary_avg["labor_min"], 0.01)
+
+    total_max_sum = sum(item["total_max"] for item in labor_items_avg)
+    assert total_max_sum == pytest.approx(summary_avg["labor_max"], 0.01)
+
+    # 2. Запрос с tier="min"
+    payload_min = {**payload, "tier": "min"}
+    resp_min = client.post("/api/estimates/calculate", json=payload_min)
+    assert resp_min.status_code == 200
+    data_min = resp_min.json()
+    labor_items_min = data_min["labor"]
+
+    for item in labor_items_min:
+        assert item["tier"] == "min"
+        assert item["price"] == item["price_min"]
+        assert item["total"] == item["total_min"]
+
+    # 3. Запрос с tier="max"
+    payload_max = {**payload, "tier": "max"}
+    resp_max = client.post("/api/estimates/calculate", json=payload_max)
+    assert resp_max.status_code == 200
+    data_max = resp_max.json()
+    labor_items_max = data_max["labor"]
+
+    for item in labor_items_max:
+        assert item["tier"] == "max"
+        assert item["price"] == item["price_max"]
+        assert item["total"] == item["total_max"]
+
+    # Дополнительно: убедимся, что min < avg < max (если цены различаются)
+    # Находим одну работу, которая точно есть (например, "Покраска стен")
+    paint_avg = next(item for item in labor_items_avg if item["service"] == "Покраска стен")
+    assert paint_avg["price_min"] < paint_avg["price_avg"] < paint_avg["price_max"]
+
+
+def test_material_tier_and_villa_consistency():
+    """Проверка, что materials[] содержит полную вилку цен, а сводка согласована со строками."""
+    # Базовый payload с одной комнатой (включая электрику для разнообразия)
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Спальня",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0},
+                    {"x": 4, "y": 0},
+                    {"x": 4, "y": 3},
+                    {"x": 0, "y": 3}
+                ],
+                "room_type": "living",
+                "openings": [
+                    {"type": "door", "width": 0.8, "height": 2.0},
+                    {"type": "window", "width": 1.5, "height": 1.4}
+                ],
+                "works": {
+                    "floor": {"enabled": True, "finish": "laminate"},
+                    "walls": {"enabled": True, "finish": "paint"},
+                    "ceiling": {"enabled": True, "finish": "paint"},
+                    "electric": {"enabled": True, "sockets": 5, "lights": 3, "cable_m": 20},
+                    "plumbing": {"enabled": False, "pipe_m": 0}
+                }
+            }
+        ],
+        "tier": "avg"   # задаём уровень
+    }
+
+    # 1. Запрос с tier="avg"
+    resp_avg = client.post("/api/estimates/calculate", json=payload)
+    assert resp_avg.status_code == 200
+    data_avg = resp_avg.json()
+    materials_avg = data_avg["materials"]
+
+    # Проверяем, что у каждого материала есть все поля вилки
+    for item in materials_avg:
+        assert "price_min" in item
+        assert "price_avg" in item
+        assert "price_max" in item
+        assert "total_min" in item
+        assert "total_avg" in item
+        assert "total_max" in item
+        assert item["tier"] == "avg"
+        # Для avg-уровня price и total должны равняться avg
+        assert item["price"] == item["price_avg"]
+        assert item["total"] == item["total_avg"]
+
+    # Проверяем согласованность сводки
+    summary_avg = data_avg["summary"]
+    total_avg_sum = sum(item["total_avg"] for item in materials_avg)
+    assert total_avg_sum == pytest.approx(summary_avg["materials_avg"], 0.01)
+
+    total_min_sum = sum(item["total_min"] for item in materials_avg)
+    assert total_min_sum == pytest.approx(summary_avg["materials_min"], 0.01)
+
+    total_max_sum = sum(item["total_max"] for item in materials_avg)
+    assert total_max_sum == pytest.approx(summary_avg["materials_max"], 0.01)
+
+    # 2. Запрос с tier="min"
+    payload_min = {**payload, "tier": "min"}
+    resp_min = client.post("/api/estimates/calculate", json=payload_min)
+    assert resp_min.status_code == 200
+    data_min = resp_min.json()
+    materials_min = data_min["materials"]
+
+    for item in materials_min:
+        assert item["tier"] == "min"
+        assert item["price"] == item["price_min"]
+        assert item["total"] == item["total_min"]
+
+    # 3. Запрос с tier="max"
+    payload_max = {**payload, "tier": "max"}
+    resp_max = client.post("/api/estimates/calculate", json=payload_max)
+    assert resp_max.status_code == 200
+    data_max = resp_max.json()
+    materials_max = data_max["materials"]
+
+    for item in materials_max:
+        assert item["tier"] == "max"
+        assert item["price"] == item["price_max"]
+        assert item["total"] == item["total_max"]
+
+    # Дополнительно: убедимся, что min < avg < max (если цены различаются)
+    # Находим один материал, который точно есть (например, "Краска для стен")
+    paint_avg = next(item for item in materials_avg if item["name"] == "Краска для стен")
+    assert paint_avg["price_min"] < paint_avg["price_avg"] < paint_avg["price_max"]
+
+

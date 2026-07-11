@@ -223,10 +223,6 @@ def calculate_estimate(
             sources_by_id=sources_by_id, include_finish=include_finish,
         ))
 
-    # Множитель строк детализации: непредвиденные расходы (avg). Класса ремонта больше нет (#222).
-    # Нужен, чтобы сумма построчных total_avg точно совпадала с summary.*_avg.
-    line_factor = CONTINGENCY['avg']
-
     # Агрегация материалов с округлением до упаковок
     mat_groups: Dict[int, Dict] = {}
     for mat in all_materials:
@@ -278,12 +274,24 @@ def calculate_estimate(
             ))
             continue
 
+        price_min = price_obj.price_min
         price_avg = price_obj.price_avg
-        # Строчный итог уже включает запас на непредвиденные (CONTINGENCY), чтобы
-        # сумма строк совпадала с summary (см. line_factor). Класса ремонта больше нет (#222).
-        total_avg = final_quantity * price_avg * line_factor
+        price_max = price_obj.price_max
         source_name = sources_by_id.get(price_obj.source_id, "unknown")
         updated_at = price_obj.updated_at.strftime("%Y-%m-%d") if price_obj.updated_at else ""
+        total_min = final_quantity * price_min * CONTINGENCY['min']
+        total_avg = final_quantity * price_avg * CONTINGENCY['avg']
+        total_max = final_quantity * price_max * CONTINGENCY['max']
+
+        if request.tier == "min":
+            price = price_min
+            total = total_min
+        elif request.tier == "max":
+            price = price_max
+            total = total_max
+        else:
+            price = price_avg
+            total = total_avg
 
         materials_response.append(MaterialItem(
             name=name,
@@ -293,12 +301,19 @@ def calculate_estimate(
             package_size=float(group['package_size']),
             packs=packs,
             unit=group['unit'],
+            tier=request.tier,
+            price=float(price),
+            total=float(total),
+            price_min=float(price_min),
             price_avg=float(price_avg),
+            price_max=float(price_max),
+            total_min=float(total_min),
             total_avg=float(total_avg),
+            total_max=float(total_max),
             source=source_name,
             source_url=price_obj.source_url,
             updated_at=updated_at,
-            region=price_obj.region
+            region=price_obj.region,
         ))
 
         materials_sum['min'] += final_quantity * price_obj.price_min
@@ -327,10 +342,26 @@ def calculate_estimate(
             continue
 
         volume = group['volume']
-        price_avg = labor_price.price_avg
-        # Строчный итог включает запас на непредвиденные (CONTINGENCY), как и у материалов.
-        total_avg = volume * price_avg * line_factor
+        p_min, p_avg, p_max = labor_price.price_min, labor_price.price_avg, labor_price.price_max
+
+        # Применяем непредвиденные расходы для каждой границы
+        total_min = volume * p_min * CONTINGENCY['min']
+        total_avg = volume * p_avg * CONTINGENCY['avg']
+        total_max = volume * p_max * CONTINGENCY['max']
+
+        # Выбор цены и итога для текущего уровня (tier)
+        if request.tier == "min":
+            price = p_min
+            total = total_min
+        elif request.tier == "max":
+            price = p_max
+            total = total_max
+        else:  # "avg"
+            price = p_avg
+            total = total_avg
+
         labor_source_name = sources_by_id.get(labor_price.source_id, "seed")
+        updated_at = labor_price.updated_at.strftime("%Y-%m-%d") if labor_price.updated_at else ""
 
         labor_response.append(LaborItem(
             service=service,
@@ -338,19 +369,25 @@ def calculate_estimate(
             stage=group['stage'],
             volume=float(volume),
             unit=group['unit'],
-            price_avg=float(price_avg),
+            tier=request.tier,
+            price=float(price),
+            total=float(total),
+            price_min=float(p_min),
+            price_avg=float(p_avg),
+            price_max=float(p_max),
+            total_min=float(total_min),
             total_avg=float(total_avg),
+            total_max=float(total_max),
             source=labor_source_name,
+            updated_at=updated_at,
             source_url=labor_price.source_url,
             region=labor_price.region,
-            # Полный список сайтов, объединённых в вилку (#166); None для seed.
             sources=getattr(labor_price, "contributing_sources", None),
         ))
 
-        labor_sum['min'] += volume * labor_price.price_min
-        labor_sum['avg'] += volume * labor_price.price_avg
-        labor_sum['max'] += volume * labor_price.price_max
-
+        labor_sum['min'] += volume * p_min
+        labor_sum['avg'] += volume * p_avg
+        labor_sum['max'] += volume * p_max
     # Итог = материалы + работы, каждый со своим запасом на непредвиденные (CONTINGENCY).
     # Классового множителя ремонта больше нет (#222).
     mat_final = {k: materials_sum[k] * CONTINGENCY[k] for k in ('min', 'avg', 'max')}

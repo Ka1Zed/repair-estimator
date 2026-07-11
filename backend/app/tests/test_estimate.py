@@ -197,6 +197,51 @@ class TestMaterialCalc:
             db_session.commit()
 
 
+class TestFinishVariants:
+    """Варианты материала по уровню комплектации (#331): tier выбирает конкретный
+    SKU (finish_key/variant_tier — см. conftest.variant_materials), а не только
+    границу вилки одного и того же товара."""
+
+    GEOM = {
+        'floor_area': Decimal('12.0'), 'ceiling_area': Decimal('12.0'),
+        'wall_area': Decimal('34.1'), 'perimeter': Decimal('14.0'),
+        'door_width_sum': Decimal('0.8'),
+    }
+
+    def test_tier_selects_different_sku(self, db_session):
+        """tier=min/avg/max на floor.laminate — три РАЗНЫХ material_id/name/package_size."""
+        repair_options = {'floor': 'laminate', 'walls': None, 'ceiling': None}
+
+        by_tier = {}
+        for tier in ("min", "avg", "max"):
+            materials = calculate_materials(self.GEOM, repair_options, db_session, tier=tier)
+            laminate = next(m for m in materials if m['unit'] == 'м²')
+            by_tier[tier] = laminate
+
+        assert by_tier['min']['name'] == 'Ламинат эконом'
+        assert by_tier['avg']['name'] == 'Ламинат'
+        assert by_tier['max']['name'] == 'Ламинат премиум'
+        # Разные material_id → в агрегации (B1-5) это разные строки сметы,
+        # а не одна строка с другой ценой.
+        assert len({by_tier[t]['material_id'] for t in by_tier}) == 3
+        assert by_tier['min']['package_size'] == 1.5
+        assert by_tier['avg']['package_size'] == 2.0
+        assert by_tier['max']['package_size'] == 2.5
+
+    def test_fallback_to_nearest_tier_when_variant_missing(self, db_session):
+        """Позиция без варианта запрошенного tier не выпадает — резолвится в avg."""
+        ceiling_only = {'floor': None, 'walls': None, 'ceiling': 'paint'}
+        materials_min = calculate_materials(self.GEOM, ceiling_only, db_session, tier="min")
+        ceiling_paint = next((m for m in materials_min if m['name'] == 'Краска потолочная'), None)
+        assert ceiling_paint is not None  # ceiling.paint не имеет min-варианта → fallback на avg
+
+        sockets_max = calculate_engineering_materials(
+            sockets=3, lights=0, cable_m=0, pipe_m=0, db=db_session, tier="max",
+        )
+        socket = next((m for m in sockets_max if m['name'] == 'Розетка'), None)
+        assert socket is not None  # socket не имеет max-варианта → fallback на avg
+
+
 class TestLaborCalc:
     """Модульные тесты для расчёта работ."""
 

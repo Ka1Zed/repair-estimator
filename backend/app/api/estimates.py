@@ -134,10 +134,10 @@ def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> D
         return v_max
     return v_avg
 
-# Текущий PR (#293): tier выбирает, какую границу вилки (min/avg/max)
-# показывать в строке как основную цену. Реальные разные бренды/SKU
-# под эконом/премиум (с отдельными ценами и фасовкой) будут добавлены
-# в отдельной задаче #331. Здесь _selections tier-agnostic.
+# tier выбирает границу вилки (min/avg/max) уже ВЫБРАННОГО SKU-варианта.
+# Выбор самого варианта (эконом/стандарт/премиум — разные Material с одним
+# finish_key) происходит раньше, в calculate_materials/_resolve_material (#331) —
+# сюда попадает готовая цена одного конкретного товара.
 
 @router.post("/calculate", response_model=EstimateResponse)
 def calculate_estimate(
@@ -198,7 +198,7 @@ def calculate_estimate(
         include_finish = request.scope != "rough_only"
         all_materials.extend(calculate_materials(
             geometry=geometry, repair_options=finish_options, db=db,
-            include_finish=include_finish,
+            include_finish=include_finish, tier=request.tier,
         ))
         all_labor.extend(calculate_labor(
             geometry=geometry, repair_options=finish_options, db=db,
@@ -227,7 +227,7 @@ def calculate_estimate(
             hidden['wet_floor'] += Decimal(str(geometry['floor_area']))
         all_materials.extend(calculate_engineering_materials(
             sockets=sockets, lights=lights, cable_m=cable_m, pipe_m=pipe_m, db=db,
-            include_finish=include_finish,
+            include_finish=include_finish, tier=request.tier,
         ))
         all_labor.extend(calculate_engineering_labor(
             sockets=sockets, lights=lights, cable_m=cable_m,

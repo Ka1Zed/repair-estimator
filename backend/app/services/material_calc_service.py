@@ -69,7 +69,7 @@ def packs_to_buy(pack_quantity: Decimal) -> int:
     return int(pack_quantity.to_integral_value(rounding=ROUND_CEILING))
 
 
-def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tuple]:
+def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any], tier: str) -> List[tuple]:
     """
     Разворачивает repair_options ({floor, walls, ceiling, ...}) в список
     позиций (material_slug, area) — какую площадь использовать для материала.

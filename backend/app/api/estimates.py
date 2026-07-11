@@ -214,7 +214,8 @@ def calculate_estimate(
         if points > 0 or room.room_type in WET_ROOM_TYPES:
             hidden['wet_floor'] += Decimal(str(geometry['floor_area']))
         all_materials.extend(calculate_engineering_materials(
-            sockets=sockets, lights=lights, cable_m=cable_m, pipe_m=pipe_m, db=db
+            sockets=sockets, lights=lights, cable_m=cable_m, pipe_m=pipe_m, db=db,
+            include_finish=include_finish,
         ))
         all_labor.extend(calculate_engineering_labor(
             sockets=sockets, lights=lights, cable_m=cable_m,

@@ -47,10 +47,15 @@ M_PIPE          = "pipe"
 # ---- стадии материалов (#303): rough / finish ----
 # Только грунт и стартовая (выравнивающая) шпаклёвка — ближайший существующий аналог
 # «штукатурки» из чек-листа issue; стяжка/штукатурка как отдельные материалы пока не
-# заведены (labor-only, см. calculate_rough_labor). Слаг без записи — finish (дефолт).
+# заведены (labor-only, см. calculate_rough_labor). Кабель и труба — разводка, черновой
+# этап (как cable_lay/pipe_mount в labor). Розетка/светильник — приборы: их дефолтная
+# стадия finish, в rough_only не закупаются (монтаж socket_mount/light_mount тоже finish).
+# Слаг без записи — finish (дефолт).
 STAGE_BY_MATERIAL = {
     M_PRIMER:      "rough",
     M_PUTTY_START: "rough",
+    M_CABLE:       "rough",
+    M_PIPE:        "rough",
 }
 
 
@@ -205,6 +210,7 @@ def calculate_engineering_materials(
     cable_m: Any,
     pipe_m: Any,
     db: Session,
+    include_finish: bool = True,
 ) -> List[Dict[str, Any]]:
     """Материалы электрики/сантехники по явным числам из works (не через quantity_of).
 
@@ -213,6 +219,10 @@ def calculate_engineering_materials(
     труба округляется вверх до хлыста 2 м на общей агрегации (package_size = 2).
     Мелочёвка (подрозетники, фитинги) отдельными строками не заводится — она в стоимости
     работ. См. docs/estimation-rules.md.
+
+    include_finish: False при scope=rough_only (#303) — оставляет разводку (кабель/труба,
+        stage="rough"), убирает приборы (розетка/светильник, stage="finish"): их монтаж
+        (socket_mount/light_mount) в rough_only тоже не считается.
     """
     result: List[Dict[str, Any]] = []
     # (имя, количество, применять ли waste_factor) — штучные без запаса, погонаж с запасом.
@@ -223,6 +233,8 @@ def calculate_engineering_materials(
         (M_PIPE, pipe_m, True),
     ]
     for slug, count, with_waste in specs:
+        if not include_finish and material_stage_of(slug) == "finish":
+            continue
         qty = D(count)
         if qty <= 0:
             continue

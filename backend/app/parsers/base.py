@@ -24,6 +24,12 @@ class ParsedPrice:
     # Ссылка на карточку/страницу, откуда взяты цены (для отображения источника
     # в смете). Необязательна: парсер может не знать ссылку → остаётся None.
     source_url: str | None = None
+    # Фасовка КОНКРЕТНОГО товара, чья цена ушла в price_avg/source_url (#306) —
+    # не справочное значение из materials.json, а то, что реально стоит за
+    # ссылкой. Парсер может не суметь её извлечь (категория без фасовки в
+    # названии/карточке) → остаётся None, вызывающий код откатывается на
+    # статичный Material.package_size (см. price_aggregator_service.get_price).
+    package_size: Decimal | None = None
 
 
 class BaseParser(ABC):

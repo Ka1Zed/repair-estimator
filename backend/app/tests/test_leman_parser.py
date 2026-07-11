@@ -194,6 +194,20 @@ def test_paint_uses_unitprice_block_not_whole_can_price(monkeypatch):
 
     assert parsed.price_avg == Decimal("223")  # round(223.2)
     assert parsed.price_min == Decimal("223.2")
+    # package_size (#306): банка 10 л — ратио цены за упаковку к цене за литр
+    # (2232 / 223.2), а не справочные 9 л из materials.json.
+    assert parsed.package_size == Decimal("10")
+
+
+def test_package_size_none_when_only_one_price_block_present(monkeypatch):
+    # Карточка без второго блока (например, requests/HTML не отдали unitprice
+    # отдельно) — фасовку взять неоткуда, откатываемся на статику выше по стеку.
+    html = _page(_item("/product/kraska-b-1/", unitprice="223.2", unitprice_unit="л"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Краска для стен")
+
+    assert parsed.package_size is None
 
 
 def test_tile_and_laminate_use_primary_block_when_it_is_already_per_m2(monkeypatch):
@@ -213,6 +227,10 @@ def test_tile_and_laminate_use_primary_block_when_it_is_already_per_m2(monkeypat
     parsed = LemanParser().fetch_price("Плитка")
 
     assert parsed.price_avg == Decimal("1125")
+    # package_size (#306): у плитки блоки "перевёрнуты" относительно краски —
+    # основной уже за м² (база), вторичный "₽/кор." — цена упаковки. Формула
+    # та же: package_size = цена_упаковки / цена_базовой_единицы = 1368/1125 м².
+    assert parsed.package_size == Decimal("1368") / Decimal("1125")
 
 
 def test_wallpaper_accepts_pieces_as_rolls(monkeypatch):
@@ -268,6 +286,8 @@ def test_plintus_normalizes_price_per_piece_by_length_from_title(monkeypatch):
     parsed = LemanParser().fetch_price("Плинтус")
 
     assert parsed.price_avg == Decimal("100")  # 220 / 2.2 м
+    # package_size (#306) — длина рейки из названия, как и у Мегастроя.
+    assert parsed.package_size == Decimal("2.2")
 
 
 def test_plintus_skips_items_without_parsable_length(monkeypatch):

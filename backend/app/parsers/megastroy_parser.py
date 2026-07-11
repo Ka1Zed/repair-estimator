@@ -285,31 +285,40 @@ class MegastroyParser(BaseParser):
         if not raw_items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (возможно, урезанная страница)")
 
-        items: list[tuple[Decimal, str | None]]
+        # Третий элемент кортежа — package_size (#306): фасовка ЭТОГО конкретного
+        # товара, извлечённая при нормализации цены, а не справочная. Для
+        # site_unit-категорий (плитка/ламинат/обои) сайт не даёт отдельной
+        # "цены за коробку" на странице категории — фасовку взять неоткуда,
+        # остаётся None (fallback на статичный Material.package_size).
+        items: list[tuple[Decimal, str | None, Decimal | None]]
         if category.site_unit is not None:
             # Категория смешивает разнородные позиции (замазка "₽/шт" в шпаклёвке,
             # добавки в мл в затирке) — отсекаем всё, чья витринная единица не
             # совпадает с ожидаемой (#277).
-            items = [(price, url) for price, url, unit, _title in raw_items if unit == category.site_unit]
+            items = [
+                (price, url, None) for price, url, unit, _title in raw_items if unit == category.site_unit
+            ]
         elif category.title_unit is not None:
             # Мегастрой у весовых/объёмных материалов всегда пишет цену за
             # упаковку целиком ("₽/шт") — вес/объём достаём из названия и
-            # считаем базовую цену сами.
+            # считаем базовую цену сами. qty — это и есть реальная фасовка
+            # товара (сколько кг/л в упаковке), несём её дальше как package_size.
             items = []
             for price, url, _unit, title in raw_items:
                 qty = _quantity_from_title(title, category.title_unit)
                 if qty:
-                    items.append((price / qty, url))
+                    items.append((price / qty, url, qty))
         elif category.normalize_length_mm:
             # Плинтус продаётся рейкой ("72х2500мм") по цене за шт — приводим
-            # к ₽/м делением на длину рейки из названия.
+            # к ₽/м делением на длину рейки из названия. Длина рейки — и есть
+            # package_size (м на упаковку).
             items = []
             for price, url, _unit, title in raw_items:
                 length_m = _length_m_from_title(title)
                 if length_m:
-                    items.append((price / length_m, url))
+                    items.append((price / length_m, url, length_m))
         else:
-            items = [(price, url) for price, url, _unit, _title in raw_items]
+            items = [(price, url, None) for price, url, _unit, _title in raw_items]
 
         if not items:
             raise RuntimeError(
@@ -326,7 +335,7 @@ class MegastroyParser(BaseParser):
                 f"{raw_count - len(items)} из {raw_count}"
             )
 
-        all_prices = [price for price, _ in items]
+        all_prices = [price for price, _, _ in items]
         price_min = min(all_prices)
         price_max = max(all_prices)
         price_avg = Decimal(round(statistics.mean(all_prices)))
@@ -334,8 +343,11 @@ class MegastroyParser(BaseParser):
         # Источник — карточка товара, чья цена ближе всего к показанной (avg), как и
         # для работ (price_aggregator._combine_labor_prices). Товар без ссылки →
         # деградируем до URL категории, чтобы источник никогда не был пустым (#197).
+        # package_size берём у ТОГО ЖЕ товара (#306) — иначе фасовка в смете и
+        # фасовка на странице source_url могут не совпадать.
         representative = min(items, key=lambda it: abs(it[0] - price_avg))
         source_url = representative[1] or category.urls[0]
+        package_size = representative[2]
 
         logger.info(
             f"Мегастрой: '{material_name}' — всего {len(all_prices)} цен, "
@@ -347,4 +359,5 @@ class MegastroyParser(BaseParser):
             price_avg=price_avg,
             price_max=price_max,
             source_url=source_url,
+            package_size=package_size,
         )

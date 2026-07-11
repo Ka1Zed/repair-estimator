@@ -258,14 +258,29 @@ def calculate_estimate(
 
     for mid, group in mat_groups.items():
         name = group['name']
-        packs = packs_to_buy(group['pack_quantity'])
-        final_quantity = Decimal(packs) * group['package_size']
         base_quantity = group['base_quantity']
         # Эффективный запас группы: quantity/base_quantity — по построению совпадает
         # с накрученным по факту коэффициентом даже после суммирования нескольких комнат.
         waste_factor = (group['quantity'] / base_quantity) if base_quantity > 0 else Decimal(1)
 
         price_obj = get_price(name, db=db, parser=parser, region=request.city)
+
+        # package_size (#306): если цена пришла от парсера и он отдал фасовку
+        # КОНКРЕТНОГО товара за source_url — считаем упаковки по ней, а не по
+        # справочной Material.package_size, иначе то, что показано по ссылке,
+        # и то, что легло в расчёт, могут разойтись (краска 2.5 л на карточке
+        # против 9 л в смете). Нет цены/фасовки от парсера — прежнее поведение.
+        effective_package_size = (
+            Decimal(str(price_obj.package_size))
+            if price_obj is not None and price_obj.package_size
+            else group['package_size']
+        )
+        if effective_package_size > 0:
+            packs = packs_to_buy(group['quantity'] / effective_package_size)
+        else:
+            packs = packs_to_buy(group['pack_quantity'])
+        final_quantity = Decimal(packs) * effective_package_size
+
         if not price_obj:
             logger.warning(f"Цена для материала '{name}' не найдена, показываем без цены")
             materials_response.append(MaterialItem(
@@ -273,7 +288,7 @@ def calculate_estimate(
                 quantity=float(final_quantity),
                 base_quantity=float(base_quantity),
                 waste_factor=float(waste_factor),
-                package_size=float(group['package_size']),
+                package_size=float(effective_package_size),
                 packs=packs,
                 unit=group['unit'],
                 tier=request.tier,
@@ -309,7 +324,7 @@ def calculate_estimate(
             quantity=float(final_quantity),
             base_quantity=float(base_quantity),
             waste_factor=float(waste_factor),
-            package_size=float(group['package_size']),
+            package_size=float(effective_package_size),
             packs=packs,
             unit=group['unit'],
             tier=request.tier,

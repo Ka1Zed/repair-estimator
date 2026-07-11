@@ -1,7 +1,9 @@
+import os
 import sys
 import logging
 from contextlib import nullcontext
 
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.parsers.labor_table_parser import LABOR_SERVICE_MAP
 from app.parsers.registry import BASE_LABOR_PARSER, MATERIAL_PARSERS, REGIONAL_LABOR_PARSERS
@@ -24,6 +26,15 @@ def update_prices():
     '''
     success = 0
     failed = 0
+
+    # update_prices — ручной наполнитель кэша с российского IP, где живой фетч
+    # нужен для ВСЕХ источников. Леман в config выключен по умолчанию ради
+    # прод/API-пути (см. LEMAN_LIVE в core/config.py), но здесь это ровно тот
+    # инструмент, ради которого его и включают, — поднимаем сами, чтобы не писать
+    # LEMAN_LIVE=1 перед каждым запуском. Явный LEMAN_LIVE=0 в окружении уважаем
+    # (напр. прогон только Мегастроя с не-РФ IP, чтобы не тратить время на браузер).
+    if "LEMAN_LIVE" not in os.environ:
+        settings.LEMAN_LIVE = True
 
     # CLI не в FastAPI-запросе — сессию открываем и закрываем сами вокруг всей
     # серии вызовов (Depends здесь недоступен).

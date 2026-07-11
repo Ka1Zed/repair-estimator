@@ -611,6 +611,30 @@ def test_finish_only_is_default_and_labeled():
     assert all("stage" in lab for lab in data["labor"])
 
 
+def test_finish_only_keeps_engineering_wiring():
+    """scope=finish_only + электрика/сантехника включены: разводка (Прокладка кабеля,
+    Монтаж труб, stage=rough) остаётся — она не входит в «жёсткие связки», которыми
+    управляет scope (#304). Монтаж приборов (finish) при этом тоже присутствует —
+    в finish_only чистовая отделка не исключается, исключаются только черновые."""
+    response = client.post("/api/estimates/calculate", json=_bathroom_payload())
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "finish_only"
+
+    labor = {x["service"]: x for x in data["labor"]}
+    for wiring in ("Прокладка кабеля", "Монтаж труб"):
+        assert wiring in labor, f"разводка «{wiring}» должна остаться в finish_only"
+        assert labor[wiring]["stage"] == "rough"
+        assert labor[wiring]["total_avg"] > 0
+
+    for fixture in ("Монтаж розетки", "Монтаж светильника", "Сантехнические работы"):
+        assert fixture in labor, f"монтаж приборов «{fixture}» должен остаться в finish_only"
+        assert labor[fixture]["stage"] == "finish"
+
+    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+        assert rough not in labor, f"черновая работа «{rough}» не должна попасть в finish_only"
+
+
 def test_rough_scope_adds_rough_works():
     """scope=rough_and_finish: черновые работы санузла попадают в смету со стадией rough (#190)."""
     response = client.post("/api/estimates/calculate",
@@ -685,6 +709,61 @@ def test_rough_only_bathroom_keeps_waterproof_no_tile():
 
     names = {m["name"] for m in data["materials"]}
     assert not ({"Плитка", "Плиточный клей", "Затирка"} & names)
+
+
+WALLPAPER_PAYLOAD = {
+    "city": "Казань",
+    "rooms": [
+        {
+            "name": "Комната",
+            "height": 2.7,
+            "points": [
+                {"x": 0, "y": 0}, {"x": 4, "y": 0},
+                {"x": 4, "y": 3}, {"x": 0, "y": 3}
+            ],
+            "room_type": "living",
+            "openings": [],
+            "works": W(walls="wallpaper")
+        }
+    ]
+}
+
+
+def test_wallpaper_adds_wall_prep_materials():
+    """walls=wallpaper: под обои считаются грунт и стартовая шпаклёвка, финишная — нет (#325)."""
+    response = client.post("/api/estimates/calculate", json=WALLPAPER_PAYLOAD)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "finish_only"
+
+    materials = {m["name"]: m for m in data["materials"]}
+    for name in ("Грунтовка", "Шпаклевка стартовая", "Обои"):
+        assert name in materials, f"нет материала «{name}» под обои"
+
+    # Финишная шпаклёвка под обои избыточна — полотно скрывает огрехи (#325).
+    assert "Шпаклевка финишная" not in materials
+
+    # wall_area = (4+3)*2*2.7 = 37.8 (проёмов нет)
+    wall_area = data["geometry"]["wall_area"]
+    assert wall_area == pytest.approx(37.8, 0.01)
+
+    primer = materials["Грунтовка"]
+    assert primer["base_quantity"] == pytest.approx(wall_area * 0.12, rel=0.01)
+
+    putty_start = materials["Шпаклевка стартовая"]
+    assert putty_start["base_quantity"] == pytest.approx(wall_area * 5.0, rel=0.01)
+
+
+def test_wallpaper_rough_only_keeps_prep_drops_wallpaper():
+    """scope=rough_only под обои: грунт/стартовая шпаклёвка остаются, сами обои — нет (#325)."""
+    response = client.post("/api/estimates/calculate",
+                           json={**WALLPAPER_PAYLOAD, "scope": "rough_only"})
+    assert response.status_code == 200
+    data = response.json()
+
+    names = {m["name"] for m in data["materials"]}
+    assert {"Грунтовка", "Шпаклевка стартовая"} <= names
+    assert "Обои" not in names
 
 
 def test_hidden_works_block_present_and_not_in_summary():

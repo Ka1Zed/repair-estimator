@@ -109,6 +109,10 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any], tier: str)
         sel.append((M_PUTTY, wall_area))         # финишная шпаклёвка
         sel.append((M_PAINT_WALLS if walls == "paint" else M_PAINT_MOIST, wall_area))  # 2 слоя
     elif walls == "wallpaper":
+        # Обои тоже требуют выравнивания основания (#325), но без финишной
+        # шпаклёвки — мелкие огрехи полотно скрывает само.
+        sel.append((M_PRIMER, wall_area))        # грунтовка, 1 слой
+        sel.append((M_PUTTY_START, wall_area))   # стартовая шпаклёвка (выравнивание)
         sel.append((M_WALLPAPER, wall_area))
 
     # --- потолок ---

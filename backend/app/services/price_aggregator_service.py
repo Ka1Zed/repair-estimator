@@ -129,12 +129,18 @@ def get_price(
                         f"'{material_name}' — fallback на seed (parser=0/empty)"
                     )
                 elif source:
+                    # package_size (#306) — фасовка конкретного товара за
+                    # source_url, а не справочная Material.package_size.
+                    package_size = (
+                        float(parsed.package_size) if parsed.package_size is not None else None
+                    )
                     if price_entry:
                         # Обновляем
                         price_entry.price_min = parsed.price_min
                         price_entry.price_avg = parsed.price_avg
                         price_entry.price_max = parsed.price_max
                         price_entry.source_url = parsed.source_url
+                        price_entry.package_size = package_size
                         price_entry.updated_at = datetime.now(timezone.utc)
                     else:
                         # Создаем новую
@@ -145,6 +151,7 @@ def get_price(
                             price_avg=parsed.price_avg,
                             price_max=parsed.price_max,
                             source_url=parsed.source_url,
+                            package_size=package_size,
                             updated_at=datetime.now(timezone.utc)
                         )
                         session.add(price_entry)
@@ -372,7 +379,14 @@ def update_labor_price(service_name: str, parser, db: Session, region: str | Non
     price.source_url = parsed.source_url
     price.updated_at = datetime.now(timezone.utc)
 
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        # Без rollback транзакция остаётся aborted, и все последующие запросы по
+        # общей сессии падают с InFailedSqlTransaction. Откатываем и пробрасываем
+        # настоящую ошибку вызывающему (он залогирует и пойдёт дальше по чистой сессии).
+        session.rollback()
+        raise
     session.refresh(price)
     logger.info(f"Цена услуги '{service_name}' обновлена от {parser.source_name}")
     return price

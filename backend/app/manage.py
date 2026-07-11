@@ -57,7 +57,10 @@ def update_prices():
                                 logger.warning(f"  ✗ {name}: цена не найдена (нет в БД)")
                                 failed += 1
                         except Exception as e:
-                            # агрегатор и так глотает ошибки парсера, но на всякий случай
+                            # агрегатор и так глотает ошибки парсера, но на всякий случай.
+                            # rollback — чтобы упавший commit не оставил сессию aborted
+                            # и не поронил остальные позиции InFailedSqlTransaction.
+                            db.rollback()
                             logger.error(f"  ✗ {name}: непредвиденная ошибка — {e}")
                             failed += 1
                 finally:
@@ -77,6 +80,7 @@ def update_prices():
                     logger.warning(f"  ✗ {service}: не обновлено (fallback на seed)")
                     failed += 1
             except Exception as e:
+                db.rollback()
                 logger.error(f"  ✗ {service}: {e}")
                 failed += 1
 
@@ -101,6 +105,7 @@ def update_prices():
                         )
                         failed += 1
                 except Exception as e:
+                    db.rollback()
                     logger.error(f"  ✗ {service} [{labor_parser.region}]: {e}")
                     failed += 1
     finally:

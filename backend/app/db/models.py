@@ -62,6 +62,12 @@ class MaterialPrice(Base):
     # Ссылка на карточку/категорию товара у источника. Заполняет парсер;
     # для seed-цен NULL (показать «нет ссылки» / не делать ссылку на фронте).
     source_url: Mapped[str | None]
+    # Фасовка КОНКРЕТНОГО товара за source_url (#306) — не справочная
+    # Material.package_size, а то, что парсер реально извлёк у этого товара
+    # (объём/вес из названия, длина рейки, соотношение блоков цены). NULL для
+    # seed/manual и когда парсер не смог её распознать — расчёт откатывается
+    # на статичный Material.package_size (см. estimates.py).
+    package_size: Mapped[float | None]
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 

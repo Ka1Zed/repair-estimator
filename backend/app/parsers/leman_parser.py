@@ -208,6 +208,26 @@ def _select_price(candidates: list[tuple[Decimal, str]], spec: UnitSpec) -> Deci
     return None
 
 
+def _select_package_size(
+    candidates: list[tuple[Decimal, str]], spec: UnitSpec, base_price: Decimal
+) -> Decimal | None:
+    # Карточка Лемана держит до двух ценовых блоков: тот, что совпал с
+    # ожидаемой единицей (base_price — уже выбран в _select_price выше), и,
+    # если карточка его показывает, второй — цена за упаковку/коробку целиком
+    # ("2 232 ₽/шт.", "1 295 ₽/кор."). У краски/шпаклёвки/грунтовки/клея это
+    # ВТОРОЙ блок относительно unitprice, у плитки/ламината — наоборот
+    # (unitprice там и есть цена за коробку, см. #319 в docs/price-sources.md),
+    # но формула не зависит от того, какой блок какой: package_size = цена
+    # упаковки / цена базовой единицы. Берём первый кандидат с ДРУГОЙ единицей —
+    # у Лемана на карточке их максимум два, так что это однозначно "второй" блок.
+    if base_price <= 0:
+        return None
+    for price, unit in candidates:
+        if unit not in spec.accepted:
+            return price / base_price
+    return None
+
+
 class LemanParser(BaseParser):
     source_name = "Леман"
 
@@ -252,7 +272,7 @@ class LemanParser(BaseParser):
         base_urls = CATEGORY_MAP[material_name]
         fetch_pages = self._session.fetch_pages if self._session is not None else leman_browser.fetch_pages
 
-        items: list[tuple[Decimal, str | None, str | None]] = []
+        items: list[tuple[Decimal, str | None, str | None, Decimal | None]] = []
         seen_ids: set[str] = set()
         any_pages_loaded = False
 
@@ -284,9 +304,15 @@ class LemanParser(BaseParser):
                         length_m = _length_m_from_title(name)
                         if not length_m:
                             continue
+                        # Длина рейки — она же и есть package_size (м на упаковку).
+                        package_size = length_m
                         price = price / length_m
+                    else:
+                        # package_size (#306) — фасовка ЭТОГО товара, если карточка
+                        # показывает второй ценовой блок (см. _select_package_size).
+                        package_size = _select_package_size(candidates, spec, price)
 
-                    new_items.append((price, url, name))
+                    new_items.append((price, url, name, package_size))
 
                 items.extend(new_items)
                 logger.info(f"  Леман '{material_name}' {base_url} стр.{page_num}: +{len(new_items)} цен")
@@ -317,13 +343,16 @@ class LemanParser(BaseParser):
                 f"{raw_count - len(items)} из {raw_count}"
             )
 
-        all_prices = [price for price, _, _ in items]
+        all_prices = [price for price, _, _, _ in items]
         price_min = min(all_prices)
         price_max = max(all_prices)
         price_avg = Decimal(round(statistics.mean(all_prices)))
 
+        # package_size берём у ТОГО ЖЕ товара-представителя (#306) — иначе
+        # фасовка в смете и фасовка на странице source_url могут не совпадать.
         representative = min(items, key=lambda it: abs(it[0] - price_avg))
         source_url = representative[1] or base_urls[0]
+        package_size = representative[3]
 
         logger.info(
             f"Леман: '{material_name}' — всего {len(all_prices)} цен, "
@@ -335,4 +364,5 @@ class LemanParser(BaseParser):
             price_avg=price_avg,
             price_max=price_max,
             source_url=source_url,
+            package_size=package_size,
         )

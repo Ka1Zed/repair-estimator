@@ -611,6 +611,30 @@ def test_finish_only_is_default_and_labeled():
     assert all("stage" in lab for lab in data["labor"])
 
 
+def test_finish_only_keeps_engineering_wiring():
+    """scope=finish_only + электрика/сантехника включены: разводка (Прокладка кабеля,
+    Монтаж труб, stage=rough) остаётся — она не входит в «жёсткие связки», которыми
+    управляет scope (#304). Монтаж приборов (finish) при этом тоже присутствует —
+    в finish_only чистовая отделка не исключается, исключаются только черновые."""
+    response = client.post("/api/estimates/calculate", json=_bathroom_payload())
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "finish_only"
+
+    labor = {x["service"]: x for x in data["labor"]}
+    for wiring in ("Прокладка кабеля", "Монтаж труб"):
+        assert wiring in labor, f"разводка «{wiring}» должна остаться в finish_only"
+        assert labor[wiring]["stage"] == "rough"
+        assert labor[wiring]["total_avg"] > 0
+
+    for fixture in ("Монтаж розетки", "Монтаж светильника", "Сантехнические работы"):
+        assert fixture in labor, f"монтаж приборов «{fixture}» должен остаться в finish_only"
+        assert labor[fixture]["stage"] == "finish"
+
+    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+        assert rough not in labor, f"черновая работа «{rough}» не должна попасть в finish_only"
+
+
 def test_rough_scope_adds_rough_works():
     """scope=rough_and_finish: черновые работы санузла попадают в смету со стадией rough (#190)."""
     response = client.post("/api/estimates/calculate",

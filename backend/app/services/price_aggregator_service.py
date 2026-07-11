@@ -2,6 +2,7 @@ import logging
 import statistics
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,16 @@ from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_price(price: Decimal, pack_size: Optional[Decimal]) -> Decimal:
+    """
+    Нормирует цену к единице измерения материала (л, кг, м², шт).
+    Если pack_size задан (количество единиц в упаковке), цена делится на pack_size.
+    Иначе цена считается уже за единицу.
+    """
+    if pack_size and pack_size > 0:
+        return price / pack_size
+    return price
 
 def _is_fresh(updated_at: datetime | None, ttl_hours: int) -> bool:
     '''Цена считается актуальной, если её обновляли позже, чем ttl_hours назад.'''

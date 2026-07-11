@@ -369,6 +369,33 @@ def test_fetch_price_excludes_outliers_from_spread_and_source(monkeypatch):
     assert "designer" not in (parsed.source_url or "")
 
 
+def test_fetch_price_economy_and_premium_return_different_products(monkeypatch):
+    """#331: 'Краска для стен эконом'/'премиум' берут нижнюю/верхнюю треть цен той
+    же категории (price_band в MATERIAL_UNITS) — разные товары, не только цена."""
+    def _paint(href, unitprice):
+        return _item(href, price="1", price_unit="шт.", unitprice=unitprice, unitprice_unit="л")
+
+    html = _page(
+        _paint("/product/paint-a/", "400"),
+        _paint("/product/paint-b/", "500"),
+        _paint("/product/paint-c/", "600"),
+        _paint("/product/paint-d/", "700"),
+        _paint("/product/paint-e/", "800"),
+        _paint("/product/paint-f/", "900"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    economy = LemanParser().fetch_price("Краска для стен эконом")
+    premium = LemanParser().fetch_price("Краска для стен премиум")
+    standard = LemanParser().fetch_price("Краска для стен")
+
+    assert economy.price_max <= Decimal("500")
+    assert premium.price_min >= Decimal("800")
+    assert economy.source_url != premium.source_url
+    assert standard.price_min == Decimal("400")
+    assert standard.price_max == Decimal("900")
+
+
 def test_fetch_price_excludes_irrelevant_subtypes_by_name(monkeypatch):
     # Пробник за 30 ₽ и колеровочная паста — семантический мусор, который роняет
     # min и перекашивает вилку. Отсекаются по имени до статистики: min уже не 30.

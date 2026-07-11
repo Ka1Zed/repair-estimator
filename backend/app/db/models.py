@@ -36,6 +36,13 @@ class Material(Base):
     # Надбавка на подгонку рисунка (раппорт) — применяется только при
     # repair_options.wallpaper_pattern; NULL = без надбавки (см. #278).
     pattern_factor: Mapped[float | None]
+    # Позиция отделки (#331): "floor.laminate", "walls.paint" и т.д. — несколько
+    # Material с одним finish_key являются вариантами разного уровня комплектации
+    # одной и той же позиции. NULL = обычный материал без вариантов (см.
+    # material_calc_service._resolve_material).
+    finish_key: Mapped[str | None]
+    # Уровень варианта (min/avg/max), осмыслен только вместе с finish_key.
+    variant_tier: Mapped[str | None]
 
 
 class LaborService(Base):

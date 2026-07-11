@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.parsers import headless_session
-from app.parsers._stats import filter_outliers
+from app.parsers._stats import filter_outliers, price_band_slice
 from app.parsers.base import BaseParser, ParsedPrice, DEFAULT_HEADERS, DEFAULT_REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,11 @@ class MaterialCategory:
     # Плинтус — особый разбор: размерный блок "72х2500мм" в названии, а не
     # "число+кг/л" — длина рейки берётся отдельной функцией (_length_m_from_title).
     normalize_length_mm: bool = False
+    # Вариант по уровню комплектации (#331): "low"/"high" — нижняя/верхняя
+    # треть цен категории (см. price_band_slice), None — вся категория как
+    # раньше (стандарт/avg). Сайт не даёт facet «бренд/класс» вне краски —
+    # это приближение, а не курированный список брендов (docs/price-sources.md).
+    price_band: str | None = None
 
 
 _SHPAKLEVKA = "https://kazan.megastroy.com/catalog/shpaklevka"
@@ -46,11 +51,27 @@ CATEGORY_MAP: dict[str, MaterialCategory] = {
         urls=("https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot",),
         title_unit="л",
     ),
+    # Варианты по уровню (#331) — та же категория, нижняя/верхняя треть цен
+    # (price_band, см. docs/price-sources.md).
+    "Краска для стен эконом": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot",),
+        title_unit="л", price_band="low",
+    ),
+    "Краска для стен премиум": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot",),
+        title_unit="л", price_band="high",
+    ),
     "Краска потолочная": MaterialCategory(
         urls=(
             "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot?field142[]=для потолков",
         ),
         title_unit="л",
+    ),
+    "Краска потолочная премиум": MaterialCategory(
+        urls=(
+            "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot?field142[]=для потолков",
+        ),
+        title_unit="л", price_band="high",
     ),
     "Шпаклевка стартовая": MaterialCategory(
         urls=(f"{_SHPAKLEVKA}?field206[]=для заделки щелей, выбоин, трещин",),
@@ -79,13 +100,43 @@ CATEGORY_MAP: dict[str, MaterialCategory] = {
         ),
         site_unit="м²",
     ),
+    "Плитка эконом": MaterialCategory(
+        urls=(
+            "https://kazan.megastroy.com/catalog/keramogranit",
+            "https://kazan.megastroy.com/catalog/keramicheskaya-plitka",
+        ),
+        site_unit="м²", price_band="low",
+    ),
+    "Плитка премиум": MaterialCategory(
+        urls=(
+            "https://kazan.megastroy.com/catalog/keramogranit",
+            "https://kazan.megastroy.com/catalog/keramicheskaya-plitka",
+        ),
+        site_unit="м²", price_band="high",
+    ),
     "Ламинат": MaterialCategory(
         urls=("https://kazan.megastroy.com/catalog/laminat",),
         site_unit="м²",
     ),
+    "Ламинат эконом": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/laminat",),
+        site_unit="м²", price_band="low",
+    ),
+    "Ламинат премиум": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/laminat",),
+        site_unit="м²", price_band="high",
+    ),
     "Обои": MaterialCategory(
         urls=("https://kazan.megastroy.com/catalog/dekorativnye-oboi",),
         site_unit="рулон",
+    ),
+    "Обои эконом": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/dekorativnye-oboi",),
+        site_unit="рулон", price_band="low",
+    ),
+    "Обои премиум": MaterialCategory(
+        urls=("https://kazan.megastroy.com/catalog/dekorativnye-oboi",),
+        site_unit="рулон", price_band="high",
     ),
     "Плинтус": MaterialCategory(
         urls=("https://kazan.megastroy.com/catalog/plintusy",),
@@ -333,6 +384,16 @@ class MegastroyParser(BaseParser):
             logger.info(
                 f"  Мегастрой '{material_name}': отброшено выбросов "
                 f"{raw_count - len(items)} из {raw_count}"
+            )
+
+        # Вариант по уровню комплектации (#331): нижняя/верхняя треть цен категории
+        # вместо всей выборки — см. price_band_slice и docs/price-sources.md.
+        if category.price_band:
+            band_count = len(items)
+            items = price_band_slice(items, category.price_band, key=lambda it: it[0])
+            logger.info(
+                f"  Мегастрой '{material_name}': price_band={category.price_band}, "
+                f"{len(items)} из {band_count} цен"
             )
 
         all_prices = [price for price, _, _ in items]

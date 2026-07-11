@@ -13,7 +13,7 @@ from decimal import Decimal
 import pytest
 
 from app.parsers import megastroy_parser
-from app.parsers._stats import filter_outliers
+from app.parsers._stats import filter_outliers, price_band_slice
 from app.parsers.megastroy_parser import (
     CATEGORY_MAP,
     MegastroyParser,
@@ -243,6 +243,44 @@ def test_fetch_price_excludes_outliers_from_spread_and_source(monkeypatch):
     assert parsed.price_max == Decimal("250")
     assert parsed.price_max / parsed.price_min < 4
     assert "designer" not in (parsed.source_url or "")
+
+
+def test_price_band_slice_takes_low_and_high_terciles():
+    items = _items("400", "500", "600", "700", "800", "900")
+    low = price_band_slice(items, "low", key=lambda it: it[0])
+    high = price_band_slice(items, "high", key=lambda it: it[0])
+    assert [p for p, _ in low] == [Decimal("400"), Decimal("500")]
+    assert [p for p, _ in high] == [Decimal("800"), Decimal("900")]
+    # avg/None — вся выборка без изменений (стандартный tier).
+    assert price_band_slice(items, None, key=lambda it: it[0]) == items
+    # На маленькой выборке треть выродилась бы в пустоту — не режем.
+    small = _items("100", "200")
+    assert price_band_slice(small, "low", key=lambda it: it[0]) == small
+
+
+def test_fetch_price_economy_and_premium_return_different_products(monkeypatch):
+    """#331: 'Ламинат эконом'/'Ламинат премиум' берут нижнюю/верхнюю треть цен той
+    же категории — разные товары (source_url), а не только разная цена."""
+    html = _page(
+        _item("400", "/catalog/x/lam-a", title="Ламинат А", unit="м²"),
+        _item("500", "/catalog/x/lam-b", title="Ламинат Б", unit="м²"),
+        _item("600", "/catalog/x/lam-c", title="Ламинат В", unit="м²"),
+        _item("700", "/catalog/x/lam-d", title="Ламинат Г", unit="м²"),
+        _item("800", "/catalog/x/lam-e", title="Ламинат Д", unit="м²"),
+        _item("900", "/catalog/x/lam-f", title="Ламинат Е", unit="м²"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    economy = MegastroyParser().fetch_price("Ламинат эконом")
+    premium = MegastroyParser().fetch_price("Ламинат премиум")
+    standard = MegastroyParser().fetch_price("Ламинат")
+
+    assert economy.price_max <= Decimal("500")
+    assert premium.price_min >= Decimal("800")
+    assert economy.source_url != premium.source_url
+    # Стандарт (без price_band) по-прежнему считает по всей категории.
+    assert standard.price_min == Decimal("400")
+    assert standard.price_max == Decimal("900")
 
 
 def test_unknown_material_raises():

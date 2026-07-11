@@ -1254,6 +1254,51 @@ def test_material_tier_consistency():
     assert paint_avg["price_min"] < paint_avg["price_avg"] < paint_avg["price_max"]
 
 
+def test_material_tier_selects_different_sku():
+    """#331: tier=min/max на floor.laminate отдают РАЗНЫЕ товары (name/source_url/
+    package_size), а не одну цену с разбросом (в отличие от #327/#293-интерима)."""
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Спальня",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}
+                ],
+                "room_type": "living",
+                "openings": [{"type": "door", "width": 0.8, "height": 2.0}],
+                "works": {
+                    "floor": {"enabled": True, "finish": "laminate"},
+                    "walls": {"enabled": False, "finish": None},
+                    "ceiling": {"enabled": False, "finish": None},
+                    "electric": {"enabled": False},
+                    "plumbing": {"enabled": False},
+                }
+            }
+        ],
+    }
+
+    def _laminate_row(tier):
+        resp = client.post("/api/estimates/calculate", json={**payload, "tier": tier})
+        assert resp.status_code == 200
+        materials = resp.json()["materials"]
+        return next(m for m in materials if m["unit"] == "м²")
+
+    row_min = _laminate_row("min")
+    row_avg = _laminate_row("avg")
+    row_max = _laminate_row("max")
+
+    assert row_min["name"] == "Ламинат эконом"
+    assert row_avg["name"] == "Ламинат"
+    assert row_max["name"] == "Ламинат премиум"
+    # package_size различается по варианту → у quantity/packs тоже другое число,
+    # не только цена (как проверить из issue #331).
+    assert row_min["package_size"] == 1.5
+    assert row_max["package_size"] == 2.5
+    assert row_min["packs"] != row_max["packs"]
+
+
 def test_missing_price_handled_gracefully(monkeypatch):
     """Проверка, что при отсутствии цены у материала (get_price возвращает None)
     ответ остаётся 200, строка присутствует со source='нет цены' и все ценовые поля = 0.

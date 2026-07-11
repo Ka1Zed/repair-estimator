@@ -60,6 +60,29 @@ MATERIAL_UNITS: dict[str, UnitSpec] = {
     "Обои эконом": UnitSpec(frozenset({"шт."}), price_band="low"),
     "Обои премиум": UnitSpec(frozenset({"шт."}), price_band="high"),
     "Плинтус": UnitSpec(frozenset({"шт."}), normalize_length=True),
+    # #335: розетка продаётся штучно, витринная единица "шт." и есть цена за
+    # штуку — как у обоев (per-roll), нормализация не нужна.
+    "Розетка": UnitSpec(frozenset({"шт."})),
+    "Розетка эконом": UnitSpec(frozenset({"шт."}), price_band="low"),
+    # #335: как плитка/ламинат — основной блок уже "₽/м²" (см. _PACKAGE_UNITS
+    # выше про то, почему вторичный блок "₽/пог.м" не идёт в package_size).
+    "Линолеум": UnitSpec(frozenset({"м²"})),
+    # #335: у паркета вторичный блок — "₽/кор." (как у плитки/ламината), не
+    # "₽/пог.м" — package_size считается штатно.
+    "Паркетная доска": UnitSpec(frozenset({"м²"})),
+    # #335: точечные светильники (споты) — цена "₽/шт" как есть, как у обоев.
+    "Светильник": UnitSpec(frozenset({"шт."})),
+    # #335: кабель — карточка бухты САМА даёт вторичный normализованный блок
+    # "₽/м" (как у краски "₽/л") — доп. парсинг длины из названия не нужен, в
+    # отличие от Мегастроя (там такого блока нет). У "на отрез"-товаров
+    # основной блок и так уже "₽/м". package_size = длина бухты в метрах —
+    # осмысленная фасовка (в отличие от "пог.м" у линолеума, тут единица
+    # вторичного блока "шт." — целая бухта, есть в _PACKAGE_UNITS).
+    "Кабель электрический": UnitSpec(frozenset({"м"})),
+    # #335: труба продаётся штукой фиксированной длины (обычно 2 м), карточка
+    # даёт только один блок "₽/шт." (в отличие от кабеля — вторичного "₽/м" нет)
+    # — как у плинтуса, длина в конце названия ("...2 м").
+    "Труба водопроводная": UnitSpec(frozenset({"шт."}), normalize_length=True),
 }
 
 # Карта: материал в БД -> URL категории, сужённый фасетами (#319, #277). Общая
@@ -111,6 +134,35 @@ CATEGORY_MAP: dict[str, tuple[str, ...]] = {
     "Обои эконом": (f"https://kazan.lemanapro.ru/catalogue/dekorativnye-oboi/?{_IN_STOCK_KAZAN}",),
     "Обои премиум": (f"https://kazan.lemanapro.ru/catalogue/dekorativnye-oboi/?{_IN_STOCK_KAZAN}",),
     "Плинтус": (f"https://kazan.lemanapro.ru/catalogue/napolnye-plintusy/?{_IN_STOCK_KAZAN}",),
+    # #335: 22088=Розетка — facet "Тип продукта" внутри уже предфильтрованной по
+    # монтажу категории (rozetki-i-vyklyuchateli-skrytye — аналог field846[]=
+    # скрытая проводка у Мегастроя), исключает выключатели/рамки/диммеры и
+    # RJ45/RTV/USB/ТВ/телефонные розетки (слаботочка).
+    "Розетка": (f"https://kazan.lemanapro.ru/catalogue/rozetki-i-vyklyuchateli-skrytye/?22088=Розетка&{_IN_STOCK_KAZAN}",),
+    "Розетка эконом": (f"https://kazan.lemanapro.ru/catalogue/rozetki-i-vyklyuchateli-skrytye/?22088=Розетка&{_IN_STOCK_KAZAN}",),
+    "Линолеум": (f"https://kazan.lemanapro.ru/catalogue/linoleum/?24700=Бытовой&{_IN_STOCK_KAZAN}",),
+    # #335: инженерная доска (типовая для квартиры, не массив/трёхполосная/
+    # ёлочка) — вся категория "только онлайн-заказ" (нет в наличии ни в одном
+    # казанском магазине), поэтому без _IN_STOCK_KAZAN — с ним выборка была бы
+    # пустой. Мегастрой паркет вообще не продаёт в Казани (нет такой категории
+    # в каталоге) — CATEGORY_MAP там не заводим, известный пробел (см.
+    # docs/price-sources.md).
+    "Паркетная доска": ("https://kazan.lemanapro.ru/catalogue/parketnaya-doska/inzhenernaya/",),
+    "Светильник": (f"https://kazan.lemanapro.ru/catalogue/tochechnye-svetilniki/?{_IN_STOCK_KAZAN}",),
+    # #335: 15070= — тип кабеля, ВВГнг(А)-LS/ВВГпнг(A)-LS (стандарт для скрытой
+    # проводки в квартире, тот же выбор, что и "ВВГ" у Мегастроя). Кириллица/
+    # латиница "А"/"A" в значениях — не опечатка, это два разных facet-значения
+    # сайта (сверено вживую), нормализовать нельзя — сломает фильтр.
+    "Кабель электрический": (
+        f"https://kazan.lemanapro.ru/catalogue/silovye-kabeli/"
+        f"?15070=ВВГнг(А)-LS_ВВГпнг(A)-LS&{_IN_STOCK_KAZAN}",
+    ),
+    # #335: 22088= — тип продукта "Труба полипропиленовая", сужает от общей
+    # категории (трубы+фитинги) до собственно труб (45 позиций).
+    "Труба водопроводная": (
+        f"https://kazan.lemanapro.ru/catalogue/polipropilenovye-truby-i-fitingi/"
+        f"?22088=Труба полипропиленовая&{_IN_STOCK_KAZAN}",
+    ),
 }
 
 # Обходим не всю выдачу: после ~15-й страницы у Лемана идут серые/нерелевантные
@@ -242,6 +294,16 @@ def _select_price(candidates: list[tuple[Decimal, str]], spec: UnitSpec) -> Deci
     return None
 
 
+# Единицы вторичного ценового блока, которые реально означают "цена за
+# упаковку/тару целиком" (банка/мешок/коробка) — из них законно выводить
+# package_size делением на цену базовой единицы. Другие "не свои" единицы не
+# считаются package_size: у линолеума (#335) вторичный блок — "₽/пог.м" (цена
+# за погонный метр рулона), а отношение его к "₽/м²" — это ШИРИНА рулона в
+# метрах, а не фасовка; слепое деление (как было раньше) протащило бы ширину
+# рулона в package_size и сломало бы округление площади в смете.
+_PACKAGE_UNITS = frozenset({"шт.", "кор.", "уп."})
+
+
 def _select_package_size(
     candidates: list[tuple[Decimal, str]], spec: UnitSpec, base_price: Decimal
 ) -> Decimal | None:
@@ -252,12 +314,12 @@ def _select_package_size(
     # ВТОРОЙ блок относительно unitprice, у плитки/ламината — наоборот
     # (unitprice там и есть цена за коробку, см. #319 в docs/price-sources.md),
     # но формула не зависит от того, какой блок какой: package_size = цена
-    # упаковки / цена базовой единицы. Берём первый кандидат с ДРУГОЙ единицей —
-    # у Лемана на карточке их максимум два, так что это однозначно "второй" блок.
+    # упаковки / цена базовой единицы. Берём первый кандидат с ДРУГОЙ единицей,
+    # но только если она из _PACKAGE_UNITS (см. выше) — иначе не считаем.
     if base_price <= 0:
         return None
     for price, unit in candidates:
-        if unit not in spec.accepted:
+        if unit not in spec.accepted and unit in _PACKAGE_UNITS:
             return price / base_price
     return None
 

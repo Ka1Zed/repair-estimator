@@ -1,10 +1,14 @@
 # app/tests/test_regional_prices.py
 # Региональные цены с привязкой к region (#127).
 
+from decimal import Decimal
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.api.estimates import get_material_parsers
+from app.parsers.base import BaseParser, ParsedPrice
 from app.services.price_aggregator_service import get_price, get_labor_price
 
 client = TestClient(app)
@@ -113,3 +117,73 @@ def test_estimate_item_reports_actual_region():
     assert paint_msk["region"] == "Москва"
     # Для города без своих цен сработал fallback на базовую → region == null, а не "Тверь".
     assert paint_other["region"] is None
+
+
+# --- сквозной выбор регионального источника материалов (#345) ---
+# Проверяем проводку эндпоинта целиком: get_material_parsers отдаёт региональные
+# парсеры, а get_material_price/_select_regional_parsers исключает безрегиональный
+# Мегастрой для города с выделенным источником (Леман-Москва) и объединяет оба
+# источника для города без такого (Казань). Юнит-уровень покрыт в
+# test_price_normalization.py — здесь то же поведение, но через реальный
+# /api/estimates, а не только в сервисе.
+
+
+class _StubRegionalParser(BaseParser):
+    """Локальная заглушка парсера материалов: отдаёт фиксированную parser-цену,
+    в сеть не ходит. Параметризуется source_name/region/covered_cities под
+    конкретный сценарий (мимикрия под MATERIAL_PARSERS + REGIONAL_MATERIAL_PARSERS)."""
+
+    def __init__(self, source_name, avg, *, region=None, covered_cities=None):
+        self.source_name = source_name
+        self.region = region
+        self.covered_cities = covered_cities
+        self._avg = Decimal(avg)
+
+    def fetch_price(self, material_name: str) -> ParsedPrice:
+        return ParsedPrice(
+            price_min=self._avg - 20,
+            price_avg=self._avg,
+            price_max=self._avg + 20,
+            source_url=f"https://example/{self.source_name}",
+        )
+
+
+@pytest.fixture
+def regional_material_parsers(override_get_db):
+    """get_material_parsers → Мегастрой (без региона) + базовый Леман (Казань,
+    без региона) + Леман-Москва (covered_cities={'Москва'}) — как в реальном
+    registry. Чистит осевшие parser-цены до и после, чтобы TTL-кэш не протекал
+    между тестами (общая тест-БД)."""
+    from app.tests.conftest import _clear_parser_material_prices
+
+    _clear_parser_material_prices()
+    app.dependency_overrides[get_material_parsers] = lambda: [
+        _StubRegionalParser("Мегастрой", "100"),
+        _StubRegionalParser("Леман", "300"),
+        _StubRegionalParser("Леман", "250", region="Москва", covered_cities=frozenset({"Москва"})),
+    ]
+    yield
+    app.dependency_overrides.pop(get_material_parsers, None)
+    _clear_parser_material_prices()
+
+
+def test_moscow_estimate_uses_only_regional_leman(regional_material_parsers):
+    """Москва: в вилку идёт только Леман-Москва; Мегастрой (физически вне Москвы,
+    без covered_cities) и базовый Леман-Казань исключены, region строки == 'Москва'."""
+    body = client.post("/api/estimates/calculate", json=_payload("Москва")).json()
+    paint = next(m for m in body["materials"] if m["name"] == "Краска для стен")
+
+    assert paint["sources"] == ["Леман"]
+    assert paint["region"] == "Москва"
+    assert paint["price_avg"] == 250.0
+
+
+def test_kazan_estimate_combines_default_sources(regional_material_parsers):
+    """Казань: covered_cities ни у кого не совпал → участвуют оба безрегиональных
+    источника (Мегастрой + базовый Леман), региональный Леман-Москва не подмешан,
+    region строки == null (как раньше)."""
+    body = client.post("/api/estimates/calculate", json=_payload("Казань")).json()
+    paint = next(m for m in body["materials"] if m["name"] == "Краска для стен")
+
+    assert set(paint["sources"]) == {"Мегастрой", "Леман"}
+    assert paint["region"] is None

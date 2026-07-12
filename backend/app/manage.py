@@ -6,7 +6,12 @@ from contextlib import nullcontext
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.parsers.labor_table_parser import LABOR_SERVICE_MAP
-from app.parsers.registry import BASE_LABOR_PARSER, MATERIAL_PARSERS, REGIONAL_LABOR_PARSERS
+from app.parsers.registry import (
+    BASE_LABOR_PARSER,
+    MATERIAL_PARSERS,
+    REGIONAL_LABOR_PARSERS,
+    REGIONAL_MATERIAL_PARSERS,
+)
 from app.services.price_aggregator_service import get_price, update_labor_price
 
 # Настройка логирования — чтобы видеть прогресс в консоли
@@ -42,11 +47,15 @@ def update_prices():
     try:
         # Материалы: каждый зарегистрированный парсер обрабатывает свой список
         # (parser.known_materials()) — добавление нового источника (напр. Леман,
-        # #276) не требует правок этой функции, только app/parsers/registry.py.
-        for parser in MATERIAL_PARSERS:
+        # #276) или региона (#345, REGIONAL_MATERIAL_PARSERS — Леман для
+        # Москвы/СПб) не требует правок этой функции, только
+        # app/parsers/registry.py. get_price сам адресует кэш по region
+        # инстанса (parser.region), region в вызов ниже передавать не нужно.
+        for parser in MATERIAL_PARSERS + REGIONAL_MATERIAL_PARSERS:
             material_names = parser.known_materials()
+            region_suffix = f" [{parser.region}]" if parser.region else ""
             logger.info(
-                f"Обновление цен материалов ({parser.source_name}): "
+                f"Обновление цен материалов ({parser.source_name}{region_suffix}): "
                 f"{len(material_names)} позиций"
             )
             # Браузерные парсеры (Леман) умеют отдать общую сессию — один Chrome
@@ -62,17 +71,17 @@ def update_prices():
                         try:
                             price = get_price(name, db=db, parser=parser, force_refresh=True)
                             if price:
-                                logger.info(f"  ✓ {name}: avg={price.price_avg}")
+                                logger.info(f"  ✓ {name}{region_suffix}: avg={price.price_avg}")
                                 success += 1
                             else:
-                                logger.warning(f"  ✗ {name}: цена не найдена (нет в БД)")
+                                logger.warning(f"  ✗ {name}{region_suffix}: цена не найдена (нет в БД)")
                                 failed += 1
                         except Exception as e:
                             # агрегатор и так глотает ошибки парсера, но на всякий случай.
                             # rollback — чтобы упавший commit не оставил сессию aborted
                             # и не поронил остальные позиции InFailedSqlTransaction.
                             db.rollback()
-                            logger.error(f"  ✗ {name}: непредвиденная ошибка — {e}")
+                            logger.error(f"  ✗ {name}{region_suffix}: непредвиденная ошибка — {e}")
                             failed += 1
                 finally:
                     if hasattr(parser, "set_session"):

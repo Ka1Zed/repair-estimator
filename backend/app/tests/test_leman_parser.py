@@ -20,6 +20,8 @@ import pytest
 from app.parsers import leman_browser, leman_parser
 from app.parsers.leman_parser import (
     CATEGORY_MAP,
+    LEMAN_MOSCOW,
+    LEMAN_SPB,
     LemanParser,
     _length_m_from_title,
     _parse_page,
@@ -836,3 +838,54 @@ def test_fetch_price_uses_injected_session_instead_of_module_fetch_pages(monkeyp
     parsed = parser.fetch_price("Краска для стен")
 
     assert parsed.price_avg == Decimal("200")
+
+
+# --- Региональные инстансы (#345) ---
+# LEMAN_MOSCOW/LEMAN_SPB — тот же класс/CATEGORY_MAP, домен и facet "в наличии"
+# подменяются на лету (_localize_url) вместо переписывания ~20 URL под каждый
+# город. Живого прогона здесь нет (только юнит-тесты на URL-строках) — реальный
+# ответ сайта для новых доменов не сверялся live в этой сессии.
+
+def test_default_leman_parser_urls_unchanged():
+    # Базовый инстанс (Казань) не должен отличаться от «сырого» CATEGORY_MAP —
+    # регионализация не должна задевать поведение единственного региона,
+    # который уже был в проде.
+    parser = LemanParser()
+    assert parser._category_urls("Краска для стен") == CATEGORY_MAP["Краска для стен"]
+
+
+def test_leman_moscow_localizes_domain_and_facet():
+    urls = LEMAN_MOSCOW._category_urls("Краска для стен")
+    assert len(urls) == 1
+    assert urls[0].startswith("https://lemanapro.ru/")
+    assert "kazan.lemanapro.ru" not in urls[0]
+    assert "eligibilityByStores=Киевское Шоссе_" in urls[0]
+    assert "Казань" not in urls[0]
+    # Прочие facet'ы категории (назначение "Стена") не задеваются подменой.
+    assert "00277=Стена" in urls[0]
+
+
+def test_leman_spb_localizes_domain_facet_and_appends_from_region():
+    urls = LEMAN_SPB._category_urls("Краска для стен")
+    assert len(urls) == 1
+    assert urls[0].startswith("https://spb.lemanapro.ru/")
+    assert "eligibilityByStores=Партизана Германа_" in urls[0]
+    assert urls[0].endswith("&fromRegion=34")
+
+
+def test_leman_moscow_localizes_url_without_facet():
+    # "Паркетная доска" — единственная категория без _IN_STOCK_KAZAN в URL (вся
+    # категория "только онлайн-заказ", см. CATEGORY_MAP) — регионализация не
+    # должна ничего туда подставлять, только сменить домен.
+    urls = LEMAN_MOSCOW._category_urls("Паркетная доска")
+    assert urls == ("https://lemanapro.ru/catalogue/parketnaya-doska/inzhenernaya/",)
+
+
+def test_regional_leman_instances_declare_region_and_covered_cities():
+    assert LEMAN_MOSCOW.region == "Москва"
+    assert LEMAN_MOSCOW.covered_cities == frozenset({"Москва"})
+    assert LEMAN_SPB.region == "Санкт-Петербург"
+    assert LEMAN_SPB.covered_cities == frozenset({"Санкт-Петербург"})
+    # Базовый инстанс (Казань) — без городской привязки, как раньше.
+    assert LemanParser().region is None
+    assert LemanParser().covered_cities is None

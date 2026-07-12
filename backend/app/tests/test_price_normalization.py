@@ -2,11 +2,14 @@
 
 import pytest
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from datetime import datetime, timezone
 
-from app.services.price_aggregator_service import get_price, get_material_price, _normalize_price
+from app.services.price_aggregator_service import (
+    get_price, get_material_price, _normalize_price, _select_regional_parsers,
+)
 from app.parsers.base import ParsedPrice
 from app.db.models import Material, MaterialPrice, PriceSource
 
@@ -53,6 +56,9 @@ class TestPriceNormalization:
 
         mock_parser = Mock()
         mock_parser.source_name = source_name
+        # region=None — источник без городской привязки (#345); Mock() без spec
+        # иначе подставил бы авто-атрибут вместо None и сломал бы кэш-lookup в get_price.
+        mock_parser.region = None
         mock_parser.fetch_price.return_value = ParsedPrice(
             price_min=Decimal(price_min),
             price_avg=Decimal(price_avg),
@@ -87,6 +93,7 @@ class TestPriceNormalization:
 
         mock_megastroy = Mock()
         mock_megastroy.source_name = "Мегастрой"
+        mock_megastroy.region = None  # #345 — см. комментарий выше про Mock() без spec
         mock_megastroy.fetch_price.return_value = ParsedPrice(
             price_min=Decimal('102'),
             price_avg=Decimal('120'),
@@ -96,6 +103,7 @@ class TestPriceNormalization:
 
         mock_leman = Mock()
         mock_leman.source_name = "Леман"
+        mock_leman.region = None  # #345 — см. комментарий выше про Mock() без spec
         mock_leman.fetch_price.return_value = ParsedPrice(
             price_min=Decimal('106'),
             price_avg=Decimal('125'),
@@ -145,11 +153,11 @@ class TestMaterialPriceCombination:
             db_session.commit()
         return src
 
-    def _insert_price(self, db_session, source_name, price_min, price_avg, price_max):
+    def _insert_price(self, db_session, source_name, price_min, price_avg, price_max, region=None):
         material = db_session.query(Material).filter(Material.name == self.MATERIAL).first()
         source = self._seed_source(db_session, source_name)
         row = MaterialPrice(
-            material_id=material.id, source_id=source.id,
+            material_id=material.id, source_id=source.id, region=region,
             price_min=Decimal(price_min), price_avg=Decimal(price_avg), price_max=Decimal(price_max),
             source_url=f"http://example-{source_name.lower()}.ru",
             updated_at=datetime.now(timezone.utc),
@@ -157,9 +165,14 @@ class TestMaterialPriceCombination:
         db_session.add(row)
         db_session.commit()
 
-    def _no_network_parser(self, source_name):
+    def _no_network_parser(self, source_name, *, region=None, covered_cities=None):
         parser = Mock()
         parser.source_name = source_name
+        # region/covered_cities=None по умолчанию — источник без городской
+        # привязки (#345); Mock() без spec иначе подставил бы авто-атрибут
+        # вместо None и сломал бы кэш-lookup в get_price/_select_regional_parsers.
+        parser.region = region
+        parser.covered_cities = covered_cities
         parser.fetch_price.side_effect = RuntimeError("сеть недоступна (тест герметичен)")
         return parser
 
@@ -221,3 +234,91 @@ class TestMaterialPriceCombination:
             assert getattr(price, "contributing_sources", None) is None
         finally:
             self._clear_parser_prices(db_session)
+
+    # --- Региональные источники материалов (#345) ---
+
+    def test_parser_cache_addressed_by_parser_own_region_not_by_request(self, db_session):
+        """Кэш парсера адресуется (материал, источник, region САМОГО парсера), не
+        аргументом region у get_price: Леман-Казань (region=None) и Леман-Москва
+        (region="Москва") — общий source_id "Леман", разные строки в кэше."""
+        self._clear_parser_prices(db_session)
+        try:
+            self._insert_price(db_session, "Леман", 100, 120, 150, region=None)
+            self._insert_price(db_session, "Леман", 200, 250, 300, region="Москва")
+
+            kazan = get_price(self.MATERIAL, db=db_session, parser=self._no_network_parser("Леман", region=None))
+            moscow = get_price(self.MATERIAL, db=db_session, parser=self._no_network_parser("Леман", region="Москва"))
+
+            assert kazan is not None and kazan.price_avg == Decimal("120") and kazan.region is None
+            assert moscow is not None and moscow.price_avg == Decimal("250") and moscow.region == "Москва"
+        finally:
+            self._clear_parser_prices(db_session)
+
+    def test_regional_source_excludes_default_sources_for_its_city(self, db_session):
+        """Город с выделенным региональным источником (Леман-Москва, covered_cities)
+        не должен получать в вилку цену источника без городской привязки (Мегастрой —
+        физически только Казань, #345) — тот вообще не должен вызываться для Москвы."""
+        self._clear_parser_prices(db_session)
+        try:
+            self._insert_price(db_session, "Мегастрой", 100, 120, 150, region=None)
+            self._insert_price(db_session, "Леман", 200, 250, 300, region="Москва")
+
+            price = get_material_price(
+                self.MATERIAL, db=db_session,
+                parsers=[
+                    self._no_network_parser("Мегастрой"),
+                    self._no_network_parser("Леман", region="Москва", covered_cities=frozenset({"Москва"})),
+                ],
+                region="Москва",
+            )
+
+            assert price is not None
+            assert price.contributing_sources == ["Леман"]
+            assert price.price_avg == Decimal("250")
+            assert price.region == "Москва"
+        finally:
+            self._clear_parser_prices(db_session)
+
+    def test_default_sources_used_when_no_regional_source_covers_city(self, db_session):
+        """Город без выделенного регионального источника (напр. Казань) — как раньше,
+        участвуют все источники без covered_cities (регресс не внесён, #345)."""
+        self._clear_parser_prices(db_session)
+        try:
+            self._insert_price(db_session, "Мегастрой", 100, 120, 150, region=None)
+            self._insert_price(db_session, "Леман", 200, 250, 300, region="Москва")
+
+            price = get_material_price(
+                self.MATERIAL, db=db_session,
+                parsers=[
+                    self._no_network_parser("Мегастрой"),
+                    self._no_network_parser("Леман", region="Москва", covered_cities=frozenset({"Москва"})),
+                ],
+                region="Казань",
+            )
+
+            assert price is not None
+            # Ни один covered_cities не совпал с "Казань" → берём только
+            # источники без городской привязки (только Мегастрой в этом наборе).
+            assert price.contributing_sources == ["Мегастрой"]
+            assert price.price_avg == Decimal("120")
+        finally:
+            self._clear_parser_prices(db_session)
+
+
+class TestSelectRegionalParsers:
+    """_select_regional_parsers (#345) в изоляции от БД/get_material_price."""
+
+    def test_uses_only_source_covering_requested_city(self):
+        base = SimpleNamespace(covered_cities=None)
+        moscow = SimpleNamespace(covered_cities=frozenset({"Москва"}))
+        assert _select_regional_parsers([base, moscow], "Москва") == [moscow]
+
+    def test_falls_back_to_uncovered_sources_when_no_source_matches_city(self):
+        base = SimpleNamespace(covered_cities=None)
+        moscow = SimpleNamespace(covered_cities=frozenset({"Москва"}))
+        assert _select_regional_parsers([base, moscow], "Казань") == [base]
+
+    def test_no_requested_city_falls_back_to_uncovered_sources(self):
+        base = SimpleNamespace(covered_cities=None)
+        moscow = SimpleNamespace(covered_cities=frozenset({"Москва"}))
+        assert _select_regional_parsers([base, moscow], None) == [base]

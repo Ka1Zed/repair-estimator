@@ -24,7 +24,7 @@ from app.services.repair_coeffs_service import CONTINGENCY
 from app.services.price_aggregator_service import get_material_price, get_labor_price
 from app.services.hidden_works_service import calculate_hidden_works
 from app.parsers.base import BaseParser
-from app.parsers.registry import MATERIAL_PARSERS
+from app.parsers.registry import MATERIAL_PARSERS, REGIONAL_MATERIAL_PARSERS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
@@ -34,11 +34,13 @@ def get_material_parsers() -> list[BaseParser]:
     '''Все зарегистрированные источники цен материалов для расчёта сметы.
 
     Вынесена в зависимость FastAPI, чтобы тесты могли подменить список заглушкой
-    (app.dependency_overrides) и не ходить в сеть. В проде — все парсеры из
-    app.parsers.registry.MATERIAL_PARSERS (Мегастрой, Леман, ...); объединение их
-    цен в одну вилку делает get_material_price (#333).
+    (app.dependency_overrides) и не ходить в сеть. В проде — базовые парсеры из
+    app.parsers.registry.MATERIAL_PARSERS (Мегастрой, Леман-Казань) плюс
+    региональные (#345, REGIONAL_MATERIAL_PARSERS — Леман для Москвы/СПб);
+    get_material_price сам выбирает, какие из них применимы к запрошенному
+    городу (_select_regional_parsers), и объединяет их цены в одну вилку (#333).
     '''
-    return MATERIAL_PARSERS
+    return MATERIAL_PARSERS + REGIONAL_MATERIAL_PARSERS
 
 # Дефолты инженерки, когда группа works включена, а число не задано (null).
 # Явный 0 остаётся 0 (осознанный ноль). База — пресеты по типу комнаты; для типа

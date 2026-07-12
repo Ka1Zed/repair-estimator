@@ -123,6 +123,15 @@ def seed_test_data(session):
         url="https://megastroy.com",
         last_checked=datetime.now(timezone.utc)
     )
+    # Второй источник материалов — Леман (Казань/Москва/СПб делят один source_id,
+    # цены разводятся по MaterialPrice.region, #345). Нужен, чтобы эндпоинт-тесты
+    # могли проверить объединение источников и выбор регионального парсера.
+    src_leman = PriceSource(
+        name="Леман",
+        type="parser",
+        url="https://lemanapro.ru",
+        last_checked=datetime.now(timezone.utc)
+    )
     # Источники региональных парсеров работ (#166).
     src_garant = PriceSource(
         name="garantstroikompleks.ru", type="parser",
@@ -146,6 +155,7 @@ def seed_test_data(session):
     )
     session.add(src)
     session.add(src_megastroy)
+    session.add(src_leman)
     session.add(src_garant)
     session.add(src_remont_uroven)
     session.add(src_otdelka)

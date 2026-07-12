@@ -9,10 +9,9 @@ import OpeningsForm from "../../components/OpeningsForm";
 import { RoomTypeSelector } from "../../components/RoomTypeSelector";
 import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
-import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
+import type { MaterialItem, PriceVariant, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
-import { EstimateLedger, type LedgerRow } from "../../components/EstimateLedger/EstimateLedger";
-
+import { EstimateLedger, type LedgerRow, type LedgerRowVariant } from "../../components/EstimateLedger/EstimateLedger";
 import { useProjectStore, type EstimateScope } from "../../store/projectStore";
 import { useBackendStatus } from "../../store/backendStatus";
 import { roomHasInvalidOpenings } from "../../utils/openingValidation";
@@ -49,8 +48,35 @@ const formatNum = (n: number) =>
 const formatQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
 
-// Регион, по которому реально взялась цена; null → базовая seed-цена (не зависит от города).
-const regionLabel = (region?: string | null) => region ?? "базовая цена";
+// Регион, по которому реально взялась цена; null → нерегиональный источник
+// (парсер отдаёт один и тот же каталог на все города, см. docs/price-sources.md).
+// Мегастрой и базовый Леман физически используют домен kazan.* при ЛЮБОМ выбранном
+// городе (проверено вживую: тот же source_url для Москвы/Новосибирска/Казани) —
+// подставлять "Казань" им всегда было бы неправдой. Честно можно показать город
+// только когда пользователь и правда выбрал Казань — тогда это совпадает с фактом.
+// "базовая цена" — только для настоящего seed-резерва (нет живого источника вообще).
+// Если источник — реальный парсер (Мегастрой/Леман), просто не привязанный к городу,
+// так его называть неверно: это не "запасной" вариант, а актуальная живая цена.
+const regionLabel = (
+  region: string | null | undefined,
+  sourceUrl: string | null | undefined,
+  selectedCity: string,
+  source: string,
+) => {
+  if (region) return region;
+  if (selectedCity === "Казань" && sourceUrl?.includes("kazan.")) return "Казань";
+  return source === "seed" ? "базовая цена" : "не привязан к городу";
+};
+
+// "company_price" — источник rembrigada116.ru (казанская компания), но так
+// исторически называется в БД (см. rembrigada_parser.py) — не показываем сырой
+// внутренний код клиенту.
+const LABOR_SOURCE_NAMES: Record<string, string> = { company_price: "rembrigada116.ru" };
+const laborSourceName = (source: string) => LABOR_SOURCE_NAMES[source] ?? source;
+
+// Резерв на непредвиденные (CONTINGENCY, backend/app/services/repair_coeffs_service.py),
+// уже включён в "Итог по позиции" — поэтому итог не равен цене за единицу × кол-во.
+const CONTINGENCY_PCT: Record<PriceMode, number> = { min: 10, avg: 12, max: 15 };
 
 export type PriceMode = "min" | "avg" | "max";
 
@@ -81,6 +107,35 @@ export function Workspace() {
   const [priceMode, setPriceMode] = useState<PriceMode>("avg");
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState(0);
+
+  // Точечное переопределение уровня для конкретного материала (индекс в data.materials)
+  // поверх глобального ползунка: выбрали "Минимум" глобально, но зажали конкретный
+  // товар на "Премиум" — держится, пока не пересчитаем смету или не кликнут ещё раз.
+  const [materialOverrides, setMaterialOverrides] = useState<Record<number, PriceMode>>({});
+  const toggleMaterialOverride = useCallback((index: number, mode: PriceMode) => {
+    setMaterialOverrides((prev) => {
+      if (prev[index] === mode) {
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      }
+      return { ...prev, [index]: mode };
+    });
+  }, []);
+
+  // То же самое для работ (индекс в data.labor): у работ нет альтернативного
+  // исполнителя по tier, только цена внутри коридора price_min/avg/max строки.
+  const [laborOverrides, setLaborOverrides] = useState<Record<number, PriceMode>>({});
+  const toggleLaborOverride = useCallback((index: number, mode: PriceMode) => {
+    setLaborOverrides((prev) => {
+      if (prev[index] === mode) {
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      }
+      return { ...prev, [index]: mode };
+    });
+  }, []);
 
   // Список городов для селектора. Если текущего города нет в ответе бэка,
   // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
@@ -158,9 +213,58 @@ export function Workspace() {
             works: room.works,
           })),
         };
-        const res = (await calculateEstimate(payload)) as EstimateResponse;
-        setData(res);
+        // Запрашиваем все три tier параллельно (#331): для 6 finish_key-позиций
+        // (ламинат, покраска стен/потолка, плитка, обои, розетка) tier меняет
+        // конкретный товар (name/source_url), не только цену. Геометрия/работы
+        // берутся из avg-ответа; материалы и «Вилка стоимости» материалов — из
+        // реальных min/max-tier сумм (иначе сводка ±15-20% коридора расходится
+        // с построчными итогами, которые теперь берут настоящие эконом/премиум SKU).
+        const [minRes, avgRes, maxRes] = (await Promise.all([
+          calculateEstimate({ ...payload, tier: "min" }),
+          calculateEstimate({ ...payload, tier: "avg" }),
+          calculateEstimate({ ...payload, tier: "max" }),
+        ])) as [EstimateResponse, EstimateResponse, EstimateResponse];
+
+        // ВАЖНО: price/total — цена именно ЭТОГО tier (backend/app/schemas/estimate.py).
+        // price_avg/total_avg — статичное среднее ВНУТРИ разрешённого товара, оно
+        // одинаковое во всех трёх ответах для не-finish_key материалов (тот же товар) —
+        // подставить его сюда значило бы показать одну и ту же цену на всех уровнях.
+        const toVariant = (m?: MaterialItem): PriceVariant | null =>
+          m
+            ? { name: m.name, price: m.price, total: m.total, source: m.source, source_url: m.source_url ?? null }
+            : null;
+
+        const sameLength =
+          avgRes.materials.length === minRes.materials.length &&
+          avgRes.materials.length === maxRes.materials.length;
+
+        const materials = sameLength
+          ? avgRes.materials.map((m, i) => ({
+              ...m,
+              min_item: toVariant(minRes.materials[i]),
+              avg_item: toVariant(avgRes.materials[i]),
+              max_item: toVariant(maxRes.materials[i]),
+            }))
+          : avgRes.materials;
+
+        const summary = sameLength
+          ? (() => {
+              const materialsMin = minRes.materials.reduce((s, m) => s + (m.total ?? 0), 0);
+              const materialsMax = maxRes.materials.reduce((s, m) => s + (m.total ?? 0), 0);
+              return {
+                ...avgRes.summary,
+                materials_min: materialsMin,
+                materials_max: materialsMax,
+                total_min: materialsMin + avgRes.summary.labor_min,
+                total_max: materialsMax + avgRes.summary.labor_max,
+              };
+            })()
+          : avgRes.summary;
+
+        setData({ ...avgRes, summary, materials });
         setPriceMode("avg");
+        setMaterialOverrides({});
+        setLaborOverrides({});
       } catch (err) {
         console.error(err);
         if (!silent) {
@@ -296,77 +400,174 @@ export function Workspace() {
     [data, priceMode],
   );
 
-  const sectionTotal = useMemo(() => {
-    if (!data) return 0;
-    const items = tab === "materials" ? data.materials : data.labor;
-    const sum = items.reduce((s, i) => s + (i.total_avg ?? 0), 0);
-    return Math.round(sum * priceScale(tab));
-  }, [data, tab, priceScale]);
-
-  const materialRows: LedgerRow[] = useMemo(() => {
+  // Материалы с учётом эффективного уровня по каждой строке (глобальный ползунок,
+  // если для строки нет точечного переопределения). Источник правды для materialRows
+  // и для суммы раздела — чтобы не считать total дважды по разной логике.
+  const materialsActive = useMemo(() => {
     const scale = priceScale("materials");
-    return (data?.materials ?? []).map((m) => ({
-      name: m.name,
-      volume: `${formatQty(m.quantity)} ${m.unit}`,
-      price: rub(Math.round(m.price_avg * scale)),
-      details: [
-        { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
-        { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
-        { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
-        { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
-        { label: "Цена за единицу", value: rub(Math.round(m.price_avg * scale)) },
-        { label: "Итог по позиции", value: rub(Math.round(m.total_avg * scale)) },
-        { label: "Источник цены", value: m.source, url: m.source_url },
-        // Когда цена объединена из нескольких источников (#333) — показываем полный
-        // список; source выше указывает лишь на представителя вилки.
-        ...(m.sources && m.sources.length > 1
-          ? [{ label: "Все источники", value: m.sources.join(", ") }]
-          : []),
-        { label: "Регион", value: regionLabel(m.region) },
-        ...(m.updated_at
-          ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
-          : []),
-      ],
-    }));
-  }, [data, priceScale]);
 
-  const toLedgerRow = useCallback(
-    (l: LaborItem): LedgerRow => {
-      const scale = priceScale("labor");
-      return {
-        name: l.service,
-        subtitle: l.specialist,
-        volume: `${formatQty(l.volume)} ${l.unit}`,
-        price: rub(Math.round(l.price_avg * scale)),
+    return (data?.materials ?? []).map((m, i) => {
+      const effectiveMode = materialOverrides[i] ?? priceMode;
+
+      // finish_key-позиции (ламинат/плитка/покраска/обои/розетка, #331) реально меняют
+      // товар по tier — у каждого варианта тогда свой достоверный source_url. У остальных
+      // материалов на всех tier одна и та же строка/товар — только другая точка коридора
+      // (комбинация price_min/avg/max из m.sources), а какая именно компания дала какую
+      // границу, бэкенд не сообщает — ссылку на карточку в этом случае не приписываем
+      // (кроме "Стандарт" — она соответствует представительному source_url строки).
+      const namesDiffer =
+        new Set([m.min_item?.name, m.avg_item?.name, m.max_item?.name].filter((n): n is string => !!n)).size > 1;
+
+      const variants: LedgerRowVariant[] = [];
+      if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: namesDiffer ? m.min_item.source_url : undefined, onClick: () => toggleMaterialOverride(i, "min") });
+      if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: m.avg_item.source_url, onClick: () => toggleMaterialOverride(i, "avg") });
+      if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: namesDiffer ? m.max_item.source_url : undefined, onClick: () => toggleMaterialOverride(i, "max") });
+
+      const activeVariant = effectiveMode === "min" ? m.min_item : effectiveMode === "max" ? m.max_item : m.avg_item;
+      const activeName = activeVariant?.name ?? m.name;
+      const activePrice = activeVariant ? activeVariant.price : m.price_avg * scale;
+      const activeTotal = activeVariant ? activeVariant.total : m.total_avg * scale;
+      const activeUrl = activeVariant?.source_url ?? m.source_url;
+      const activeSource = activeVariant?.source ?? m.source;
+
+      const combinedSources = !namesDiffer && m.sources && m.sources.length > 1 ? m.sources : null;
+      const sourceLabel = combinedSources ? combinedSources.join(", ") : activeSource;
+      const sourceCount = combinedSources ? combinedSources.length : 1;
+
+      return { m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, sourceLabel, sourceCount, variants };
+    });
+  }, [data, priceScale, priceMode, materialOverrides, toggleMaterialOverride]);
+
+  const materialRows: LedgerRow[] = useMemo(
+    () =>
+      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, sourceLabel, sourceCount, variants }) => ({
+        name: activeName,
+        volume: `${formatQty(m.quantity)} ${m.unit}`,
+        price: rub(Math.round(activePrice)),
+        activeMode: effectiveMode,
+        variants: variants.length > 0 ? variants : undefined,
         details: [
-          { label: "Специалист", value: l.specialist },
-          { label: "Цена за единицу", value: rub(Math.round(l.price_avg * scale)) },
-          { label: "Итог по позиции", value: rub(Math.round(l.total_avg * scale)) },
-          { label: "Источник цены", value: l.source, url: l.source_url },
-          { label: "Регион", value: regionLabel(l.region) },
+          { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
+          { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
+          { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
+          { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
+          { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
+          {
+            label: "Итог по позиции",
+            value: `${rub(Math.round(activeTotal))} (с резервом +${CONTINGENCY_PCT[effectiveMode]}%)`,
+          },
+          {
+            label: sourceCount > 1 ? "Источники цены" : "Источник цены",
+            value: sourceLabel,
+            ...(variants.length > 0 ? {} : { url: activeUrl }),
+          },
+          { label: "Регион", value: regionLabel(m.region, activeUrl, city, activeSource) },
+          ...(m.updated_at
+            ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
+            : []),
         ],
-      };
-    },
-    [priceScale],
+      })),
+    [materialsActive, city],
+  );
+
+  // Работы с учётом эффективного уровня по каждой строке. В отличие от материалов,
+  // у работы нет альтернативного исполнителя по tier — только цена внутри своего
+  // коридора (price_min/avg/max), уже посчитанного бэкендом для строки.
+  const laborActive = useMemo(() => {
+    const scale = priceScale("labor");
+
+    return (data?.labor ?? []).map((l, i) => {
+      const effectiveMode = laborOverrides[i] ?? priceMode;
+      const hasCorridor = l.price_min != null && l.price_max != null;
+
+      const activePrice = !hasCorridor
+        ? l.price_avg * scale
+        : effectiveMode === "min"
+          ? l.price_min!
+          : effectiveMode === "max"
+            ? l.price_max!
+            : l.price_avg;
+      const activeTotal = !hasCorridor
+        ? l.total_avg * scale
+        : effectiveMode === "min"
+          ? (l.total_min ?? l.total_avg)
+          : effectiveMode === "max"
+            ? (l.total_max ?? l.total_avg)
+            : l.total_avg;
+
+      // Мин./макс. цена в коридоре — это реально цены разных компаний из l.sources
+      // (посчитаны на бэкенде из нескольких прайс-листов), но бэкенд не сообщает,
+      // ЧЬЯ именно цена дала каждую границу — только "представительный" source_url,
+      // общий для всей строки (по документации — тот, чья средняя ближе к итоговой,
+      // т.е. соответствует именно avg). Поэтому ссылку ставим только на «Стандарт»,
+      // у «Эконом»/«Премиум» её быть не может — компания неизвестна; список всех
+      // участников — одной строкой в "Источник(и) цены" ниже.
+      const variants: LedgerRowVariant[] = hasCorridor
+        ? [
+            { mode: "min", title: "Эконом", name: l.service, price: rub(Math.round(l.price_min!)), onClick: () => toggleLaborOverride(i, "min") },
+            { mode: "avg", title: "Стандарт", name: l.service, price: rub(Math.round(l.price_avg)), url: l.source_url, onClick: () => toggleLaborOverride(i, "avg") },
+            { mode: "max", title: "Премиум", name: l.service, price: rub(Math.round(l.price_max!)), onClick: () => toggleLaborOverride(i, "max") },
+          ]
+        : [];
+
+      const sourceCount = l.sources?.length ?? (l.source ? 1 : 0);
+      const sourceLabel =
+        l.sources && l.sources.length > 1
+          ? l.sources.map(laborSourceName).join(", ")
+          : laborSourceName(l.source);
+
+      return { l, effectiveMode, activePrice, activeTotal, variants, sourceLabel, sourceCount };
+    });
+  }, [data, priceScale, priceMode, laborOverrides, toggleLaborOverride]);
+
+  const laborItemToRow = useCallback(
+    ({ l, effectiveMode, activePrice, activeTotal, variants, sourceLabel, sourceCount }: (typeof laborActive)[number]): LedgerRow => ({
+      name: l.service,
+      subtitle: l.specialist,
+      volume: `${formatQty(l.volume)} ${l.unit}`,
+      price: rub(Math.round(activePrice)),
+      activeMode: effectiveMode,
+      variants: variants.length > 0 ? variants : undefined,
+      details: [
+        { label: "Специалист", value: l.specialist },
+        { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
+        {
+          label: "Итог по позиции",
+          value: `${rub(Math.round(activeTotal))} (с резервом +${CONTINGENCY_PCT[effectiveMode]}%)`,
+        },
+        {
+          label: sourceCount > 1 ? "Источники цены" : "Источник цены",
+          value: sourceLabel,
+          ...(sourceCount > 1 ? {} : { url: l.source_url }),
+        },
+        { label: "Регион", value: regionLabel(l.region, l.source_url, city, l.source) },
+      ],
+    }),
+    [city],
   );
 
   const laborRows: LedgerRow[] = useMemo(
-    () => (data?.labor ?? []).map(toLedgerRow),
-    [data, toLedgerRow],
+    () => laborActive.map(laborItemToRow),
+    [laborActive, laborItemToRow],
   );
 
   // Работы, сгруппированные по стадиям (черновая/предчистовая/чистовая) — для
   // сметы «Черновая + чистовая». В режиме «только чистовая» группировки нет.
   const laborByStage = useMemo(() => {
-    const labor = data?.labor ?? [];
-    const groups = new Map<LaborStage, LaborItem[]>();
-    for (const item of labor) {
-      const stage: LaborStage = item.stage ?? "finish";
+    const groups = new Map<LaborStage, typeof laborActive>();
+    for (const item of laborActive) {
+      const stage: LaborStage = item.l.stage ?? "finish";
       if (!groups.has(stage)) groups.set(stage, []);
       groups.get(stage)!.push(item);
     }
     return groups;
-  }, [data]);
+  }, [laborActive]);
+
+  const sectionTotal = useMemo(() => {
+    if (!data) return 0;
+    const items = tab === "materials" ? materialsActive : laborActive;
+    return Math.round(items.reduce((s, x) => s + x.activeTotal, 0));
+  }, [data, tab, materialsActive, laborActive]);
 
   return (
     <div className={styles.page} ref={containerRef}>
@@ -654,13 +855,18 @@ export function Workspace() {
                       className={`${styles.rangeEnd} ${priceMode === "min" && !isDragging ? styles.rangeEndActive : ""}`}
                       style={{ left: 0 }}
                     />
-                    <span
-                      className={styles.rangeDot}
-                      style={{
-                        left: `${dotVisualPos}%`,
-                        transition: isDragging ? "none" : "left 0.2s ease",
-                      }}
-                    />
+                    {/* На min/max точка легла бы точно на rangeEnd (разные размеры/центровка —
+                        получалось наложение из двух кружков). Пока не тащим и стоим на краю,
+                        просто прячем её — сам rangeEnd уже подсвечен активным. */}
+                    {(isDragging || priceMode === "avg") && (
+                      <span
+                        className={styles.rangeDot}
+                        style={{
+                          left: `${dotVisualPos}%`,
+                          transition: isDragging ? "none" : "left 0.2s ease",
+                        }}
+                      />
+                    )}
                     <span
                       className={`${styles.rangeEnd} ${priceMode === "max" && !isDragging ? styles.rangeEndActive : ""}`}
                       style={{ right: 0 }}
@@ -672,7 +878,7 @@ export function Workspace() {
                   <button
                     className={styles.exportBtn}
                     onClick={() =>
-                      data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode))
+                      data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode, materialOverrides, laborOverrides))
                     }
                   >
                     Скачать PDF
@@ -680,7 +886,7 @@ export function Workspace() {
                   <button
                     className={styles.exportBtn}
                     onClick={() =>
-                      data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode))
+                      data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode, materialOverrides, laborOverrides))
                     }
                   >
                     Экспорт в Excel
@@ -715,14 +921,12 @@ export function Workspace() {
                     .filter((stage) => laborByStage.has(stage))
                     .map((stage) => {
                       const items = laborByStage.get(stage)!;
-                      const stageTotalAvg = items.reduce((s, i) => s + i.total_avg, 0);
+                      const stageTotal = items.reduce((s, x) => s + x.activeTotal, 0);
                       return (
                         <div key={stage}>
                           <div className={styles.stageHeader}>{STAGE_LABELS[stage]}</div>
-                          <EstimateLedger rows={items.map(toLedgerRow)} />
-                          <div className={styles.stageSubtotal}>
-                            {rub(Math.round(stageTotalAvg * priceScale("labor")))}
-                          </div>
+                          <EstimateLedger rows={items.map(laborItemToRow)} />
+                          <div className={styles.stageSubtotal}>{rub(Math.round(stageTotal))}</div>
                         </div>
                       );
                     })}

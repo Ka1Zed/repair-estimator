@@ -1,12 +1,25 @@
 import { useState } from "react";
 import styles from "./EstimateLedger.module.css";
 
+export interface LedgerRowVariant {
+  mode: "min" | "avg" | "max";
+  title: string;
+  name: string;
+  price: string;
+  url?: string | null;
+  // Закрепить этот вариант для строки поверх глобального уровня цены;
+  // повторный клик по уже закреплённому варианту снимает закрепление.
+  onClick?: () => void;
+}
+
 export interface LedgerRow {
   name: string;
   subtitle?: string;
   volume: string;
   price: string;
   details: { label: string; value: string; url?: string | null }[];
+  variants?: LedgerRowVariant[];
+  activeMode?: "min" | "avg" | "max";
 }
 
 interface EstimateLedgerProps {
@@ -55,8 +68,58 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
               </span>
             </button>
 
-            {/* Теперь мы рендерим детали всегда, но прячем закрытые через CSS класс hiddenOnScreen */}
             <div className={`${styles.details} ${!isOpen ? styles.hiddenOnScreen : ""}`}>
+              {/* Блок вариантов уровня — материал (разный товар) или работа (та же услуга, другая цена) */}
+              {row.variants && row.variants.length > 0 && (
+                <div className={styles.variantsBlock}>
+                  <div className={styles.variantsTitle}>Варианты по уровню:</div>
+                  {row.variants.map((v) => {
+                    const isActive = v.mode === row.activeMode;
+                    return (
+                      <div
+                        key={v.mode}
+                        role={v.onClick ? "button" : undefined}
+                        tabIndex={v.onClick ? 0 : undefined}
+                        onClick={v.onClick}
+                        onKeyDown={
+                          v.onClick
+                            ? (e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  v.onClick!();
+                                }
+                              }
+                            : undefined
+                        }
+                        title={v.onClick ? (isActive ? "Снять закрепление уровня для этой позиции" : "Закрепить этот уровень для этой позиции") : undefined}
+                        className={`${styles.variantItem} ${isActive ? styles.variantActive : ""} ${v.onClick ? styles.variantClickable : ""}`}
+                      >
+                        <div className={styles.variantHeader}>
+                          <span className={styles.variantBadge}>{v.title}</span>
+                          <span className={styles.variantPrice}>{v.price}</span>
+                        </div>
+                        <div className={styles.variantName}>
+                          {v.url ? (
+                            <a
+                              href={v.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={styles.sourceLink}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {v.name} ↗
+                            </a>
+                          ) : (
+                            v.name
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Стандартные детали позиции */}
               {row.details.map((d, j) => (
                 <div key={j} className={styles.detailItem}>
                   <span className={styles.detailLabel}>{d.label}</span>

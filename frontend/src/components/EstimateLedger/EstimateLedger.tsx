@@ -70,9 +70,9 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
               {row.variants && row.variants.length > 0 && (
                 <div className={styles.variantsBlock}>
                   <div className={styles.variantsTitle}>Варианты материалов:</div>
-                  {row.variants.map((v, idx) => (
-                    <div 
-                      key={idx} 
+                  {row.variants.map((v) => (
+                    <div
+                      key={v.mode}
                       className={`${styles.variantItem} ${v.mode === row.activeMode ? styles.variantActive : ""}`}
                     >
                       <div className={styles.variantHeader}>

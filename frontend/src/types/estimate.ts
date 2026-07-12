@@ -20,8 +20,11 @@ export interface MaterialItem {
   region?: string | null;
   updated_at?: string;
   source_url?: string | null;
-  
-  // Новые поля для задачи #291 (варианты по уровням)
+
+  // Материал по каждому tier (#291): для 6 finish_key-позиций (ламинат, покраска
+  // стен/потолка, плитка, обои, розетка) это разные товары (name/source_url),
+  // для остальных — тот же товар с ценой своего tier. Заполняется на фронте
+  // из трёх параллельных запросов /calculate с tier=min/avg/max (Workspace.tsx).
   min_item?: PriceVariant | null;
   avg_item?: PriceVariant | null;
   max_item?: PriceVariant | null;
@@ -61,20 +64,4 @@ export interface HiddenWorks {
   total_avg: number;
   total_max: number;
   items: HiddenWorkItem[];
-}
-export interface PriceVariant {
-  name: string;
-  price: number;
-  total: number;
-  source: string;
-  source_url?: string | null;
-}
-
-export interface MaterialItem {
-  // ... старые поля (name, quantity, unit, price_avg и т.д.) оставляем как есть
-  
-  // Новые поля для задачи #291
-  min_item?: PriceVariant | null;
-  avg_item?: PriceVariant | null;
-  max_item?: PriceVariant | null;
 }

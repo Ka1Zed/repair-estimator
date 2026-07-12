@@ -9,7 +9,7 @@ import OpeningsForm from "../../components/OpeningsForm";
 import { RoomTypeSelector } from "../../components/RoomTypeSelector";
 import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
-import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
+import type { MaterialItem, PriceVariant, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
 import { EstimateLedger, type LedgerRow, type LedgerRowVariant } from "../../components/EstimateLedger/EstimateLedger";
 import { useProjectStore, type EstimateScope } from "../../store/projectStore";
@@ -157,8 +157,36 @@ export function Workspace() {
             works: room.works,
           })),
         };
-        const res = (await calculateEstimate(payload)) as EstimateResponse;
-        setData(res);
+        // Запрашиваем все три tier параллельно (#331): для 6 finish_key-позиций
+        // (ламинат, покраска стен/потолка, плитка, обои, розетка) tier меняет
+        // конкретный товар (name/source_url), не только цену — без трёх запросов
+        // это не восстановить из одного ответа. Сводка/геометрия/работы берутся
+        // из avg-ответа, как и раньше; min/max нужны только для min_item/max_item.
+        const [minRes, avgRes, maxRes] = (await Promise.all([
+          calculateEstimate({ ...payload, tier: "min" }),
+          calculateEstimate({ ...payload, tier: "avg" }),
+          calculateEstimate({ ...payload, tier: "max" }),
+        ])) as [EstimateResponse, EstimateResponse, EstimateResponse];
+
+        const toVariant = (m?: MaterialItem): PriceVariant | null =>
+          m
+            ? { name: m.name, price: m.price_avg, total: m.total_avg, source: m.source, source_url: m.source_url ?? null }
+            : null;
+
+        const sameLength =
+          avgRes.materials.length === minRes.materials.length &&
+          avgRes.materials.length === maxRes.materials.length;
+
+        const materials = sameLength
+          ? avgRes.materials.map((m, i) => ({
+              ...m,
+              min_item: toVariant(minRes.materials[i]),
+              avg_item: toVariant(avgRes.materials[i]),
+              max_item: toVariant(maxRes.materials[i]),
+            }))
+          : avgRes.materials;
+
+        setData({ ...avgRes, materials });
         setPriceMode("avg");
       } catch (err) {
         console.error(err);
@@ -303,46 +331,44 @@ export function Workspace() {
   }, [data, tab, priceScale]);
 
   const materialRows: LedgerRow[] = useMemo(() => {
-  const scale = priceScale("materials"); // Фоллбэк на случай старых данных
-  
-  return (data?.materials ?? []).map((m) => {
-    const variants: LedgerRowVariant[] = [];
-    
-    if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: m.min_item.source_url });
-    if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: m.avg_item.source_url });
-    if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: m.max_item.source_url });
+    const scale = priceScale("materials");
 
-    // Достаем РЕАЛЬНЫЕ значения для выбранного уровня цен
-    let activeName = m.name;
-    let activePrice = m.price_avg * scale;
-    let activeTotal = m.total_avg * scale;
-    let activeUrl = m.source_url;
+    return (data?.materials ?? []).map((m) => {
+      const variants: LedgerRowVariant[] = [];
+      if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: m.min_item.source_url });
+      if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: m.avg_item.source_url });
+      if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: m.max_item.source_url });
 
-    if (priceMode === "min" && m.min_item) {
-      activeName = m.min_item.name; activePrice = m.min_item.price; activeTotal = m.min_item.total; activeUrl = m.min_item.source_url || m.source_url;
-    } else if (priceMode === "avg" && m.avg_item) {
-      activeName = m.avg_item.name; activePrice = m.avg_item.price; activeTotal = m.avg_item.total; activeUrl = m.avg_item.source_url || m.source_url;
-    } else if (priceMode === "max" && m.max_item) {
-      activeName = m.max_item.name; activePrice = m.max_item.price; activeTotal = m.max_item.total; activeUrl = m.max_item.source_url || m.source_url;
-    }
+      const activeVariant = priceMode === "min" ? m.min_item : priceMode === "max" ? m.max_item : m.avg_item;
+      const activeName = activeVariant?.name ?? m.name;
+      const activePrice = activeVariant ? activeVariant.price : m.price_avg * scale;
+      const activeTotal = activeVariant ? activeVariant.total : m.total_avg * scale;
+      const activeUrl = activeVariant?.source_url ?? m.source_url;
+      const activeSource = activeVariant?.source ?? m.source;
 
-    return {
-      name: activeName, // Динамическое имя бренда в строке
-      volume: `${formatQty(m.quantity)} ${m.unit}`,
-      price: rub(Math.round(activePrice)), // Реальная цена
-      activeMode: priceMode, // Передаем, чтобы подсветить карточку
-      variants: variants.length > 0 ? variants : undefined,
-      details: [
-        { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
-        { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
-        { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
-        { label: "Итог по позиции", value: rub(Math.round(activeTotal)) },
-        { label: "Источник цены", value: m.source, url: activeUrl }, // Ссылка на выбранный вариант
-        // ...остальные поля
-      ],
-    };
-  });
-}, [data, priceScale, priceMode]); // priceMode обязательно в зависимостях!
+      return {
+        name: activeName,
+        volume: `${formatQty(m.quantity)} ${m.unit}`,
+        price: rub(Math.round(activePrice)),
+        activeMode: priceMode,
+        variants: variants.length > 0 ? variants : undefined,
+        details: [
+          { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
+          { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
+          { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
+          { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
+          { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
+          { label: "Итог по позиции", value: rub(Math.round(activeTotal)) },
+          { label: "Источник цены", value: activeSource, url: activeUrl },
+          { label: "Регион", value: regionLabel(m.region) },
+          ...(m.updated_at
+            ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
+            : []),
+        ],
+      };
+    });
+  }, [data, priceScale, priceMode]);
+
   const toLedgerRow = useCallback(
     (l: LaborItem): LedgerRow => {
       const scale = priceScale("labor");

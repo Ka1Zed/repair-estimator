@@ -3,7 +3,7 @@ import autoTable, { type CellHookData } from 'jspdf-autotable';
 import * as XLSX from 'xlsx-js-style';
 
 import type { SummaryData } from '../components/EstimateSummary';
-import type { MaterialItem, LaborItem, HiddenWorks } from '../types/estimate';
+import type { MaterialItem, LaborItem, HiddenWorks, HiddenWorkItem } from '../types/estimate';
 import type { PriceMode } from '../pages/Workspace/Workspace';
 
 export interface EstimateExportData {
@@ -601,8 +601,7 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
       ...tableBase,
       startY: currentY + 5 + noteLines.length * 4,
       head: [['Работа', 'Специалист', 'Причина', 'Объём', 'Мин.', 'Макс.']],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      body: hw.items.map((item: any) => [
+      body: hw.items.map((item: HiddenWorkItem) => [
         item.service,
         item.specialist,
         item.reason,

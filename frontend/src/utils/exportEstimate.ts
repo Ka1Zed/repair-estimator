@@ -442,9 +442,8 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
     doc.text(text, marginX, y);
   };
 
-  // Обновленный хелпер для ссылок — теперь принимает геттер URL
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sourceLinks = (items: any[], col: number, getUrl: (item: any) => string | null | undefined) => ({
+  // Хелпер для ссылок — использует дженерик T для сохранения типобезопасности
+  const sourceLinks = <T,>(items: T[], col: number, getUrl: (item: T) => string | null | undefined) => ({
     didParseCell: (h: CellHookData) => {
       if (h.section === 'body' && h.column.index === col && getUrl(items[h.row.index])) {
         h.cell.styles.textColor = PDF_ACCENT;

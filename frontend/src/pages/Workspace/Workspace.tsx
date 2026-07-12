@@ -303,7 +303,7 @@ export function Workspace() {
   }, [data, tab, priceScale]);
 
   const materialRows: LedgerRow[] = useMemo(() => {
-    const scale = priceScale("materials"); // Оставляем только как запасной вариант на случай старых данных бэка
+    const scale = priceScale("materials"); // Единственный рабочий путь масштабирования, пока бэкенд не реализует модель по уровням (#293)
     
     return (data?.materials ?? []).map((m) => {
       const variants: LedgerRowVariant[] = [];

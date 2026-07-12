@@ -65,10 +65,8 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
               </span>
             </button>
 
-            {/* Детали прячем через CSS класс hiddenOnScreen */}
             <div className={`${styles.details} ${!isOpen ? styles.hiddenOnScreen : ""}`}>
-              
-              {/* Блок вариантов материалов (если они переданы бэкендом) */}
+              {/* Блок вариантов материалов */}
               {row.variants && row.variants.length > 0 && (
                 <div className={styles.variantsBlock}>
                   <div className={styles.variantsTitle}>Варианты материалов:</div>
@@ -95,7 +93,7 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
                 </div>
               )}
 
-              {/* Стандартные детали (кол-во, упаковки, запас и т.д.) */}
+              {/* Стандартные детали позиции */}
               {row.details.map((d, j) => (
                 <div key={j} className={styles.detailItem}>
                   <span className={styles.detailLabel}>{d.label}</span>

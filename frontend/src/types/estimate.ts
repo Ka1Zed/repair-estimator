@@ -62,3 +62,19 @@ export interface HiddenWorks {
   total_max: number;
   items: HiddenWorkItem[];
 }
+export interface PriceVariant {
+  name: string;
+  price: number;
+  total: number;
+  source: string;
+  source_url?: string | null;
+}
+
+export interface MaterialItem {
+  // ... старые поля (name, quantity, unit, price_avg и т.д.) оставляем как есть
+  
+  // Новые поля для задачи #291
+  min_item?: PriceVariant | null;
+  avg_item?: PriceVariant | null;
+  max_item?: PriceVariant | null;
+}

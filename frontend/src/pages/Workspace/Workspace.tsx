@@ -96,6 +96,20 @@ export function Workspace() {
     });
   }, []);
 
+  // То же самое для работ (индекс в data.labor): у работ нет альтернативного
+  // исполнителя по tier, только цена внутри коридора price_min/avg/max строки.
+  const [laborOverrides, setLaborOverrides] = useState<Record<number, PriceMode>>({});
+  const toggleLaborOverride = useCallback((index: number, mode: PriceMode) => {
+    setLaborOverrides((prev) => {
+      if (prev[index] === mode) {
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      }
+      return { ...prev, [index]: mode };
+    });
+  }, []);
+
   // Список городов для селектора. Если текущего города нет в ответе бэка,
   // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
   useEffect(() => {
@@ -174,9 +188,10 @@ export function Workspace() {
         };
         // Запрашиваем все три tier параллельно (#331): для 6 finish_key-позиций
         // (ламинат, покраска стен/потолка, плитка, обои, розетка) tier меняет
-        // конкретный товар (name/source_url), не только цену — без трёх запросов
-        // это не восстановить из одного ответа. Сводка/геометрия/работы берутся
-        // из avg-ответа, как и раньше; min/max нужны только для min_item/max_item.
+        // конкретный товар (name/source_url), не только цену. Геометрия/работы
+        // берутся из avg-ответа; материалы и «Вилка стоимости» материалов — из
+        // реальных min/max-tier сумм (иначе сводка ±15-20% коридора расходится
+        // с построчными итогами, которые теперь берут настоящие эконом/премиум SKU).
         const [minRes, avgRes, maxRes] = (await Promise.all([
           calculateEstimate({ ...payload, tier: "min" }),
           calculateEstimate({ ...payload, tier: "avg" }),
@@ -201,9 +216,24 @@ export function Workspace() {
             }))
           : avgRes.materials;
 
-        setData({ ...avgRes, materials });
+        const summary = sameLength
+          ? (() => {
+              const materialsMin = minRes.materials.reduce((s, m) => s + (m.total_avg ?? 0), 0);
+              const materialsMax = maxRes.materials.reduce((s, m) => s + (m.total_avg ?? 0), 0);
+              return {
+                ...avgRes.summary,
+                materials_min: materialsMin,
+                materials_max: materialsMax,
+                total_min: materialsMin + avgRes.summary.labor_min,
+                total_max: materialsMax + avgRes.summary.labor_max,
+              };
+            })()
+          : avgRes.summary;
+
+        setData({ ...avgRes, summary, materials });
         setPriceMode("avg");
         setMaterialOverrides({});
+        setLaborOverrides({});
       } catch (err) {
         console.error(err);
         if (!silent) {
@@ -371,15 +401,6 @@ export function Workspace() {
     });
   }, [data, priceScale, priceMode, materialOverrides, toggleMaterialOverride]);
 
-  const sectionTotal = useMemo(() => {
-    if (!data) return 0;
-    if (tab === "materials") {
-      return Math.round(materialsActive.reduce((s, x) => s + x.activeTotal, 0));
-    }
-    const sum = data.labor.reduce((s, i) => s + (i.total_avg ?? 0), 0);
-    return Math.round(sum * priceScale("labor"));
-  }, [data, tab, materialsActive, priceScale]);
-
   const materialRows: LedgerRow[] = useMemo(
     () =>
       materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, sourceLabel, variants }) => ({
@@ -409,43 +430,84 @@ export function Workspace() {
     [materialsActive],
   );
 
-  const toLedgerRow = useCallback(
-    (l: LaborItem): LedgerRow => {
-      const scale = priceScale("labor");
-      return {
-        name: l.service,
-        subtitle: l.specialist,
-        volume: `${formatQty(l.volume)} ${l.unit}`,
-        price: rub(Math.round(l.price_avg * scale)),
-        details: [
-          { label: "Специалист", value: l.specialist },
-          { label: "Цена за единицу", value: rub(Math.round(l.price_avg * scale)) },
-          { label: "Итог по позиции", value: rub(Math.round(l.total_avg * scale)) },
-          { label: "Источник цены", value: l.source, url: l.source_url },
-          { label: "Регион", value: regionLabel(l.region) },
-        ],
-      };
-    },
-    [priceScale],
+  // Работы с учётом эффективного уровня по каждой строке. В отличие от материалов,
+  // у работы нет альтернативного исполнителя по tier — только цена внутри своего
+  // коридора (price_min/avg/max), уже посчитанного бэкендом для строки.
+  const laborActive = useMemo(() => {
+    const scale = priceScale("labor");
+
+    return (data?.labor ?? []).map((l, i) => {
+      const effectiveMode = laborOverrides[i] ?? priceMode;
+      const hasCorridor = l.price_min != null && l.price_max != null;
+
+      const activePrice = !hasCorridor
+        ? l.price_avg * scale
+        : effectiveMode === "min"
+          ? l.price_min!
+          : effectiveMode === "max"
+            ? l.price_max!
+            : l.price_avg;
+      const activeTotal = !hasCorridor
+        ? l.total_avg * scale
+        : effectiveMode === "min"
+          ? (l.total_min ?? l.total_avg)
+          : effectiveMode === "max"
+            ? (l.total_max ?? l.total_avg)
+            : l.total_avg;
+
+      const variants: LedgerRowVariant[] = hasCorridor
+        ? [
+            { mode: "min", title: "Эконом", name: l.service, price: rub(Math.round(l.price_min!)), url: l.source_url, onClick: () => toggleLaborOverride(i, "min") },
+            { mode: "avg", title: "Стандарт", name: l.service, price: rub(Math.round(l.price_avg)), url: l.source_url, onClick: () => toggleLaborOverride(i, "avg") },
+            { mode: "max", title: "Премиум", name: l.service, price: rub(Math.round(l.price_max!)), url: l.source_url, onClick: () => toggleLaborOverride(i, "max") },
+          ]
+        : [];
+
+      return { l, effectiveMode, activePrice, activeTotal, variants };
+    });
+  }, [data, priceScale, priceMode, laborOverrides, toggleLaborOverride]);
+
+  const laborItemToRow = useCallback(
+    ({ l, effectiveMode, activePrice, activeTotal, variants }: (typeof laborActive)[number]): LedgerRow => ({
+      name: l.service,
+      subtitle: l.specialist,
+      volume: `${formatQty(l.volume)} ${l.unit}`,
+      price: rub(Math.round(activePrice)),
+      activeMode: effectiveMode,
+      variants: variants.length > 0 ? variants : undefined,
+      details: [
+        { label: "Специалист", value: l.specialist },
+        { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
+        { label: "Итог по позиции", value: rub(Math.round(activeTotal)) },
+        { label: "Источник цены", value: l.source, url: l.source_url },
+        { label: "Регион", value: regionLabel(l.region) },
+      ],
+    }),
+    [],
   );
 
   const laborRows: LedgerRow[] = useMemo(
-    () => (data?.labor ?? []).map(toLedgerRow),
-    [data, toLedgerRow],
+    () => laborActive.map(laborItemToRow),
+    [laborActive, laborItemToRow],
   );
 
   // Работы, сгруппированные по стадиям (черновая/предчистовая/чистовая) — для
   // сметы «Черновая + чистовая». В режиме «только чистовая» группировки нет.
   const laborByStage = useMemo(() => {
-    const labor = data?.labor ?? [];
-    const groups = new Map<LaborStage, LaborItem[]>();
-    for (const item of labor) {
-      const stage: LaborStage = item.stage ?? "finish";
+    const groups = new Map<LaborStage, typeof laborActive>();
+    for (const item of laborActive) {
+      const stage: LaborStage = item.l.stage ?? "finish";
       if (!groups.has(stage)) groups.set(stage, []);
       groups.get(stage)!.push(item);
     }
     return groups;
-  }, [data]);
+  }, [laborActive]);
+
+  const sectionTotal = useMemo(() => {
+    if (!data) return 0;
+    const items = tab === "materials" ? materialsActive : laborActive;
+    return Math.round(items.reduce((s, x) => s + x.activeTotal, 0));
+  }, [data, tab, materialsActive, laborActive]);
 
   return (
     <div className={styles.page} ref={containerRef}>
@@ -781,14 +843,12 @@ export function Workspace() {
                     .filter((stage) => laborByStage.has(stage))
                     .map((stage) => {
                       const items = laborByStage.get(stage)!;
-                      const stageTotalAvg = items.reduce((s, i) => s + i.total_avg, 0);
+                      const stageTotal = items.reduce((s, x) => s + x.activeTotal, 0);
                       return (
                         <div key={stage}>
                           <div className={styles.stageHeader}>{STAGE_LABELS[stage]}</div>
-                          <EstimateLedger rows={items.map(toLedgerRow)} />
-                          <div className={styles.stageSubtotal}>
-                            {rub(Math.round(stageTotalAvg * priceScale("labor")))}
-                          </div>
+                          <EstimateLedger rows={items.map(laborItemToRow)} />
+                          <div className={styles.stageSubtotal}>{rub(Math.round(stageTotal))}</div>
                         </div>
                       );
                     })}

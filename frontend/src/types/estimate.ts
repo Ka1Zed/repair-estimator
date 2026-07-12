@@ -43,6 +43,13 @@ export interface LaborItem {
   region?: string | null;
   source_url?: string | null;
   stage?: LaborStage;
+
+  // Коридор цены внутри выбранного tier (не межтоварный скачок, как у материалов —
+  // у работ tier только сужает границы вилки одной и той же услуги/специалиста).
+  price_min?: number;
+  price_max?: number;
+  total_min?: number;
+  total_max?: number;
 }
 
 export interface HiddenWorkItem {

@@ -69,10 +69,10 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
             </button>
 
             <div className={`${styles.details} ${!isOpen ? styles.hiddenOnScreen : ""}`}>
-              {/* Блок вариантов материалов */}
+              {/* Блок вариантов уровня — материал (разный товар) или работа (та же услуга, другая цена) */}
               {row.variants && row.variants.length > 0 && (
                 <div className={styles.variantsBlock}>
-                  <div className={styles.variantsTitle}>Варианты материалов:</div>
+                  <div className={styles.variantsTitle}>Варианты по уровню:</div>
                   {row.variants.map((v) => {
                     const isActive = v.mode === row.activeMode;
                     return (

@@ -455,20 +455,29 @@ export function Workspace() {
             ? (l.total_max ?? l.total_avg)
             : l.total_avg;
 
+      // Мин./макс. цена в коридоре — это реально цены разных компаний из l.sources
+      // (посчитаны на бэкенде из нескольких прайс-листов), но бэкенд не сообщает,
+      // ЧЬЯ именно цена дала каждую границу — только "представительный" source_url,
+      // общий для всей строки. Ссылку на конкретную карточку варианта поэтому не
+      // приписываем (была бы одинаковой у всех трёх и выглядела как обман); список
+      // компаний — одной строкой в "Источник цены" ниже.
       const variants: LedgerRowVariant[] = hasCorridor
         ? [
-            { mode: "min", title: "Эконом", name: l.service, price: rub(Math.round(l.price_min!)), url: l.source_url, onClick: () => toggleLaborOverride(i, "min") },
-            { mode: "avg", title: "Стандарт", name: l.service, price: rub(Math.round(l.price_avg)), url: l.source_url, onClick: () => toggleLaborOverride(i, "avg") },
-            { mode: "max", title: "Премиум", name: l.service, price: rub(Math.round(l.price_max!)), url: l.source_url, onClick: () => toggleLaborOverride(i, "max") },
+            { mode: "min", title: "Эконом", name: l.service, price: rub(Math.round(l.price_min!)), onClick: () => toggleLaborOverride(i, "min") },
+            { mode: "avg", title: "Стандарт", name: l.service, price: rub(Math.round(l.price_avg)), onClick: () => toggleLaborOverride(i, "avg") },
+            { mode: "max", title: "Премиум", name: l.service, price: rub(Math.round(l.price_max!)), onClick: () => toggleLaborOverride(i, "max") },
           ]
         : [];
 
-      return { l, effectiveMode, activePrice, activeTotal, variants };
+      const sourceLabel =
+        l.sources && l.sources.length > 1 ? l.sources.join(", ") : l.source;
+
+      return { l, effectiveMode, activePrice, activeTotal, variants, sourceLabel };
     });
   }, [data, priceScale, priceMode, laborOverrides, toggleLaborOverride]);
 
   const laborItemToRow = useCallback(
-    ({ l, effectiveMode, activePrice, activeTotal, variants }: (typeof laborActive)[number]): LedgerRow => ({
+    ({ l, effectiveMode, activePrice, activeTotal, variants, sourceLabel }: (typeof laborActive)[number]): LedgerRow => ({
       name: l.service,
       subtitle: l.specialist,
       volume: `${formatQty(l.volume)} ${l.unit}`,
@@ -479,7 +488,11 @@ export function Workspace() {
         { label: "Специалист", value: l.specialist },
         { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
         { label: "Итог по позиции", value: rub(Math.round(activeTotal)) },
-        { label: "Источник цены", value: l.source, url: l.source_url },
+        {
+          label: "Источник цены",
+          value: sourceLabel,
+          ...(l.sources && l.sources.length > 1 ? {} : { url: l.source_url }),
+        },
         { label: "Регион", value: regionLabel(l.region) },
       ],
     }),
@@ -782,13 +795,18 @@ export function Workspace() {
                       className={`${styles.rangeEnd} ${priceMode === "min" && !isDragging ? styles.rangeEndActive : ""}`}
                       style={{ left: 0 }}
                     />
-                    <span
-                      className={styles.rangeDot}
-                      style={{
-                        left: `${dotVisualPos}%`,
-                        transition: isDragging ? "none" : "left 0.2s ease",
-                      }}
-                    />
+                    {/* На min/max точка легла бы точно на rangeEnd (разные размеры/центровка —
+                        получалось наложение из двух кружков). Пока не тащим и стоим на краю,
+                        просто прячем её — сам rangeEnd уже подсвечен активным. */}
+                    {(isDragging || priceMode === "avg") && (
+                      <span
+                        className={styles.rangeDot}
+                        style={{
+                          left: `${dotVisualPos}%`,
+                          transition: isDragging ? "none" : "left 0.2s ease",
+                        }}
+                      />
+                    )}
                     <span
                       className={`${styles.rangeEnd} ${priceMode === "max" && !isDragging ? styles.rangeEndActive : ""}`}
                       style={{ right: 0 }}

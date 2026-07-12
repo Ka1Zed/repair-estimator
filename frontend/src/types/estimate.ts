@@ -50,6 +50,11 @@ export interface LaborItem {
   price_max?: number;
   total_min?: number;
   total_max?: number;
+
+  // Все компании/прайс-листы, чьи цены объединены в вилку строки (#166/#333).
+  // Бэкенд не сообщает, ЧЬЯ именно цена дала price_min/price_max — только
+  // список участников и один "представительный" source/source_url.
+  sources?: string[] | null;
 }
 
 export interface HiddenWorkItem {

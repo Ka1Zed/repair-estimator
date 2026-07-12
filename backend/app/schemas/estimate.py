@@ -118,6 +118,10 @@ class MaterialItem(BaseModel):
     # Регион, по которому реально взялась цена: город при региональной seed-цене
     # или null, если цена базовая (region IS NULL) / парсерная. См. city в запросе.
     region: Optional[str] = None
+    # Все источники, чьи цены объединены в эту вилку (#333, по аналогии с LaborItem.sources).
+    # Для одного источника — один элемент; для seed-цены — null. source/source_url —
+    # представительный источник (его средняя ближе к итоговой).
+    sources: Optional[List[str]] = None
 
 class LaborItem(BaseModel):
     service: str

@@ -4,9 +4,11 @@ import pytest
 from decimal import Decimal
 from unittest.mock import Mock
 
-from app.services.price_aggregator_service import get_price, _normalize_price
+from datetime import datetime, timezone
+
+from app.services.price_aggregator_service import get_price, get_material_price, _normalize_price
 from app.parsers.base import ParsedPrice
-from app.db.models import PriceSource
+from app.db.models import Material, MaterialPrice, PriceSource
 
 
 def test_normalize_price():
@@ -111,4 +113,109 @@ class TestPriceNormalization:
         ratio = max(price_megastroy.price_avg, price_leman.price_avg) / min(price_megastroy.price_avg, price_leman.price_avg)
         assert ratio <= Decimal('1.2'), f"Цены слишком различаются: {price_megastroy.price_avg} vs {price_leman.price_avg}"
 
-        
+
+class TestMaterialPriceCombination:
+    """get_material_price (#333): объединение цен материала из нескольких источников,
+    по аналогии с test_labor_combines_multiple_regional_sites в test_labor_parsers.py.
+
+    Цены источников вставляются напрямую в MaterialPrice (свежий updated_at), а не
+    через живой fetch_price — так тест не зависит от TTL-кэша, оставленного другими
+    тестами файла (get_price кэширует parser-цену материала по (material, source) без
+    привязки к региону). Моки парсеров при этом остаются полностью герметичны:
+    fetch_price кидает RuntimeError вместо похода в сеть — их не должно вызвать при
+    свежем кэше, а если вызовет (нет строки), это тоже не сеть, а fallback на seed.
+    """
+
+    MATERIAL = "Краска для стен"
+
+    def _clear_parser_prices(self, db_session):
+        seed = db_session.query(PriceSource).filter(PriceSource.name == "seed").first()
+        material = db_session.query(Material).filter(Material.name == self.MATERIAL).first()
+        db_session.query(MaterialPrice).filter(
+            MaterialPrice.material_id == material.id,
+            MaterialPrice.source_id != seed.id,
+        ).delete()
+        db_session.commit()
+
+    def _seed_source(self, db_session, name):
+        src = db_session.query(PriceSource).filter(PriceSource.name == name).first()
+        if not src:
+            src = PriceSource(name=name, type="parser", url=f"http://{name.lower()}.ru")
+            db_session.add(src)
+            db_session.commit()
+        return src
+
+    def _insert_price(self, db_session, source_name, price_min, price_avg, price_max):
+        material = db_session.query(Material).filter(Material.name == self.MATERIAL).first()
+        source = self._seed_source(db_session, source_name)
+        row = MaterialPrice(
+            material_id=material.id, source_id=source.id,
+            price_min=Decimal(price_min), price_avg=Decimal(price_avg), price_max=Decimal(price_max),
+            source_url=f"http://example-{source_name.lower()}.ru",
+            updated_at=datetime.now(timezone.utc),
+        )
+        db_session.add(row)
+        db_session.commit()
+
+    def _no_network_parser(self, source_name):
+        parser = Mock()
+        parser.source_name = source_name
+        parser.fetch_price.side_effect = RuntimeError("сеть недоступна (тест герметичен)")
+        return parser
+
+    def test_combines_two_sources_into_one_corridor(self, db_session):
+        """Мегастрой + Леман дают валидные цены → вилка min по обоим/max по обоим/
+        avg среднего средних, sources содержит оба источника."""
+        self._clear_parser_prices(db_session)
+        try:
+            self._insert_price(db_session, "Мегастрой", 100, 120, 150)
+            self._insert_price(db_session, "Леман", 130, 160, 200)
+
+            price = get_material_price(
+                self.MATERIAL, db=db_session,
+                parsers=[self._no_network_parser("Мегастрой"), self._no_network_parser("Леман")],
+                region="Москва",
+            )
+
+            assert price is not None
+            assert price.price_min == Decimal("100")   # минимум по источникам
+            assert price.price_max == Decimal("200")   # максимум по источникам
+            assert price.price_avg == Decimal("140")   # среднее средних (120+160)/2
+            assert set(price.contributing_sources) == {"Мегастрой", "Леман"}
+        finally:
+            self._clear_parser_prices(db_session)
+
+    def test_single_source_reports_one_source(self, db_session):
+        """Только у одного источника есть цена → вилка этого источника, sources из одного элемента."""
+        self._clear_parser_prices(db_session)
+        try:
+            self._insert_price(db_session, "Мегастрой", 100, 120, 150)
+            self._seed_source(db_session, "Леман")  # источник заведён, но цены нет
+
+            price = get_material_price(
+                self.MATERIAL, db=db_session,
+                parsers=[self._no_network_parser("Мегастрой"), self._no_network_parser("Леман")],
+                region="Москва",
+            )
+
+            assert price is not None
+            assert price.price_avg == Decimal("120")
+            assert price.contributing_sources == ["Мегастрой"]
+        finally:
+            self._clear_parser_prices(db_session)
+
+    def test_no_valid_source_falls_back_to_seed(self, db_session):
+        """Ни один источник не дал валидной цены → корректный fallback на seed (не падает, не пусто)."""
+        self._clear_parser_prices(db_session)
+        try:
+            price = get_material_price(
+                self.MATERIAL, db=db_session,
+                parsers=[self._no_network_parser("Мегастрой"), self._no_network_parser("Леман")],
+            )
+
+            assert price is not None
+            assert price.price_avg > 0
+            assert getattr(price, "contributing_sources", None) is None
+        finally:
+            self._clear_parser_prices(db_session)
+        assert getattr(price, "contributing_sources", None) is None

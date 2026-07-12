@@ -21,7 +21,7 @@ from app.services.labor_calc_service import (
     WET_ROOM_TYPES,
 )
 from app.services.repair_coeffs_service import CONTINGENCY
-from app.services.price_aggregator_service import get_price, get_labor_price
+from app.services.price_aggregator_service import get_material_price, get_labor_price
 from app.services.hidden_works_service import calculate_hidden_works
 from app.parsers.base import BaseParser
 from app.parsers.registry import MATERIAL_PARSERS
@@ -30,16 +30,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
 
-def get_material_parser() -> BaseParser:
-    '''Парсер цен материалов для расчёта сметы.
+def get_material_parsers() -> list[BaseParser]:
+    '''Все зарегистрированные источники цен материалов для расчёта сметы.
 
-    Вынесен в зависимость FastAPI, чтобы тесты могли подменить его заглушкой
-    (app.dependency_overrides) и не ходить в сеть. В проде — живой Мегастрой
-    (первый источник в app.parsers.registry.MATERIAL_PARSERS). Когда появится
-    второй источник материалов (Леман, #276), выбор/комбинирование цен между
-    ними войдёт сюда — сам список источников уже вынесен в registry.py.
+    Вынесена в зависимость FastAPI, чтобы тесты могли подменить список заглушкой
+    (app.dependency_overrides) и не ходить в сеть. В проде — все парсеры из
+    app.parsers.registry.MATERIAL_PARSERS (Мегастрой, Леман, ...); объединение их
+    цен в одну вилку делает get_material_price (#333).
     '''
-    return MATERIAL_PARSERS[0]
+    return MATERIAL_PARSERS
 
 # Дефолты инженерки, когда группа works включена, а число не задано (null).
 # Явный 0 остаётся 0 (осознанный ноль). База — пресеты по типу комнаты; для типа
@@ -143,7 +142,7 @@ def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> D
 def calculate_estimate(
     request: EstimateRequest,
     db: Session = Depends(get_db),
-    parser: BaseParser = Depends(get_material_parser),
+    parsers: list[BaseParser] = Depends(get_material_parsers),
 ) -> EstimateResponse:
     # Источники цен — маленький справочник (~10 строк), грузим один раз вместо
     # точечного запроса на каждую строку материала/работы (устраняет N+1, #278).
@@ -263,7 +262,7 @@ def calculate_estimate(
         # с накрученным по факту коэффициентом даже после суммирования нескольких комнат.
         waste_factor = (group['quantity'] / base_quantity) if base_quantity > 0 else Decimal(1)
 
-        price_obj = get_price(name, db=db, parser=parser, region=request.city)
+        price_obj = get_material_price(name, db=db, parsers=parsers, region=request.city)
 
         # package_size (#306): если цена пришла от парсера и он отдал фасовку
         # КОНКРЕТНОГО товара за source_url — считаем упаковки по ней, а не по
@@ -340,6 +339,7 @@ def calculate_estimate(
             source_url=price_obj.source_url,
             updated_at=updated_at,
             region=price_obj.region,
+            sources=getattr(price_obj, "contributing_sources", None),
         ))
 
         materials_sum['min'] += final_quantity * price_obj.price_min

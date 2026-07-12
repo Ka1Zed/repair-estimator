@@ -12,6 +12,9 @@ export interface MaterialItem {
   region?: string | null;
   updated_at?: string;
   source_url?: string | null;
+  // Все источники, чьи цены объединены в вилку (#333). Один элемент — цена от
+  // одного источника; null — seed-цена. source/source_url указывают на представителя.
+  sources?: string[] | null;
 }
 
 export type LaborStage = "rough" | "pre_finish" | "finish";

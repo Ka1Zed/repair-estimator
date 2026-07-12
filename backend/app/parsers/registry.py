@@ -16,10 +16,8 @@ from app.parsers.prorabneva_parser import ProrabnevaParser
 from app.parsers.rembrigada_parser import RembrigadaParser
 from app.parsers.remont_uroven_parser import RemontUrovenParser
 
-# Парсеры цен материалов. Два источника (Мегастрой, Леман); calc-код
-# (estimates.get_material_parser) пока читает только первый элемент — выбор/
-# комбинирование цен между несколькими источниками в самой смете вне scope #276,
-# это отдельная будущая задача поверх уже готового списка ниже.
+# Парсеры цен материалов. Два источника (Мегастрой, Леман); смета читает весь
+# список и объединяет их цены в одну вилку (price_aggregator_service.get_material_price, #333).
 MATERIAL_PARSERS: list[BaseParser] = [
     MegastroyParser(),
     LemanParser(),

@@ -1300,13 +1300,13 @@ def test_material_tier_selects_different_sku():
 
 
 def test_missing_price_handled_gracefully(monkeypatch):
-    """Проверка, что при отсутствии цены у материала (get_price возвращает None)
+    """Проверка, что при отсутствии цены у материала (get_material_price возвращает None)
     ответ остаётся 200, строка присутствует со source='нет цены' и все ценовые поля = 0.
     """
-    # Подменяем get_price в модуле app.api.estimates, где она используется
-    def mock_get_price(*args, **kwargs):
+    # Подменяем get_material_price в модуле app.api.estimates, где она используется
+    def mock_get_material_price(*args, **kwargs):
         return None
-    monkeypatch.setattr("app.api.estimates.get_price", mock_get_price)
+    monkeypatch.setattr("app.api.estimates.get_material_price", mock_get_material_price)
 
     payload = {
         "city": "Казань",

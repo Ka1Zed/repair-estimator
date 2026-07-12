@@ -196,6 +196,96 @@ def get_price(
     return seed_price
 
 
+def _combine_material_prices(session, material_id: int,
+                              rows: list[MaterialPrice]) -> MaterialPrice:
+    '''
+    Объединяет parser-цены нескольких источников материала (Мегастрой, Леман, ...)
+    в одну вилку — аналог _combine_labor_prices (#166), но для материалов и с учётом
+    package_size (#306): у представителя берём и source_url, и его package_size,
+    т.к. это фасовка КОНКРЕТНОГО товара за этой ссылкой (расчёт упаковок должен
+    остаться согласован с тем, что видно по ссылке).
+
+    region берём у представителя, а не из запроса: parser-цены материалов
+    нерегиональны (region IS NULL, одна цена на все города), и контракт (docs/api.md)
+    требует region=null для парсерной цены — как отдавал старый однопарсерный путь.
+
+    Работает и для одного элемента rows (тогда вилка/представитель — этот же элемент),
+    чтобы contributing_sources был заполнен и для единственного источника (как у labor).
+    '''
+    price_min = min(r.price_min for r in rows)
+    price_max = max(r.price_max for r in rows)
+    price_avg = Decimal(round(statistics.mean([r.price_avg for r in rows])))
+    representative = min(rows, key=lambda r: abs(r.price_avg - price_avg))
+
+    source_names = [
+        s.name for s in session.query(PriceSource).filter(
+            PriceSource.id.in_({r.source_id for r in rows})
+        ).all()
+    ]
+
+    combined = MaterialPrice(
+        material_id=material_id,
+        source_id=representative.source_id,
+        price_min=price_min,
+        price_avg=price_avg,
+        price_max=price_max,
+        region=representative.region,
+        source_url=representative.source_url,
+        package_size=representative.package_size,
+        updated_at=representative.updated_at,
+    )
+    combined.contributing_sources = sorted(source_names)
+    return combined
+
+
+def get_material_price(
+    material_name: str,
+    db: Session,
+    parsers: list[BaseParser],
+    region: str | None = None,
+    ttl_hours: int | None = None,
+) -> MaterialPrice | None:
+    '''
+    Возвращает цену материала, объединённую по всем зарегистрированным источникам
+    (#333) — по аналогии с get_labor_price/_combine_labor_prices.
+
+    Для каждого парсера вызывает get_price (там уже реализованы кэш/TTL, живой
+    fetch при PARSER_LIVE_FETCH и seed-fallback для ОДНОГО источника) и разбирает
+    результаты: parser-цены (не seed) объединяются в одну вилку через
+    _combine_material_prices; если валидных parser-цен нет ни у одного источника —
+    возвращаем seed-результат (у всех парсеров он одинаковый, достаточно любого).
+
+    Источников 0 (пустой parsers) — вернётся seed, как раньше при одном парсере.
+    '''
+    seed_source = db.query(PriceSource).filter(PriceSource.name == "seed").first()
+
+    material = db.query(Material).filter(Material.name == material_name).first()
+    if not material:
+        logger.warning(f"Материал '{material_name}' не найден в БД")
+        return None
+
+    parser_results: list[MaterialPrice] = []
+    seed_result: MaterialPrice | None = None
+    for parser in parsers:
+        result = get_price(material_name, db=db, parser=parser, region=region, ttl_hours=ttl_hours)
+        if result is None:
+            continue
+        if seed_source is not None and result.source_id == seed_source.id:
+            seed_result = result
+        else:
+            parser_results.append(result)
+
+    if parser_results:
+        combined = _combine_material_prices(db, material.id, parser_results)
+        logger.info(
+            f"Цена материала '{material_name}': источник=parser "
+            f"({', '.join(combined.contributing_sources)}), region={region}"
+        )
+        return combined
+
+    return seed_result
+
+
 def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
                           region: str | None) -> LaborPrice:
     '''

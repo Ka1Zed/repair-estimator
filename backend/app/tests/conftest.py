@@ -102,7 +102,7 @@ def pytest_sessionfinish(session, exitstatus):
 from app.db.models import Base  # noqa: E402 — импорт только после настройки тестовой БД
 from app.db.session import engine  # noqa: E402
 from app.main import app  # noqa: E402
-from app.api.estimates import get_db, get_material_parser  # noqa: E402
+from app.api.estimates import get_db, get_material_parsers  # noqa: E402
 from app.db.models import Material, LaborService, PriceSource, MaterialPrice, LaborPrice  # noqa: E402
 from app.parsers.base import BaseParser, ParsedPrice  # noqa: E402
 
@@ -317,9 +317,9 @@ def isolated_seeded_db(setup_test_db):
 
 
 # --- Герметизация эндпоинт-тестов от сети (#174) ---
-# /api/estimates/calculate берёт цены материалов через парсер. Чтобы тесты не
-# тащили живой Мегастрой (флак на VPN/офлайн/смене вёрстки), парсер инжектится
-# через зависимость get_material_parser и подменяется этой заглушкой.
+# /api/estimates/calculate берёт цены материалов через парсеры. Чтобы тесты не
+# тащили живой Мегастрой/Леман (флак на VPN/офлайн/смене вёрстки), список парсеров
+# инжектится через зависимость get_material_parsers и подменяется этой заглушкой.
 
 class _StubMaterialParser(BaseParser):
     """Заглушка парсера материалов: НЕ ходит в сеть.
@@ -357,14 +357,17 @@ def stub_material_parser():
     """Общая заглушка парсера материалов для эндпоинт-тестов.
 
     По умолчанию парсер падает → цены материалов берутся из seed, сети нет.
+    Подменяет ровно один источник (список из одного элемента) — этого достаточно
+    для тестов, не завязанных на объединение нескольких источников (#333); для
+    них см. get_material_price напрямую в test_price_normalization.py.
     Возвращает настройщик: вызови stub_material_parser(fetch) с функцией
     fetch(material_name) -> ParsedPrice, чтобы протестировать ветку парсера."""
 
     def _install(fetch=None):
         _clear_parser_material_prices()
-        app.dependency_overrides[get_material_parser] = lambda: _StubMaterialParser(fetch)
+        app.dependency_overrides[get_material_parsers] = lambda: [_StubMaterialParser(fetch)]
 
     _install()  # дефолт — падающий парсер, гарантированный seed
     yield _install
-    app.dependency_overrides.pop(get_material_parser, None)
+    app.dependency_overrides.pop(get_material_parsers, None)
 

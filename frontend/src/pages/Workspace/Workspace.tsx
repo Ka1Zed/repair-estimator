@@ -317,6 +317,11 @@ export function Workspace() {
         { label: "Цена за единицу", value: rub(Math.round(m.price_avg * scale)) },
         { label: "Итог по позиции", value: rub(Math.round(m.total_avg * scale)) },
         { label: "Источник цены", value: m.source, url: m.source_url },
+        // Когда цена объединена из нескольких источников (#333) — показываем полный
+        // список; source выше указывает лишь на представителя вилки.
+        ...(m.sources && m.sources.length > 1
+          ? [{ label: "Все источники", value: m.sources.join(", ") }]
+          : []),
         { label: "Регион", value: regionLabel(m.region) },
         ...(m.updated_at
           ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]

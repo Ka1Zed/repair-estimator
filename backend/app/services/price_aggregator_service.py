@@ -65,9 +65,15 @@ def get_price(
     2. Иначе, если передан парсер — пробуем спарсить и сохранить свежую цену.
     3. Если парсер упал/не передан/нет источника — берём seed-цену из БД.
        При заданном region сначала ищем seed-цену этого региона, при отсутствии —
-       базовую seed-цену с region IS NULL. Парсер региону не подчиняется (одна цена на всех).
+       базовую seed-цену с region IS NULL.
     4. force_refresh=True заставляет дёрнуть парсер даже при свежем кэше (для CLI update_prices).
     5. Наверх исключение не пробрасываем никогда.
+
+    Аргумент region используется ТОЛЬКО в seed-fallback (п.3). Ветка парсера (п.1-2)
+    региону-аргументу не подчиняется — она адресует кэш по region САМОГО инстанса
+    парсера (`parser.region`, #345, напр. LEMAN_MOSCOW), а не по тому, что запросил
+    вызывающий. Большинство парсеров (Мегастрой, базовый Леман) region не задают
+    (None) — их цены, как и раньше, region IS NULL независимо от запрошенного города.
 
     db — сессия приходит от вызывающего (Depends(get_db) в эндпоинте, своя SessionLocal()
     в CLI) — эта функция сама сессию не открывает и не закрывает.
@@ -100,12 +106,23 @@ def get_price(
                 "Досейте источник: python -m app.db.seed --missing"
             )
 
+        # Регион ЭТОГО инстанса парсера (#345, напр. LEMAN_MOSCOW.region ==
+        # "Москва") — НЕ аргумент region функции (тот только для seed ниже).
+        # Кэш адресуется (материал, источник, регион парсера), чтобы разные
+        # региональные инстансы одного источника (Леман Казань/Москва/СПб —
+        # общий source_id "Леман") не перезаписывали цены друг друга.
+        parser_region = parser.region
         price_entry = None
         if source:
-            price_entry = session.query(MaterialPrice).filter(
+            price_query = session.query(MaterialPrice).filter(
                 MaterialPrice.material_id == material.id,
-                MaterialPrice.source_id == source.id
-            ).first()
+                MaterialPrice.source_id == source.id,
+            )
+            if parser_region is not None:
+                price_query = price_query.filter(MaterialPrice.region == parser_region)
+            else:
+                price_query = price_query.filter(MaterialPrice.region.is_(None))
+            price_entry = price_query.first()
 
         # Свежий кэш парсера — отдаём без сетевого запроса
         if not force_refresh and price_entry and _is_fresh(price_entry.updated_at, ttl_hours):
@@ -147,6 +164,7 @@ def get_price(
                         price_entry = MaterialPrice(
                             material_id=material.id,
                             source_id=source.id,
+                            region=parser_region,
                             price_min=parsed.price_min,
                             price_avg=parsed.price_avg,
                             price_max=parsed.price_max,
@@ -205,9 +223,11 @@ def _combine_material_prices(session, material_id: int,
     т.к. это фасовка КОНКРЕТНОГО товара за этой ссылкой (расчёт упаковок должен
     остаться согласован с тем, что видно по ссылке).
 
-    region берём у представителя, а не из запроса: parser-цены материалов
-    нерегиональны (region IS NULL, одна цена на все города), и контракт (docs/api.md)
-    требует region=null для парсерной цены — как отдавал старый однопарсерный путь.
+    region берём у представителя, а не из запроса: у большинства источников
+    (Мегастрой, базовый Леман) region IS NULL, как и раньше (одна цена на все
+    города), но у региональных источников (#345, напр. LEMAN_MOSCOW) — реальный
+    город этого источника, а не эхо запрошенного (см. get_price про region
+    самого парсера vs аргумент region).
 
     Работает и для одного элемента rows (тогда вилка/представитель — этот же элемент),
     чтобы contributing_sources был заполнен и для единственного источника (как у labor).
@@ -238,6 +258,27 @@ def _combine_material_prices(session, material_id: int,
     return combined
 
 
+def _select_regional_parsers(parsers: list[BaseParser], city: str | None) -> list[BaseParser]:
+    '''
+    Некоторые источники материалов покрывают только конкретные города (#345,
+    напр. LEMAN_MOSCOW/LEMAN_SPB — свой домен и facet наличия по магазинам этого
+    города, см. leman_parser.py). Если среди parsers есть источник(и), чей
+    covered_cities включает запрошенный city, — берём ТОЛЬКО их: иначе цена
+    источника без городской привязки (напр. Мегастрой, который физически не
+    работает в Москве/СПб) утекла бы в вилку города, которого не покрывает.
+
+    Если ни один источник не покрывает именно этот город — берём все источники
+    без covered_cities (текущее поведение по умолчанию, единственный регион —
+    Казань). Источник со своим covered_cities, не совпадающим с city, никогда
+    не попадает в эту "по умолчанию" группу — иначе цена одного города могла бы
+    подмешаться в смету другого.
+    '''
+    exact = [p for p in parsers if city is not None and p.covered_cities and city in p.covered_cities]
+    if exact:
+        return exact
+    return [p for p in parsers if not p.covered_cities]
+
+
 def get_material_price(
     material_name: str,
     db: Session,
@@ -249,11 +290,16 @@ def get_material_price(
     Возвращает цену материала, объединённую по всем зарегистрированным источникам
     (#333) — по аналогии с get_labor_price/_combine_labor_prices.
 
-    Для каждого парсера вызывает get_price (там уже реализованы кэш/TTL, живой
-    fetch при PARSER_LIVE_FETCH и seed-fallback для ОДНОГО источника) и разбирает
-    результаты: parser-цены (не seed) объединяются в одну вилку через
-    _combine_material_prices; если валидных parser-цен нет ни у одного источника —
-    возвращаем seed-результат (у всех парсеров он одинаковый, достаточно любого).
+    region здесь — это и запрошенный город (для выбора источников через
+    _select_regional_parsers, #345), и seed-fallback регион, пробрасываемый в
+    get_price как раньше.
+
+    Для каждого выбранного парсера вызывает get_price (там уже реализованы
+    кэш/TTL, живой fetch при PARSER_LIVE_FETCH и seed-fallback для ОДНОГО
+    источника) и разбирает результаты: parser-цены (не seed) объединяются в
+    одну вилку через _combine_material_prices; если валидных parser-цен нет ни
+    у одного источника — возвращаем seed-результат (у всех парсеров он
+    одинаковый, достаточно любого).
 
     Источников 0 (пустой parsers) — вернётся seed, как раньше при одном парсере.
     '''
@@ -266,7 +312,7 @@ def get_material_price(
 
     parser_results: list[MaterialPrice] = []
     seed_result: MaterialPrice | None = None
-    for parser in parsers:
+    for parser in _select_regional_parsers(parsers, region):
         result = get_price(material_name, db=db, parser=parser, region=region, ttl_hours=ttl_hours)
         if result is None:
             continue

@@ -43,6 +43,20 @@ class BaseParser(ABC):
     # Например: "Мегастрой"
     source_name: str
 
+    # Регион (город), которому принадлежат цены ЭТОГО инстанса парсера (#345,
+    # напр. LEMAN_MOSCOW.region == "Москва") — пишется/читается в MaterialPrice.region
+    # веткой парсера в price_aggregator_service.get_price. None (по умолчанию) —
+    # источник без городской привязки, region IS NULL, как раньше.
+    region: str | None = None
+
+    # Города, для которых этот инстанс — единственный применимый источник
+    # материалов (#345, напр. LEMAN_MOSCOW). None (по умолчанию) — источник
+    # без городской привязки, участвует, когда для запрошенного города нет
+    # выделенного регионального парсера (см. price_aggregator_service.
+    # get_material_price._select_regional_parsers). Парсеров работ не
+    # касается — у них своя региональность через REGIONAL_LABOR_PARSERS.
+    covered_cities: frozenset[str] | None = None
+
     def known_materials(self) -> list[str]:
         '''
         Список материалов, которые парсер умеет обрабатывать (используется

@@ -100,6 +100,27 @@ _PAINT_CATEGORY = "https://kazan.lemanapro.ru/catalogue/kraski-dlya-sten-i-potol
 _SHPAKLEVKA_CATEGORY = "https://kazan.lemanapro.ru/catalogue/shpaklevki/"
 _IN_STOCK_KAZAN = "eligibilityByStores=Казань_Казань Солнечный_Казань Залесный"
 
+# Домен по умолчанию, зашитый в CATEGORY_MAP ниже (Казань) — регионализация
+# инстанса (#345) подменяет его строковой заменой в _localize_url, сам
+# CATEGORY_MAP не переписывается (меньше риск/диф на ~20 URL).
+_DEFAULT_HOST = "kazan.lemanapro.ru"
+
+# Региональные facet'ы "в наличии" (#345) — сверено вживую 06-07.2026 на
+# категории "Краски для стен и потолков", тот же принцип, что у _IN_STOCK_KAZAN
+# (магазин города + ближайшие пригороды/сателлиты). Пробелы вместо "+" — как и
+# у _IN_STOCK_KAZAN, браузерный фетч (patchright) сам перц-энкодит при переходе.
+_IN_STOCK_MOSCOW = (
+    "eligibilityByStores=Киевское Шоссе_Люберцы_Зеленоград_Лефортово_ЗИЛ_"
+    "Новая Рига_Алтуфьево_Пушкино_Красногорск_Юдино_Мытищи_Выхино_Шолохово_"
+    "Каширское шоссе_Рязанский проспект_Ногинск_Варшавское шоссе_Климовск_"
+    "Химки_Троицк_Домодедово_Жуковский_Истра"
+)
+_IN_STOCK_SPB = (
+    "eligibilityByStores=Партизана Германа_Бугры_Коллонтай_Испытателей_"
+    "Парашютная_Выборгское шоссе_Московское шоссе_Петергофское шоссе_"
+    "Уральская_Таллинское шоссе_Руставели"
+)
+
 CATEGORY_MAP: dict[str, tuple[str, ...]] = {
     "Краска для стен": (f"{_PAINT_CATEGORY}?{_IN_STOCK_KAZAN}&00277=Стена",),
     # Варианты по уровню (#331) — тот же URL категории, price_band (MATERIAL_UNITS)
@@ -327,7 +348,36 @@ def _select_package_size(
 class LemanParser(BaseParser):
     source_name = "Леман"
 
-    def __init__(self):
+    def __init__(
+        self,
+        region: str | None = None,
+        host: str = _DEFAULT_HOST,
+        in_stock_facet: str = _IN_STOCK_KAZAN,
+        extra_query: str | None = None,
+        covered_cities: frozenset[str] | None = None,
+    ):
+        # Регионализация инстанса (#345): один и тот же класс/CATEGORY_MAP,
+        # но домен и facet "в наличии" подменяются на лету под конкретный
+        # город (Москва/СПб — свои поддомен и список магазинов, см.
+        # _localize_url). region=None — прежнее поведение (Казань, зашита в
+        # CATEGORY_MAP как есть) — обратная совместимость, нулевой риск для
+        # существующего единственного региона.
+        #
+        # region — тег, под которым цены ЭТОГО инстанса пишутся/читаются в
+        # MaterialPrice (см. price_aggregator_service.get_price) — НЕ путать с
+        # аргументом region у get_price/get_material_price (тот — только для
+        # seed-fallback, ветки парсера не касается).
+        self.region = region
+        self._host = host
+        self._in_stock_facet = in_stock_facet
+        self._extra_query = extra_query
+        # covered_cities — города, для которых ЭТОТ инстанс — единственный
+        # применимый источник материалов (см. price_aggregator_service.
+        # get_material_price._select_regional_parsers). None — "базовый"
+        # источник без городской привязки (участвует, когда для запрошенного
+        # города нет выделенного регионального парсера — как сейчас для всех
+        # городов, кроме Москвы/СПб).
+        self.covered_cities = covered_cities
         # Опциональная общая браузерная сессия (см. leman_browser.LemanBrowserSession) —
         # update_prices() открывает её один раз на весь прогон материалов Лемана
         # и подставляет через set_session, чтобы не поднимать Chrome заново на
@@ -342,6 +392,21 @@ class LemanParser(BaseParser):
         # поднимали браузер одновременно.
         self._raw_cache: dict[tuple[str, ...], tuple[float, list]] = {}
         self._raw_cache_lock = threading.Lock()
+
+    def _localize_url(self, url: str) -> str:
+        # Меняем только домен и facet "в наличии" — путь категории и остальные
+        # facet'ы (00277=, 14431=, 22088=...) не зависят от города. Порядок
+        # query-параметров при добавлении extra_query (fromRegion=34 у СПб) не
+        # совпадает с URL, который скопировали из адресной строки браузера,
+        # но серверу порядок параметров не важен.
+        localized = url.replace(_DEFAULT_HOST, self._host).replace(_IN_STOCK_KAZAN, self._in_stock_facet)
+        if self._extra_query:
+            sep = "&" if "?" in localized else "?"
+            localized = f"{localized}{sep}{self._extra_query}"
+        return localized
+
+    def _category_urls(self, material_name: str) -> tuple[str, ...]:
+        return tuple(self._localize_url(url) for url in CATEGORY_MAP[material_name])
 
     def set_session(self, session) -> None:
         self._session = session
@@ -425,7 +490,7 @@ class LemanParser(BaseParser):
             )
 
         spec = MATERIAL_UNITS[material_name]
-        base_urls = CATEGORY_MAP[material_name]
+        base_urls = self._category_urls(material_name)
         raw = self._fetch_raw_candidates(base_urls, material_name)
 
         items: list[tuple[Decimal, str | None, str | None, Decimal | None]] = []
@@ -506,3 +571,23 @@ class LemanParser(BaseParser):
             source_url=source_url,
             package_size=package_size,
         )
+
+
+# Региональные инстансы (#345) — тот же класс/CATEGORY_MAP, свой домен и facet
+# "в наличии" (см. _localize_url). Мегастрой в эти города не заводим — сеть
+# физически не работает вне Поволжья (сверено вживую, см. docs/price-sources.md),
+# поэтому только Леман — единственный источник материалов для Москвы/СПб
+# (covered_cities — см. price_aggregator_service.get_material_price).
+LEMAN_MOSCOW = LemanParser(
+    region="Москва",
+    host="lemanapro.ru",
+    in_stock_facet=_IN_STOCK_MOSCOW,
+    covered_cities=frozenset({"Москва"}),
+)
+LEMAN_SPB = LemanParser(
+    region="Санкт-Петербург",
+    host="spb.lemanapro.ru",
+    in_stock_facet=_IN_STOCK_SPB,
+    extra_query="fromRegion=34",
+    covered_cities=frozenset({"Санкт-Петербург"}),
+)

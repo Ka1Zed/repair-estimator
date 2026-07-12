@@ -124,6 +124,11 @@ const scaleFor = (s: SummaryData, priceMode: PriceMode, category: 'materials' | 
   return 1;
 };
 
+// Точечное переопределение уровня для конкретного материала (по индексу в data.materials)
+// поверх глобального priceMode — синхронизировано с закреплением варианта в UI (Workspace.tsx).
+const resolveTier = (i: number, priceMode: PriceMode, overrides?: Record<number, PriceMode>): PriceMode =>
+  overrides?.[i] ?? priceMode;
+
 // Хелпер для получения РЕАЛЬНЫХ данных материала (с учетом выбранного уровня min/avg/max)
 const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: number) => {
   let activeName = m.name;
@@ -155,7 +160,12 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
   return { activeName, activePrice, activeTotal, activeSource, activeUrl };
 };
 
-export const exportXlsx = (data: EstimateExportData, city: string, priceMode: PriceMode = "avg") => {
+export const exportXlsx = (
+  data: EstimateExportData,
+  city: string,
+  priceMode: PriceMode = "avg",
+  materialOverrides?: Record<number, PriceMode>,
+) => {
   const wb = XLSX.utils.book_new();
   const today = new Date().toLocaleDateString('ru-RU');
   const s = data.summary;
@@ -217,8 +227,8 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
     [metaLine],
     [],
     ['Наименование', 'Кол-во', 'Ед. изм.', 'Цена за ед.', 'Итого', 'Источник', 'Дата цены'],
-    ...data.materials.map(m => {
-      const act = getActiveMaterialData(m, priceMode, scaleMat);
+    ...data.materials.map((m, i) => {
+      const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
         act.activeName, m.quantity, m.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
         sourceLabel(act.activeSource, m.region), fmtDate(m.updated_at),
@@ -229,7 +239,7 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
   const matFirst = 4;
   const matLast = matFirst + data.materials.length - 1;
   data.materials.forEach((m, i) => {
-    const act = getActiveMaterialData(m, priceMode, scaleMat);
+    const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
     if (!act.activeUrl) return;
     const ref = XLSX.utils.encode_cell({ r: matFirst + i, c: 5 });
     matSheet[ref].l = { Target: act.activeUrl, Tooltip: 'Открыть источник цены' };
@@ -244,7 +254,7 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
   if (data.materials.length) {
     styleTable(matSheet, {
       headerRow: 3, firstData: matFirst, lastData: matLast, firstCol: 0, lastCol: 6,
-      moneyCols: [3, 4], linkCol: 5, isLink: (i) => !!getActiveMaterialData(data.materials[i], priceMode, scaleMat).activeUrl,
+      moneyCols: [3, 4], linkCol: 5, isLink: (i) => !!getActiveMaterialData(data.materials[i], resolveTier(i, priceMode, materialOverrides), scaleMat).activeUrl,
     });
     matSheet['!autofilter'] = { ref: `${XLSX.utils.encode_cell({ r: 3, c: 0 })}:${XLSX.utils.encode_cell({ r: matLast, c: 6 })}` };
   }
@@ -291,8 +301,8 @@ export const exportXlsx = (data: EstimateExportData, city: string, priceMode: Pr
     ['Количество = базовый расход × запас, округлённое вверх до целых упаковок'],
     [],
     ['Материал', 'Базовый расход', 'Запас', 'Фасовка', 'Упаковок', 'Итого'],
-    ...data.materials.map(m => {
-      const act = getActiveMaterialData(m, priceMode, scaleMat);
+    ...data.materials.map((m, i) => {
+      const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
         act.activeName,
         `${fmtQty(m.base_quantity)} ${m.unit}`,
@@ -383,7 +393,12 @@ const getFinalY = (d: jsPDF) =>
 const fmtQty = (x: number) => x.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 const wastePct = (waste_factor: number) => `+${Math.round((waste_factor - 1) * 100)}%`;
 
-export const exportPdf = async (data: EstimateExportData, city: string, priceMode: PriceMode = "avg") => {
+export const exportPdf = async (
+  data: EstimateExportData,
+  city: string,
+  priceMode: PriceMode = "avg",
+  materialOverrides?: Record<number, PriceMode>,
+) => {
   const doc = new jsPDF();
   const s = data.summary;
 
@@ -443,15 +458,15 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
   };
 
   // Хелпер для ссылок — использует дженерик T для сохранения типобезопасности
-  const sourceLinks = <T,>(items: T[], col: number, getUrl: (item: T) => string | null | undefined) => ({
+  const sourceLinks = <T,>(items: T[], col: number, getUrl: (item: T, index: number) => string | null | undefined) => ({
     didParseCell: (h: CellHookData) => {
-      if (h.section === 'body' && h.column.index === col && getUrl(items[h.row.index])) {
+      if (h.section === 'body' && h.column.index === col && getUrl(items[h.row.index], h.row.index)) {
         h.cell.styles.textColor = PDF_ACCENT;
       }
     },
     didDrawCell: (h: CellHookData) => {
       if (h.section !== 'body' || h.column.index !== col) return;
-      const url = getUrl(items[h.row.index]);
+      const url = getUrl(items[h.row.index], h.row.index);
       if (url) doc.link(h.cell.x, h.cell.y, h.cell.width, h.cell.height, { url });
     },
   });
@@ -486,11 +501,11 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
   sectionHeading('Материалы', currentY);
   autoTable(doc, {
     ...tableBase,
-    ...sourceLinks(data.materials, 5, (m) => getActiveMaterialData(m, priceMode, scaleMat).activeUrl),
+    ...sourceLinks(data.materials, 5, (m, i) => getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat).activeUrl),
     startY: currentY + 4,
     head: [['Наименование', 'Кол-во', 'Ед.', 'Цена', 'Итого', 'Источник']],
-    body: data.materials.map(m => {
-      const act = getActiveMaterialData(m, priceMode, scaleMat);
+    body: data.materials.map((m, i) => {
+      const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
         act.activeName, m.quantity, m.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, m.region)
       ];
@@ -564,8 +579,8 @@ export const exportPdf = async (data: EstimateExportData, city: string, priceMod
     ...tableBase,
     startY: currentY + 9,
     head: [['Материал', 'Базовый расход', 'Запас', 'Фасовка', 'Упаковок', 'Итого']],
-    body: data.materials.map(m => {
-      const act = getActiveMaterialData(m, priceMode, scaleMat);
+    body: data.materials.map((m, i) => {
+      const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
         act.activeName,
         `${fmtQty(m.base_quantity)} ${m.unit}`,

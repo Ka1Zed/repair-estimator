@@ -7,6 +7,9 @@ export interface LedgerRowVariant {
   name: string;
   price: string;
   url?: string | null;
+  // Закрепить этот вариант для строки поверх глобального уровня цены;
+  // повторный клик по уже закреплённому варианту снимает закрепление.
+  onClick?: () => void;
 }
 
 export interface LedgerRow {
@@ -70,26 +73,49 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
               {row.variants && row.variants.length > 0 && (
                 <div className={styles.variantsBlock}>
                   <div className={styles.variantsTitle}>Варианты материалов:</div>
-                  {row.variants.map((v) => (
-                    <div
-                      key={v.mode}
-                      className={`${styles.variantItem} ${v.mode === row.activeMode ? styles.variantActive : ""}`}
-                    >
-                      <div className={styles.variantHeader}>
-                        <span className={styles.variantBadge}>{v.title}</span>
-                        <span className={styles.variantPrice}>{v.price}</span>
+                  {row.variants.map((v) => {
+                    const isActive = v.mode === row.activeMode;
+                    return (
+                      <div
+                        key={v.mode}
+                        role={v.onClick ? "button" : undefined}
+                        tabIndex={v.onClick ? 0 : undefined}
+                        onClick={v.onClick}
+                        onKeyDown={
+                          v.onClick
+                            ? (e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  v.onClick!();
+                                }
+                              }
+                            : undefined
+                        }
+                        title={v.onClick ? (isActive ? "Снять закрепление уровня для этой позиции" : "Закрепить этот уровень для этой позиции") : undefined}
+                        className={`${styles.variantItem} ${isActive ? styles.variantActive : ""} ${v.onClick ? styles.variantClickable : ""}`}
+                      >
+                        <div className={styles.variantHeader}>
+                          <span className={styles.variantBadge}>{v.title}</span>
+                          <span className={styles.variantPrice}>{v.price}</span>
+                        </div>
+                        <div className={styles.variantName}>
+                          {v.url ? (
+                            <a
+                              href={v.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={styles.sourceLink}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {v.name} ↗
+                            </a>
+                          ) : (
+                            v.name
+                          )}
+                        </div>
                       </div>
-                      <div className={styles.variantName}>
-                        {v.url ? (
-                          <a href={v.url} target="_blank" rel="noopener noreferrer" className={styles.sourceLink}>
-                            {v.name} ↗
-                          </a>
-                        ) : (
-                          v.name
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 

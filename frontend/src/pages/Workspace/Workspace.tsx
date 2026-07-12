@@ -81,6 +81,21 @@ export function Workspace() {
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState(0);
 
+  // Точечное переопределение уровня для конкретного материала (индекс в data.materials)
+  // поверх глобального ползунка: выбрали "Минимум" глобально, но зажали конкретный
+  // товар на "Премиум" — держится, пока не пересчитаем смету или не кликнут ещё раз.
+  const [materialOverrides, setMaterialOverrides] = useState<Record<number, PriceMode>>({});
+  const toggleMaterialOverride = useCallback((index: number, mode: PriceMode) => {
+    setMaterialOverrides((prev) => {
+      if (prev[index] === mode) {
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      }
+      return { ...prev, [index]: mode };
+    });
+  }, []);
+
   // Список городов для селектора. Если текущего города нет в ответе бэка,
   // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
   useEffect(() => {
@@ -188,6 +203,7 @@ export function Workspace() {
 
         setData({ ...avgRes, materials });
         setPriceMode("avg");
+        setMaterialOverrides({});
       } catch (err) {
         console.error(err);
         if (!silent) {
@@ -323,34 +339,54 @@ export function Workspace() {
     [data, priceMode],
   );
 
-  const sectionTotal = useMemo(() => {
-    if (!data) return 0;
-    const items = tab === "materials" ? data.materials : data.labor;
-    const sum = items.reduce((s, i) => s + (i.total_avg ?? 0), 0);
-    return Math.round(sum * priceScale(tab));
-  }, [data, tab, priceScale]);
-
-  const materialRows: LedgerRow[] = useMemo(() => {
+  // Материалы с учётом эффективного уровня по каждой строке (глобальный ползунок,
+  // если для строки нет точечного переопределения). Источник правды для materialRows
+  // и для суммы раздела — чтобы не считать total дважды по разной логике.
+  const materialsActive = useMemo(() => {
     const scale = priceScale("materials");
 
-    return (data?.materials ?? []).map((m) => {
-      const variants: LedgerRowVariant[] = [];
-      if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: m.min_item.source_url });
-      if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: m.avg_item.source_url });
-      if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: m.max_item.source_url });
+    return (data?.materials ?? []).map((m, i) => {
+      const effectiveMode = materialOverrides[i] ?? priceMode;
 
-      const activeVariant = priceMode === "min" ? m.min_item : priceMode === "max" ? m.max_item : m.avg_item;
+      const variants: LedgerRowVariant[] = [];
+      if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: m.min_item.source_url, onClick: () => toggleMaterialOverride(i, "min") });
+      if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: m.avg_item.source_url, onClick: () => toggleMaterialOverride(i, "avg") });
+      if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: m.max_item.source_url, onClick: () => toggleMaterialOverride(i, "max") });
+
+      const activeVariant = effectiveMode === "min" ? m.min_item : effectiveMode === "max" ? m.max_item : m.avg_item;
       const activeName = activeVariant?.name ?? m.name;
       const activePrice = activeVariant ? activeVariant.price : m.price_avg * scale;
       const activeTotal = activeVariant ? activeVariant.total : m.total_avg * scale;
       const activeUrl = activeVariant?.source_url ?? m.source_url;
       const activeSource = activeVariant?.source ?? m.source;
 
-      return {
+      // Ссылка на товар уже есть у каждой карточки в "Варианты материалов" —
+      // здесь просто перечисляем источники без дублирования ссылки.
+      const sourceNames = Array.from(
+        new Set([m.min_item?.source, m.avg_item?.source, m.max_item?.source].filter((s): s is string => !!s)),
+      );
+      const sourceLabel = sourceNames.length > 0 ? sourceNames.join(", ") : activeSource;
+
+      return { m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, sourceLabel, variants };
+    });
+  }, [data, priceScale, priceMode, materialOverrides, toggleMaterialOverride]);
+
+  const sectionTotal = useMemo(() => {
+    if (!data) return 0;
+    if (tab === "materials") {
+      return Math.round(materialsActive.reduce((s, x) => s + x.activeTotal, 0));
+    }
+    const sum = data.labor.reduce((s, i) => s + (i.total_avg ?? 0), 0);
+    return Math.round(sum * priceScale("labor"));
+  }, [data, tab, materialsActive, priceScale]);
+
+  const materialRows: LedgerRow[] = useMemo(
+    () =>
+      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, sourceLabel, variants }) => ({
         name: activeName,
         volume: `${formatQty(m.quantity)} ${m.unit}`,
         price: rub(Math.round(activePrice)),
-        activeMode: priceMode,
+        activeMode: effectiveMode,
         variants: variants.length > 0 ? variants : undefined,
         details: [
           { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
@@ -359,15 +395,19 @@ export function Workspace() {
           { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
           { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
           { label: "Итог по позиции", value: rub(Math.round(activeTotal)) },
-          { label: "Источник цены", value: activeSource, url: activeUrl },
+          {
+            label: "Источник цены",
+            value: sourceLabel,
+            ...(variants.length > 0 ? {} : { url: activeUrl }),
+          },
           { label: "Регион", value: regionLabel(m.region) },
           ...(m.updated_at
             ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
             : []),
         ],
-      };
-    });
-  }, [data, priceScale, priceMode]);
+      })),
+    [materialsActive],
+  );
 
   const toLedgerRow = useCallback(
     (l: LaborItem): LedgerRow => {
@@ -698,7 +738,7 @@ export function Workspace() {
                   <button
                     className={styles.exportBtn}
                     onClick={() =>
-                      data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode))
+                      data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode, materialOverrides))
                     }
                   >
                     Скачать PDF
@@ -706,7 +746,7 @@ export function Workspace() {
                   <button
                     className={styles.exportBtn}
                     onClick={() =>
-                      data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode))
+                      data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode, materialOverrides))
                     }
                   >
                     Экспорт в Excel

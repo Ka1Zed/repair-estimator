@@ -155,6 +155,7 @@
   }
 }
 .variantsBlock {
+  grid-column: 1 / -1;
   margin-bottom: 16px;
   padding-bottom: 16px;
   border-bottom: 1px dashed var(--border-color, #e5e5e5);
@@ -180,6 +181,19 @@
   border-color: var(--color-accent, #b07b5e);
   background: var(--bg-primary, #ffffff);
   box-shadow: 0 0 0 1px var(--color-accent, #b07b5e);
+}
+
+.variantClickable {
+  cursor: pointer;
+}
+
+.variantClickable:hover {
+  border-color: var(--color-accent, #b07b5e);
+}
+
+.variantClickable:focus-visible {
+  outline: 2px solid var(--color-accent, #b07b5e);
+  outline-offset: 2px;
 }
 
 .variantHeader {

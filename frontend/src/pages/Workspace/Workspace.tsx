@@ -635,6 +635,12 @@ export function Workspace() {
               >
                 Черновая + чистовая
               </button>
+              <button
+                className={`${styles.scopeBtn} ${scope === "rough_only" ? styles.scopeBtnActive : ""}`}
+                onClick={() => setScope("rough_only")}
+              >
+                Только черновая
+              </button>
             </div>
           </div>
         </div>
@@ -795,6 +801,13 @@ export function Workspace() {
               {(data.scope ?? scope) === "finish_only" && (
                 <p className={styles.scopeNote}>
                   Смета охватывает только чистовую отделку — черновые работы не включены.
+                </p>
+              )}
+
+              {(data.scope ?? scope) === "rough_only" && (
+                <p className={styles.scopeNote}>
+                  Смета охватывает только черновую и предчистовую подготовку — чистовая
+                  отделка не включена.
                 </p>
               )}
 

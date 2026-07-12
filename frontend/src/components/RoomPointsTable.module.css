@@ -1,0 +1,45 @@
+.wrapper {
+  margin-top: 30px;
+  border-top: 1px solid #444;
+  padding-top: 20px;
+}
+
+.table {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+  margin-bottom: 15px;
+}
+
+.th {
+  padding-bottom: 10px;
+}
+
+.td {
+  padding: 5px 0;
+}
+
+.input {
+  width: 80px;
+  padding: 5px;
+}
+
+.deleteBtn {
+  padding: 5px 10px;
+  cursor: pointer;
+  background: #fff;
+  color: #B5524A;
+  border: 1px solid #E3C9C4;
+  border-radius: 3px;
+}
+
+.addBtn {
+  padding: 8px 15px;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}

@@ -6,6 +6,9 @@
 #     layers, pattern_factor
 #   - материал ищется по slug (машинный ключ, см. seed_data/materials.json и #278;
 #     name остаётся человекочитаемым label для API-ответов, по нему не матчим)
+#   - позиции с несколькими SKU по уровню комплектации (finish_key/variant_tier,
+#     #331) резолвятся через _resolve_material(db, key, tier) с fallback на
+#     ближайший уровень; позиции без вариантов ищутся по slug, как раньше
 #   - формула зависит от unit (см. estimation-rules.md)
 #   - число слоёв (layers) и надбавка на раппорт обоев (pattern_factor) — колонки
 #     Material, значения в seed_data/materials.json (#278); дефолт при NULL — 1
@@ -44,6 +47,72 @@ M_LIGHT         = "light"
 M_CABLE         = "cable"
 M_PIPE          = "pipe"
 
+# ---- finish_key позиций отделки с вариантами по уровню комплектации (#331) ----
+# У этих 6 позиций несколько строк Material с одним finish_key и разным
+# variant_tier (min/avg/max — эконом/стандарт/премиум). Остальные материалы
+# (плинтус, клей, затирка, кабель, труба, грунт, шпаклёвка...) вариантов не
+# имеют — для них _selections по-прежнему кладёт обычный slug.
+FK_FLOOR_LAMINATE = "floor.laminate"
+FK_WALLS_PAINT    = "walls.paint"
+FK_CEILING_PAINT  = "ceiling.paint"
+FK_TILE           = "tile"
+FK_WALLS_WALLPAPER = "walls.wallpaper"
+FK_SOCKET         = "socket"
+
+# Ровно эти ключи _selections отдаёт как finish_key (позиции с вариантами) —
+# по ним резолвим SKU через variant_tier. Всё остальное — обычные slug, ищем
+# одной строкой по slug, без лишнего запроса по finish_key на каждый материал.
+_FINISH_KEYS = frozenset({
+    FK_FLOOR_LAMINATE, FK_WALLS_PAINT, FK_CEILING_PAINT,
+    FK_TILE, FK_WALLS_WALLPAPER, FK_SOCKET,
+})
+
+# Порядок fallback, если у finish_key нет варианта запрошенного tier (#331):
+# ближайший уровень, затем стандарт как последний резерв (он есть всегда —
+# родовые материалы мигрировали в variant_tier=avg миграцией d8b3c1f4a927).
+_FALLBACK_ORDER = {
+    "min": ("min", "avg", "max"),
+    "avg": ("avg", "min", "max"),
+    "max": ("max", "avg", "min"),
+}
+
+
+def _resolve_material(db: Session, key: str, tier: str) -> Material | None:
+    """Материал по (finish_key, tier) с fallback на ближайший уровень, либо по slug.
+
+    key — либо finish_key позиции с вариантами (FK_*, см. _FINISH_KEYS), либо
+    обычный slug (для материалов без вариантов). Для finish_key выбираем нужный
+    tier или ближайший по _FALLBACK_ORDER; для остальных — обычной строкой по
+    slug, как раньше (без лишнего запроса по finish_key на каждый материал).
+    """
+    if key in _FINISH_KEYS:
+        variants = db.query(Material).filter(Material.finish_key == key).all()
+        by_tier = {m.variant_tier: m for m in variants}
+        for t in _FALLBACK_ORDER.get(tier, _FALLBACK_ORDER["avg"]):
+            if t in by_tier:
+                return by_tier[t]
+        return None
+    return db.query(Material).filter(Material.slug == key).first()
+
+# ---- стадии материалов (#303): rough / finish ----
+# Только грунт и стартовая (выравнивающая) шпаклёвка — ближайший существующий аналог
+# «штукатурки» из чек-листа issue; стяжка/штукатурка как отдельные материалы пока не
+# заведены (labor-only, см. calculate_rough_labor). Кабель и труба — разводка, черновой
+# этап (как cable_lay/pipe_mount в labor). Розетка/светильник — приборы: их дефолтная
+# стадия finish, в rough_only не закупаются (монтаж socket_mount/light_mount тоже finish).
+# Слаг без записи — finish (дефолт).
+STAGE_BY_MATERIAL = {
+    M_PRIMER:      "rough",
+    M_PUTTY_START: "rough",
+    M_CABLE:       "rough",
+    M_PIPE:        "rough",
+}
+
+
+def material_stage_of(slug: str) -> str:
+    """Стадия материала по slug; дефолт — finish (чистовая)."""
+    return STAGE_BY_MATERIAL.get(slug, "finish")
+
 
 def packs_to_buy(pack_quantity: Decimal) -> int:
     """ceil до целых упаковок. Вызывать на агрегации (B1-5), не на комнате."""
@@ -71,7 +140,7 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
 
     # --- пол ---
     if floor == "laminate":
-        sel.append((M_LAMINATE, floor_area))
+        sel.append((FK_FLOOR_LAMINATE, floor_area))
         sel.append((M_PLINTH, floor_area))      # area для плинтуса не важна, считается по периметру
     elif floor == "linoleum":
         sel.append((M_LINOLEUM, floor_area))
@@ -84,17 +153,23 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
     # --- стены ---
     # Покраска (обычная/влагостойкая) идёт с одинаковой подготовкой основания
     # (грунт → стартовая → финишная шпаклёвка), отличается только сама краска.
+    # Вариант по уровню (#331) есть только у обычной краски (walls.paint) —
+    # влагостойкая остаётся tier-agnostic материалом.
     if walls in ("paint", "moisture_paint"):
         sel.append((M_PRIMER, wall_area))        # грунтовка, 1 слой
         sel.append((M_PUTTY_START, wall_area))   # стартовая шпаклёвка (выравнивание)
         sel.append((M_PUTTY, wall_area))         # финишная шпаклёвка
-        sel.append((M_PAINT_WALLS if walls == "paint" else M_PAINT_MOIST, wall_area))  # 2 слоя
+        sel.append((FK_WALLS_PAINT if walls == "paint" else M_PAINT_MOIST, wall_area))  # 2 слоя
     elif walls == "wallpaper":
-        sel.append((M_WALLPAPER, wall_area))
+        # Обои тоже требуют выравнивания основания (#325), но без финишной
+        # шпаклёвки — мелкие огрехи полотно скрывает само.
+        sel.append((M_PRIMER, wall_area))        # грунтовка, 1 слой
+        sel.append((M_PUTTY_START, wall_area))   # стартовая шпаклёвка (выравнивание)
+        sel.append((FK_WALLS_WALLPAPER, wall_area))
 
     # --- потолок ---
     if ceiling == "paint":
-        sel.append((M_PAINT_CEILING, ceiling_area))
+        sel.append((FK_CEILING_PAINT, ceiling_area))
     elif ceiling == "moisture_paint":
         sel.append((M_PAINT_MOIST, ceiling_area))   # влагостойкая (санузел)
     # ceiling == "stretch" (натяжной) — материал (плёнка/профиль) входит в цену
@@ -107,7 +182,7 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
     if walls == "tile":
         tiled += wall_area
     if tiled > 0:
-        sel.append((M_TILE, tiled))
+        sel.append((FK_TILE, tiled))
         sel.append((M_ADHESIVE, tiled))
         sel.append((M_GROUT, tiled))
 
@@ -191,6 +266,8 @@ def calculate_engineering_materials(
     cable_m: Any,
     pipe_m: Any,
     db: Session,
+    include_finish: bool = True,
+    tier: str = "avg",
 ) -> List[Dict[str, Any]]:
     """Материалы электрики/сантехники по явным числам из works (не через quantity_of).
 
@@ -199,20 +276,29 @@ def calculate_engineering_materials(
     труба округляется вверх до хлыста 2 м на общей агрегации (package_size = 2).
     Мелочёвка (подрозетники, фитинги) отдельными строками не заводится — она в стоимости
     работ. См. docs/estimation-rules.md.
+
+    include_finish: False при scope=rough_only (#303) — оставляет разводку (кабель/труба,
+        stage="rough"), убирает приборы (розетка/светильник, stage="finish"): их монтаж
+        (socket_mount/light_mount) в rough_only тоже не считается.
+    tier: уровень комплектации (#331) — розетка (FK_SOCKET) выбирается вариантом по
+        tier с fallback (см. _resolve_material); светильник/кабель/труба вариантов
+        не имеют, tier на них не влияет.
     """
     result: List[Dict[str, Any]] = []
-    # (имя, количество, применять ли waste_factor) — штучные без запаса, погонаж с запасом.
+    # (ключ, количество, применять ли waste_factor) — штучные без запаса, погонаж с запасом.
     specs = [
-        (M_SOCKET, sockets, False),
+        (FK_SOCKET, sockets, False),
         (M_LIGHT, lights, False),
         (M_CABLE, cable_m, True),
         (M_PIPE, pipe_m, True),
     ]
-    for slug, count, with_waste in specs:
+    for key, count, with_waste in specs:
+        if not include_finish and material_stage_of(key) == "finish":
+            continue
         qty = D(count)
         if qty <= 0:
             continue
-        material = db.query(Material).filter(Material.slug == slug).first()
+        material = _resolve_material(db, key, tier)
         if material is None:
             continue
         base_qty = qty
@@ -228,12 +314,20 @@ def calculate_materials(
     geometry: Dict[str, Any],
     repair_options: Dict[str, Any],
     db: Session,
+    include_finish: bool = True,
+    tier: str = "avg",
 ) -> List[Dict[str, Any]]:
     """
     Считает материалы для одной комнаты по геометрии и выбранной отделке.
 
     geometry: floor_area, ceiling_area, wall_area, perimeter, door_width_sum
     repair_options: {floor, walls, ceiling, electric, plumbing} (контракт api.md)
+    include_finish: False при scope=rough_only (#303) — отбрасывает материалы со
+        stage="finish" (краска/обои/плитка+клей+затирка/ламинат-линолеум-паркет+плинтус,
+        финишная шпаклёвка), оставляет грунт и стартовую шпаклёвку (STAGE_BY_MATERIAL).
+    tier: уровень комплектации (#331) — для позиций с finish_key (см. _selections)
+        выбирает конкретный SKU-вариант (эконом/стандарт/премиум) с fallback на
+        ближайший уровень, если у позиции нет варианта запрошенного tier.
 
     Возвращает позиции с ДРОБНЫМ pack_quantity (округление — в B1-5):
         material_id, name, quantity (Decimal), base_quantity, waste_factor,
@@ -241,8 +335,10 @@ def calculate_materials(
     """
     result: List[Dict[str, Any]] = []
 
-    for material_slug, area in _selections(repair_options, geometry):
-        material = db.query(Material).filter(Material.slug == material_slug).first()
+    for material_key, area in _selections(repair_options, geometry):
+        if not include_finish and material_stage_of(material_key) == "finish":
+            continue
+        material = _resolve_material(db, material_key, tier)
         if material is None:
             # материала нет в БД (например, не засидован) — пропускаем
             continue

@@ -102,7 +102,7 @@ def pytest_sessionfinish(session, exitstatus):
 from app.db.models import Base  # noqa: E402 — импорт только после настройки тестовой БД
 from app.db.session import engine  # noqa: E402
 from app.main import app  # noqa: E402
-from app.api.estimates import get_db, get_material_parser  # noqa: E402
+from app.api.estimates import get_db, get_material_parsers  # noqa: E402
 from app.db.models import Material, LaborService, PriceSource, MaterialPrice, LaborPrice  # noqa: E402
 from app.parsers.base import BaseParser, ParsedPrice  # noqa: E402
 
@@ -121,6 +121,15 @@ def seed_test_data(session):
         name="Мегастрой",
         type="parser",
         url="https://megastroy.com",
+        last_checked=datetime.now(timezone.utc)
+    )
+    # Второй источник материалов — Леман (Казань/Москва/СПб делят один source_id,
+    # цены разводятся по MaterialPrice.region, #345). Нужен, чтобы эндпоинт-тесты
+    # могли проверить объединение источников и выбор регионального парсера.
+    src_leman = PriceSource(
+        name="Леман",
+        type="parser",
+        url="https://lemanapro.ru",
         last_checked=datetime.now(timezone.utc)
     )
     # Источники региональных парсеров работ (#166).
@@ -146,6 +155,7 @@ def seed_test_data(session):
     )
     session.add(src)
     session.add(src_megastroy)
+    session.add(src_leman)
     session.add(src_garant)
     session.add(src_remont_uroven)
     session.add(src_otdelka)
@@ -154,23 +164,23 @@ def seed_test_data(session):
 
     # Материалы (с категорией). slug — как в seed_data/materials.json (#278).
     materials_data = [
-        {"name": "Краска для стен", "slug": "paint_walls", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2},
-        {"name": "Краска потолочная", "slug": "paint_ceiling", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9, "layers": 2},
+        {"name": "Краска для стен", "slug": "paint_walls", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "walls.paint", "variant_tier": "avg"},
+        {"name": "Краска потолочная", "slug": "paint_ceiling", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "ceiling.paint", "variant_tier": "avg"},
         {"name": "Грунтовка", "slug": "primer", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10, "layers": 1},
         {"name": "Шпаклевка стартовая", "slug": "putty_start", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30},
         {"name": "Шпаклевка финишная", "slug": "putty_finish", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
-        {"name": "Ламинат", "slug": "laminate", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
+        {"name": "Ламинат", "slug": "laminate", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0, "finish_key": "floor.laminate", "variant_tier": "avg"},
         {"name": "Плинтус", "slug": "plinth", "category": "floor", "unit": "м", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
-        {"name": "Плитка", "slug": "tile", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 1.2},
+        {"name": "Плитка", "slug": "tile", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 1.2, "finish_key": "tile", "variant_tier": "avg"},
         {"name": "Плиточный клей", "slug": "tile_adhesive", "category": "tile", "unit": "кг", "consumption_per_m2": 4.5, "waste_factor": 1.1, "package_size": 25},
         {"name": "Затирка", "slug": "grout", "category": "tile", "unit": "кг", "consumption_per_m2": 0.4, "waste_factor": 1.1, "package_size": 2},
-        {"name": "Обои", "slug": "wallpaper", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1, "pattern_factor": 1.3},
+        {"name": "Обои", "slug": "wallpaper", "category": "wall", "unit": "рулон", "consumption_per_m2": 0.2, "waste_factor": 1.1, "package_size": 1, "pattern_factor": 1.3, "finish_key": "walls.wallpaper", "variant_tier": "avg"},
         {"name": "Линолеум", "slug": "linoleum", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
         {"name": "Паркетная доска", "slug": "parquet", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0},
         {"name": "Краска влагостойкая", "slug": "paint_moisture", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2},
         # Инженерка (works.electric / works.plumbing) — количество из запроса, не по норме.
         {"name": "Кабель электрический", "slug": "cable", "category": "electric", "unit": "м", "waste_factor": 1.1, "package_size": 1.0},
-        {"name": "Розетка", "slug": "socket", "category": "electric", "unit": "шт", "package_size": 1},
+        {"name": "Розетка", "slug": "socket", "category": "electric", "unit": "шт", "package_size": 1, "finish_key": "socket", "variant_tier": "avg"},
         {"name": "Светильник", "slug": "light", "category": "electric", "unit": "шт", "package_size": 1},
         {"name": "Труба водопроводная", "slug": "pipe", "category": "plumbing", "unit": "м", "waste_factor": 1.1, "package_size": 2.0},
     ]
@@ -182,6 +192,34 @@ def seed_test_data(session):
     for mat in session.query(Material).all():
         mp = MaterialPrice(material_id=mat.id, source_id=src.id, price_min=100, price_avg=120, price_max=140)
         session.add(mp)
+
+    # Варианты floor.laminate по уровню комплектации (#331) — для тестов резолва
+    # SKU по (finish_key, tier) и его fallback. ceiling.paint/socket намеренно
+    # остаются БЕЗ min/max-варианта (только avg выше) — на них тестируется
+    # fallback на ближайший уровень.
+    variant_materials = [
+        Material(
+            name="Ламинат эконом", slug="laminate_economy", category="floor", unit="м²",
+            consumption_per_m2=1.0, waste_factor=1.15, package_size=1.5,
+            finish_key="floor.laminate", variant_tier="min",
+        ),
+        Material(
+            name="Ламинат премиум", slug="laminate_premium", category="floor", unit="м²",
+            consumption_per_m2=1.0, waste_factor=1.15, package_size=2.5,
+            finish_key="floor.laminate", variant_tier="max",
+        ),
+    ]
+    for mat in variant_materials:
+        session.add(mat)
+    session.flush()
+    session.add(MaterialPrice(
+        material_id=variant_materials[0].id, source_id=src.id,
+        price_min=350, price_avg=450, price_max=600,
+    ))
+    session.add(MaterialPrice(
+        material_id=variant_materials[1].id, source_id=src.id,
+        price_min=2200, price_avg=3200, price_max=4500,
+    ))
 
     # Региональная seed-цена для теста регионального lookup (#127):
     # отличается от базовой (avg 200 против 120), чтобы выбор региона был заметен.
@@ -289,9 +327,9 @@ def isolated_seeded_db(setup_test_db):
 
 
 # --- Герметизация эндпоинт-тестов от сети (#174) ---
-# /api/estimates/calculate берёт цены материалов через парсер. Чтобы тесты не
-# тащили живой Мегастрой (флак на VPN/офлайн/смене вёрстки), парсер инжектится
-# через зависимость get_material_parser и подменяется этой заглушкой.
+# /api/estimates/calculate берёт цены материалов через парсеры. Чтобы тесты не
+# тащили живой Мегастрой/Леман (флак на VPN/офлайн/смене вёрстки), список парсеров
+# инжектится через зависимость get_material_parsers и подменяется этой заглушкой.
 
 class _StubMaterialParser(BaseParser):
     """Заглушка парсера материалов: НЕ ходит в сеть.
@@ -329,14 +367,17 @@ def stub_material_parser():
     """Общая заглушка парсера материалов для эндпоинт-тестов.
 
     По умолчанию парсер падает → цены материалов берутся из seed, сети нет.
+    Подменяет ровно один источник (список из одного элемента) — этого достаточно
+    для тестов, не завязанных на объединение нескольких источников (#333); для
+    них см. get_material_price напрямую в test_price_normalization.py.
     Возвращает настройщик: вызови stub_material_parser(fetch) с функцией
     fetch(material_name) -> ParsedPrice, чтобы протестировать ветку парсера."""
 
     def _install(fetch=None):
         _clear_parser_material_prices()
-        app.dependency_overrides[get_material_parser] = lambda: _StubMaterialParser(fetch)
+        app.dependency_overrides[get_material_parsers] = lambda: [_StubMaterialParser(fetch)]
 
     _install()  # дефолт — падающий парсер, гарантированный seed
     yield _install
-    app.dependency_overrides.pop(get_material_parser, None)
+    app.dependency_overrides.pop(get_material_parsers, None)
 

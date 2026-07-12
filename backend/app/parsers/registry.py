@@ -9,20 +9,30 @@
 from app.parsers.base import BaseParser
 from app.parsers.garantstroikompleks_parser import GarantStroiParser
 from app.parsers.kaz_stroyka_parser import KazStroykaParser
-from app.parsers.leman_parser import LemanParser
+from app.parsers.leman_parser import LEMAN_MOSCOW, LEMAN_SPB, LemanParser
 from app.parsers.megastroy_parser import MegastroyParser
 from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
 from app.parsers.prorabneva_parser import ProrabnevaParser
 from app.parsers.rembrigada_parser import RembrigadaParser
 from app.parsers.remont_uroven_parser import RemontUrovenParser
 
-# Парсеры цен материалов. Два источника (Мегастрой, Леман); calc-код
-# (estimates.get_material_parser) пока читает только первый элемент — выбор/
-# комбинирование цен между несколькими источниками в самой смете вне scope #276,
-# это отдельная будущая задача поверх уже готового списка ниже.
+# Базовые (без городской привязки) парсеры цен материалов. Два источника
+# (Мегастрой, Леман-Казань); смета читает весь список и объединяет их цены в
+# одну вилку (price_aggregator_service.get_material_price, #333).
 MATERIAL_PARSERS: list[BaseParser] = [
     MegastroyParser(),
     LemanParser(),
+]
+
+# Региональные источники материалов (#345) — покрывают только свой город
+# (BaseParser.covered_cities), подставляются get_material_price ВМЕСТО
+# MATERIAL_PARSERS для этого города, а не поверх (Мегастрой физически не
+# работает в Москве/СПб — не должен утекать туда как якобы безрегиональный
+# источник). Пока только Леман (свой поддомен + facet наличия по магазинам
+# города), см. docs/price-sources.md.
+REGIONAL_MATERIAL_PARSERS: list[BaseParser] = [
+    LEMAN_MOSCOW,
+    LEMAN_SPB,
 ]
 
 # Базовый (безрегиональный) прайс работ.

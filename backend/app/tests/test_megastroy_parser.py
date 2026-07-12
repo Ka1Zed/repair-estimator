@@ -13,13 +13,15 @@ from decimal import Decimal
 import pytest
 
 from app.parsers import megastroy_parser
-from app.parsers._stats import filter_outliers
+from app.parsers._stats import filter_outliers, price_band_slice
 from app.parsers.megastroy_parser import (
     CATEGORY_MAP,
     MegastroyParser,
     _build_headers,
+    _cable_length_m_from_title,
     _length_m_from_title,
     _parse_page,
+    _pipe_length_m_from_title,
     _quantity_from_title,
     _site_unit,
 )
@@ -46,6 +48,23 @@ def _item(price: str, href: str | None, title: str = "Краска для сте
         f'<meta content="{price}" itemprop="price">'
         "</div></div>"
         f"{link}"
+        "</div>"
+    )
+
+
+def _collection_item(price_text: str, href: str | None, title: str = "Линолеум А") -> str:
+    # Карточка-коллекция (линолеум, #335): нет itemprop=price, цена только
+    # текстом "от 325 ₽/м2", ссылка ведёт на /catalog/collection/<id>.
+    link = f'<a href="{href}" title="{title}">{title}</a>' if href else ""
+    return (
+        '<div class="products-list__item">'
+        f'<a class="products-list__image-link" href="{href or "#"}"></a>'
+        '<div class="products-list__content-title">'
+        f"{link}"
+        "</div>"
+        '<div class="products-price">'
+        f'<div class="products-price__value">{price_text}</div>'
+        "</div>"
         "</div>"
     )
 
@@ -156,12 +175,34 @@ def test_paint_divides_price_by_liters_from_title(monkeypatch):
     assert parsed.price_min == Decimal("223.2")
 
 
+def test_paint_package_size_matches_source_product(monkeypatch):
+    # package_size (#306) — фасовка ИМЕННО товара-представителя (10 л из его
+    # названия), не справочное значение из materials.json (там для краски — 9).
+    html = _page(_item("2232", "/products/1", title="Краска латексная Dufa 10 л"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Краска для стен")
+
+    assert parsed.package_size == Decimal("10")
+
+
 def test_paint_without_liters_in_title_is_skipped(monkeypatch):
     html = _page(_item("2232", "/products/1", title="Краска латексная Dufa без объёма"))
     _patch_pages(monkeypatch, html)
 
     with pytest.raises(RuntimeError):
         MegastroyParser().fetch_price("Краска для стен")
+
+
+def test_moisture_resistant_paint_divides_price_by_liters_from_title(monkeypatch):
+    # Краска влагостойкая (#335): тот же title_unit="л" механизм, что и у обычной
+    # краски, категория/фасет отдельные (field142[]=для ванн и кухонь).
+    html = _page(_item("2718", "/products/1", title="Краска для кухонь и ванных комнат Olimp 9 л"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Краска влагостойкая")
+
+    assert parsed.price_min == Decimal("302")  # 2718 / 9, единственная цена в выборке
 
 
 def test_source_url_points_to_product_closest_to_avg(monkeypatch):
@@ -232,6 +273,147 @@ def test_fetch_price_excludes_outliers_from_spread_and_source(monkeypatch):
     assert parsed.price_max == Decimal("250")
     assert parsed.price_max / parsed.price_min < 4
     assert "designer" not in (parsed.source_url or "")
+
+
+def test_price_band_slice_takes_low_and_high_terciles():
+    items = _items("400", "500", "600", "700", "800", "900")
+    low = price_band_slice(items, "low", key=lambda it: it[0])
+    high = price_band_slice(items, "high", key=lambda it: it[0])
+    assert [p for p, _ in low] == [Decimal("400"), Decimal("500")]
+    assert [p for p, _ in high] == [Decimal("800"), Decimal("900")]
+    # avg/None — вся выборка без изменений (стандартный tier).
+    assert price_band_slice(items, None, key=lambda it: it[0]) == items
+    # На маленькой выборке треть выродилась бы в пустоту — не режем.
+    small = _items("100", "200")
+    assert price_band_slice(small, "low", key=lambda it: it[0]) == small
+
+
+def test_fetch_price_economy_and_premium_return_different_products(monkeypatch):
+    """#331: 'Ламинат эконом'/'Ламинат премиум' берут нижнюю/верхнюю треть цен той
+    же категории — разные товары (source_url), а не только разная цена."""
+    html = _page(
+        _item("400", "/catalog/x/lam-a", title="Ламинат А", unit="м²"),
+        _item("500", "/catalog/x/lam-b", title="Ламинат Б", unit="м²"),
+        _item("600", "/catalog/x/lam-c", title="Ламинат В", unit="м²"),
+        _item("700", "/catalog/x/lam-d", title="Ламинат Г", unit="м²"),
+        _item("800", "/catalog/x/lam-e", title="Ламинат Д", unit="м²"),
+        _item("900", "/catalog/x/lam-f", title="Ламинат Е", unit="м²"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    economy = MegastroyParser().fetch_price("Ламинат эконом")
+    premium = MegastroyParser().fetch_price("Ламинат премиум")
+    standard = MegastroyParser().fetch_price("Ламинат")
+
+    assert economy.price_max <= Decimal("500")
+    assert premium.price_min >= Decimal("800")
+    assert economy.source_url != premium.source_url
+    # Стандарт (без price_band) по-прежнему считает по всей категории.
+    assert standard.price_min == Decimal("400")
+    assert standard.price_max == Decimal("900")
+
+
+def test_fetch_price_shares_category_fetch_across_variants(monkeypatch):
+    """#341: 'Ламинат'/'эконом'/'премиум' указывают на тот же urls — категория
+    должна скачиваться один раз на весь update_prices, а не по разу на вариант."""
+    html = _page(
+        _item("400", "/catalog/x/lam-a", title="Ламинат А", unit="м²"),
+        _item("500", "/catalog/x/lam-b", title="Ламинат Б", unit="м²"),
+        _item("600", "/catalog/x/lam-c", title="Ламинат В", unit="м²"),
+        _item("700", "/catalog/x/lam-d", title="Ламинат Г", unit="м²"),
+        _item("800", "/catalog/x/lam-e", title="Ламинат Д", unit="м²"),
+        _item("900", "/catalog/x/lam-f", title="Ламинат Е", unit="м²"),
+    )
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, text: str, status_code: int = 200):
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(self.status_code)
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        return FakeResponse(html) if "page=" not in url else FakeResponse("", 404)
+
+    monkeypatch.setattr(megastroy_parser.requests, "get", fake_get)
+    monkeypatch.setattr(megastroy_parser.time, "sleep", lambda *a, **k: None)
+
+    parser = MegastroyParser()
+    parser.fetch_price("Ламинат")
+    parser.fetch_price("Ламинат эконом")
+    parser.fetch_price("Ламинат премиум")
+
+    # Один полный фетч категории (стр.1 + стр.2 с 404) на все три материала, не три.
+    assert len(calls) == 2
+
+
+def test_fetch_price_does_not_share_cache_across_different_categories(monkeypatch):
+    # Разные категории (краска vs ламинат) не должны путать кэш друг с другом.
+    laminate_html = _page(_item("400", "/catalog/x/lam-a", title="Ламинат А", unit="м²"))
+    paint_html = _page(_item("223", "/catalog/x/paint-a", title="Краска А 1л"))
+
+    class FakeResponse:
+        def __init__(self, text: str, status_code: int = 200):
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(self.status_code)
+
+    def fake_get(url, **kwargs):
+        if "page=" in url:
+            return FakeResponse("", 404)
+        if "laminat" in url:
+            return FakeResponse(laminate_html)
+        return FakeResponse(paint_html)
+
+    monkeypatch.setattr(megastroy_parser.requests, "get", fake_get)
+    monkeypatch.setattr(megastroy_parser.time, "sleep", lambda *a, **k: None)
+
+    parser = MegastroyParser()
+    laminate = parser.fetch_price("Ламинат")
+    paint = parser.fetch_price("Краска для стен")
+
+    assert laminate.price_avg == Decimal("400")
+    assert paint.price_avg == Decimal("223")
+
+
+def test_fetch_price_refetches_category_after_ttl_expires(monkeypatch):
+    """#341: кэш живёт не вечно — по истечении TTL повторный вызов идёт в сеть
+    заново, а не отдаёт снимок категории многочасовой давности."""
+    html = _page(_item("400", "/catalog/x/lam-a", title="Ламинат А", unit="м²"))
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, text: str, status_code: int = 200):
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(self.status_code)
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        return FakeResponse(html) if "page=" not in url else FakeResponse("", 404)
+
+    fake_now = [1000.0]
+    monkeypatch.setattr(megastroy_parser.requests, "get", fake_get)
+    monkeypatch.setattr(megastroy_parser.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(megastroy_parser.time, "monotonic", lambda: fake_now[0])
+
+    parser = MegastroyParser()
+    parser.fetch_price("Ламинат")
+    assert len(calls) == 2  # стр.1 + стр.2 с 404
+
+    fake_now[0] += megastroy_parser._CATEGORY_CACHE_TTL_SECONDS + 1
+    parser.fetch_price("Ламинат эконом")
+    assert len(calls) == 4  # TTL истёк — категория скачана заново
 
 
 def test_unknown_material_raises():
@@ -306,6 +488,17 @@ def test_plintus_normalizes_price_per_piece_to_price_per_meter(monkeypatch):
     assert parsed.price_avg == Decimal("224")  # 560 / 2.5 м
 
 
+def test_plintus_package_size_equals_rail_length(monkeypatch):
+    # package_size (#306) — длина рейки товара-представителя, а не справочная
+    # константа (в materials.json у плинтуса package_size=1).
+    html = _page(_item("560", "/products/plintus-a", title="Плинтус напольный ПВХ Lima 72х2500мм Белый"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Плинтус")
+
+    assert parsed.package_size == Decimal("2.5")
+
+
 def test_plintus_skips_items_without_parsable_length(monkeypatch):
     html = _page(
         _item("560", "/products/ok", title="Плинтус напольный ПВХ Lima 72х2500мм Белый"),
@@ -319,6 +512,107 @@ def test_plintus_skips_items_without_parsable_length(monkeypatch):
     assert "no-size" not in (parsed.source_url or "")
 
 
+def test_cable_length_from_title_reads_parenthesized_meters():
+    assert _cable_length_m_from_title("Кабель ВВГнг 3х1,5 (10м) ГОСТ") == Decimal("10")
+    assert _cable_length_m_from_title("Кабель ВВГнг(A)-LS 3х2,5 (20м) ГОСТ") == Decimal("20")
+
+
+def test_cable_length_from_title_ignores_unit_marker_without_digit():
+    # "Кабель АВВГ 3-2.5(м)" — "(м)" тут маркер единицы "на отрез", не длина.
+    assert _cable_length_m_from_title("Кабель АВВГ 3-2.5(м)") is None
+
+
+def test_cable_length_from_title_missing_length_returns_none():
+    assert _cable_length_m_from_title("Кабель медный ВВГнг-LS 2х2,5 ГОСТ") is None
+
+
+# Кабель (#335): единственная категория, где ОДНА карточка может быть уже
+# "₽/м" ("на отрез"), а другая — "₽/шт" за бухту целиком с длиной в названии
+# ("...(10м)...") — решаем по каждой карточке отдельно, не по категории целиком.
+
+
+def test_cable_takes_price_as_is_when_already_priced_per_meter(monkeypatch):
+    html = _page(_item("305", "/products/cable-otrez", title="Кабель ВВГнг 3х6 ГОСТ", unit="м"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Кабель электрический")
+
+    assert parsed.price_avg == Decimal("305")
+    assert parsed.package_size is None
+
+
+def test_cable_normalizes_coil_price_by_length_in_title(monkeypatch):
+    html = _page(_item("895", "/products/cable-coil", title="Кабель ВВГнг 3х1,5 (10м) ГОСТ"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Кабель электрический")
+
+    # price_avg — round(statistics.mean(...)), сверяем нечувствительный к
+    # округлению price_min вместо него (единственная цена в выборке).
+    assert parsed.price_min == Decimal("89.5")
+    # package_size (#306) — длина бухты, как и у плинтуса.
+    assert parsed.package_size == Decimal("10")
+
+
+def test_cable_skips_items_without_meter_unit_or_parsable_coil_length(monkeypatch):
+    html = _page(
+        _item("305", "/products/ok-otrez", title="Кабель ВВГнг 3х6 ГОСТ", unit="м"),
+        _item("895", "/products/ok-coil", title="Кабель ВВГнг 3х1,5 (10м) ГОСТ"),
+        _item("500", "/products/no-length", title="Кабель без длины в названии"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Кабель электрический")
+
+    assert "no-length" not in (parsed.source_url or "")
+    assert parsed.price_min == Decimal("89.5")
+    assert parsed.price_max == Decimal("305")
+
+
+def test_pipe_length_from_title_reads_length_after_word():
+    assert _pipe_length_m_from_title(
+        "Труба полипропиленовая армированная стекловолокном PN20 d20х2,8мм, длина трубы 2м"
+    ) == Decimal("2")
+    assert _pipe_length_m_from_title("Труба ПНД для водоснабжения PN10 d32мм, длина 4м") == Decimal("4")
+
+
+def test_pipe_length_from_title_missing_length_returns_none():
+    assert _pipe_length_m_from_title("Кран полипропиленовый шаровый PN25 d20мм") is None
+
+
+# Труба (#335): всегда "₽/шт" за штуку фиксированной длины — длина только в
+# названии ("длина трубы 2м"), в отличие от кабеля тут нет случая "уже ₽/м".
+
+
+def test_pipe_normalizes_price_per_piece_by_length_in_title(monkeypatch):
+    html = _page(
+        _item(
+            "115",
+            "/products/pipe-a",
+            title="Труба полипропиленовая для горячего и холодного водоснабжения PN20 d20х3,4мм, длина трубы 2м",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Труба водопроводная")
+
+    assert parsed.price_min == Decimal("57.5")  # 115 / 2 м
+    assert parsed.package_size == Decimal("2")
+
+
+def test_pipe_skips_items_without_parsable_length(monkeypatch):
+    html = _page(
+        _item("115", "/products/ok", title="Труба полипропиленовая PN20 d20х3,4мм, длина трубы 2м"),
+        _item("9", "/products/fitting", title="Угольник полипропиленовый соединительный под пайку 90°"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Труба водопроводная")
+
+    assert "fitting" not in (parsed.source_url or "")
+    assert parsed.price_min == Decimal("57.5")
+
+
 # Плитка/ламинат/обои (#277): сайт сам считает цену за м²/рулон и пишет её текстом
 # рядом с ценой — тут фильтруем по этому тексту напрямую, без вычислений.
 
@@ -330,6 +624,10 @@ def test_tile_and_laminate_use_site_computed_unit(monkeypatch):
     parsed = MegastroyParser().fetch_price("Ламинат")
 
     assert parsed.price_avg == Decimal("399")
+    # package_size (#306): страница категории не показывает отдельную "цену за
+    # коробку" для site_unit-материалов — фасовку взять неоткуда, откатываемся
+    # на статичный Material.package_size выше по стеку (estimates.py).
+    assert parsed.package_size is None
 
 
 def test_wallpaper_uses_site_computed_unit(monkeypatch):
@@ -339,6 +637,76 @@ def test_wallpaper_uses_site_computed_unit(monkeypatch):
     parsed = MegastroyParser().fetch_price("Обои")
 
     assert parsed.price_avg == Decimal("1295")
+
+
+def test_socket_takes_price_as_is_without_unit_normalization(monkeypatch):
+    # #335: розетка — первый материал без site_unit/title_unit/normalize_length_mm,
+    # сайт и так пишет "₽/шт" — цена берётся как есть, единица не проверяется.
+    html = _page(_item("399", "/products/rozetka", title="Розетка SE Art Gallery карбон"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Розетка")
+
+    assert parsed.price_avg == Decimal("399")
+
+
+def test_socket_economy_takes_lower_tercile(monkeypatch):
+    html = _page(
+        _item("150", "/products/rozetka-a", title="Розетка А"),
+        _item("250", "/products/rozetka-b", title="Розетка Б"),
+        _item("350", "/products/rozetka-c", title="Розетка В"),
+        _item("450", "/products/rozetka-d", title="Розетка Г"),
+        _item("550", "/products/rozetka-e", title="Розетка Д"),
+        _item("650", "/products/rozetka-f", title="Розетка Е"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    economy = MegastroyParser().fetch_price("Розетка эконом")
+    standard = MegastroyParser().fetch_price("Розетка")
+
+    assert economy.price_max <= Decimal("250")
+    assert standard.price_min == Decimal("150")
+    assert standard.price_max == Decimal("650")
+
+
+def test_parse_page_reads_collection_card_price_from_text():
+    # #335: линолеум показывает карточки-коллекции без itemprop=price.
+    html = _page(_collection_item("от 325 ₽/м2", "/catalog/collection/13673", title="Линолеум BAZIS"))
+    items = _parse_page(html, "https://kazan.megastroy.com/catalog/linoleum")
+    assert [(p, u, unit, t) for p, u, unit, t in items] == [
+        (
+            Decimal("325"),
+            "https://kazan.megastroy.com/catalog/collection/13673",
+            "м²",
+            "Линолеум BAZIS",
+        )
+    ]
+
+
+def test_linoleum_reads_price_from_collection_cards(monkeypatch):
+    html = _page(
+        _collection_item("от 325 ₽/м2", "/catalog/collection/1", title="Линолеум А"),
+        _collection_item("от 450 ₽/м2", "/catalog/collection/2", title="Линолеум Б"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Линолеум")
+
+    assert parsed.price_min == Decimal("325")
+    assert parsed.price_max == Decimal("450")
+    # site_unit-материалы не дают отдельной "цены за упаковку" (#306) — как у
+    # плитки/ламината/обоев.
+    assert parsed.package_size is None
+
+
+def test_light_takes_price_as_is_without_unit_normalization(monkeypatch):
+    # #335: точечный светильник — как розетка, цена "₽/шт" берётся как есть.
+    html = _page(_item("450", "/products/svetilnik", title="Точечный светильник LED"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Светильник")
+
+    assert parsed.price_avg == Decimal("450")
 
 
 def test_tile_combines_two_categories(monkeypatch):

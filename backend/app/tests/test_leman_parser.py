@@ -20,6 +20,8 @@ import pytest
 from app.parsers import leman_browser, leman_parser
 from app.parsers.leman_parser import (
     CATEGORY_MAP,
+    LEMAN_MOSCOW,
+    LEMAN_SPB,
     LemanParser,
     _length_m_from_title,
     _parse_page,
@@ -194,6 +196,20 @@ def test_paint_uses_unitprice_block_not_whole_can_price(monkeypatch):
 
     assert parsed.price_avg == Decimal("223")  # round(223.2)
     assert parsed.price_min == Decimal("223.2")
+    # package_size (#306): банка 10 л — ратио цены за упаковку к цене за литр
+    # (2232 / 223.2), а не справочные 9 л из materials.json.
+    assert parsed.package_size == Decimal("10")
+
+
+def test_package_size_none_when_only_one_price_block_present(monkeypatch):
+    # Карточка без второго блока (например, requests/HTML не отдали unitprice
+    # отдельно) — фасовку взять неоткуда, откатываемся на статику выше по стеку.
+    html = _page(_item("/product/kraska-b-1/", unitprice="223.2", unitprice_unit="л"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Краска для стен")
+
+    assert parsed.package_size is None
 
 
 def test_tile_and_laminate_use_primary_block_when_it_is_already_per_m2(monkeypatch):
@@ -213,6 +229,10 @@ def test_tile_and_laminate_use_primary_block_when_it_is_already_per_m2(monkeypat
     parsed = LemanParser().fetch_price("Плитка")
 
     assert parsed.price_avg == Decimal("1125")
+    # package_size (#306): у плитки блоки "перевёрнуты" относительно краски —
+    # основной уже за м² (база), вторичный "₽/кор." — цена упаковки. Формула
+    # та же: package_size = цена_упаковки / цена_базовой_единицы = 1368/1125 м².
+    assert parsed.package_size == Decimal("1368") / Decimal("1125")
 
 
 def test_wallpaper_accepts_pieces_as_rolls(monkeypatch):
@@ -223,6 +243,149 @@ def test_wallpaper_accepts_pieces_as_rolls(monkeypatch):
     parsed = LemanParser().fetch_price("Обои")
 
     assert parsed.price_avg == Decimal("2082")
+
+
+def test_socket_accepts_pieces_as_units(monkeypatch):
+    # #335: розетка без вторичного блока — "шт." и есть цена за штуку, как обои.
+    html = _page(_item("/product/rozetka-1/", price="201", price_unit="шт."))
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Розетка")
+
+    assert parsed.price_avg == Decimal("201")
+
+
+def test_socket_economy_takes_lower_tercile(monkeypatch):
+    def _socket(href, price):
+        return _item(href, price=price, price_unit="шт.")
+
+    html = _page(
+        _socket("/product/rozetka-a/", "150"),
+        _socket("/product/rozetka-b/", "250"),
+        _socket("/product/rozetka-c/", "350"),
+        _socket("/product/rozetka-d/", "450"),
+        _socket("/product/rozetka-e/", "550"),
+        _socket("/product/rozetka-f/", "650"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    economy = LemanParser().fetch_price("Розетка эконом")
+    standard = LemanParser().fetch_price("Розетка")
+
+    assert economy.price_max <= Decimal("250")
+    assert standard.price_min == Decimal("150")
+    assert standard.price_max == Decimal("650")
+
+
+def test_linoleum_uses_primary_m2_block_and_ignores_running_meter_secondary(monkeypatch):
+    # #335: вторичный блок у линолеума — "₽/пог.м" (ширина рулона), не "₽/кор."
+    # как у плитки/ламината. Раньше _select_package_size брала ЛЮБУЮ "не свою"
+    # единицу — это протащило бы ширину рулона (3 м) как фиктивный package_size
+    # и сломало бы округление площади в смете. Теперь такая единица не
+    # считается package_size (_PACKAGE_UNITS), должен остаться None.
+    html = _page(
+        _item(
+            "/product/linoleum-1/",
+            name='Линолеум бытовой «Классик Корсар» 21 класс 3 м',
+            price="290",
+            price_unit="м²",
+            unitprice="870.09",
+            unitprice_unit="пог.м",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Линолеум")
+
+    assert parsed.price_avg == Decimal("290")
+    assert parsed.package_size is None
+
+
+def test_parquet_uses_primary_m2_block_and_box_secondary_as_package_size(monkeypatch):
+    # #335: у паркета, в отличие от линолеума, вторичный блок реально "₽/кор."
+    # (как у плитки/ламината) — package_size законно считается.
+    html = _page(
+        _item(
+            "/product/parket-1/",
+            name="Инженерная доска DW Flooring Дуб DW-303U 23 класс 1.24 м²",
+            price="4261.29",
+            price_unit="м²",
+            unitprice="5284",
+            unitprice_unit="кор.",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Паркетная доска")
+
+    # price_avg — round(statistics.mean(...)), сверяем нечувствительный к
+    # округлению price_min вместо него (единственная цена в выборке).
+    assert parsed.price_min == Decimal("4261.29")
+    assert parsed.package_size == Decimal("5284") / Decimal("4261.29")
+
+
+def test_light_accepts_pieces_as_units(monkeypatch):
+    # #335: точечный светильник без вторичного блока — "шт." и есть цена за штуку.
+    html = _page(_item("/product/svetilnik-1/", price="450", price_unit="шт."))
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Светильник")
+
+    assert parsed.price_avg == Decimal("450")
+
+
+def test_cable_uses_primary_meter_price_when_sold_cut_to_order(monkeypatch):
+    # #335: "на отрез" — единственный блок и так уже "₽/м".
+    html = _page(_item("/product/cable-otrez/", price="115", price_unit="м"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Кабель электрический")
+
+    assert parsed.price_avg == Decimal("115")
+    assert parsed.package_size is None
+
+
+def test_cable_uses_secondary_meter_price_and_coil_length_as_package_size(monkeypatch):
+    # #335: бухта — основной блок "₽/шт." (вся бухта), вторичный уже "₽/м"
+    # (сайт сам нормализует, в отличие от Мегастроя, где такого блока нет).
+    html = _page(
+        _item(
+            "/product/cable-coil-100m/",
+            name="Кабель Камкабель ВВГпнг(A)-LS 3x2.5 100 м ГОСТ",
+            price="12627",
+            price_unit="шт.",
+            unitprice="126.27",
+            unitprice_unit="м",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Кабель электрический")
+
+    # price_avg — round(statistics.mean(...)), сверяем нечувствительный к
+    # округлению price_min вместо него (единственная цена в выборке).
+    assert parsed.price_min == Decimal("126.27")
+    # package_size (#306) — длина бухты, "шт." (упаковка целиком) есть в
+    # _PACKAGE_UNITS, в отличие от "пог.м" у линолеума.
+    assert parsed.package_size == Decimal("12627") / Decimal("126.27")
+
+
+def test_pipe_normalizes_price_per_piece_by_length_from_title(monkeypatch):
+    # #335: труба — как плинтус, длина в конце названия, один ценовой блок.
+    html = _page(
+        _item(
+            "/product/truba-1/",
+            name="Труба полипропиленовая MONLID армированная стекловолокном 20x3.4 мм SDR6 PN25 2 м",
+            price="127",
+            price_unit="шт.",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Труба водопроводная")
+
+    assert parsed.price_min == Decimal("63.5")  # 127 / 2 м
+    assert parsed.package_size == Decimal("2")
 
 
 def test_glue_without_unitprice_block_is_skipped(monkeypatch):
@@ -268,6 +431,8 @@ def test_plintus_normalizes_price_per_piece_by_length_from_title(monkeypatch):
     parsed = LemanParser().fetch_price("Плинтус")
 
     assert parsed.price_avg == Decimal("100")  # 220 / 2.2 м
+    # package_size (#306) — длина рейки из названия, как и у Мегастроя.
+    assert parsed.package_size == Decimal("2.2")
 
 
 def test_plintus_skips_items_without_parsable_length(monkeypatch):
@@ -347,6 +512,113 @@ def test_fetch_price_excludes_outliers_from_spread_and_source(monkeypatch):
     assert parsed.price_max == Decimal("250")
     assert parsed.price_max / parsed.price_min < 4
     assert "designer" not in (parsed.source_url or "")
+
+
+def test_fetch_price_economy_and_premium_return_different_products(monkeypatch):
+    """#331: 'Краска для стен эконом'/'премиум' берут нижнюю/верхнюю треть цен той
+    же категории (price_band в MATERIAL_UNITS) — разные товары, не только цена."""
+    def _paint(href, unitprice):
+        return _item(href, price="1", price_unit="шт.", unitprice=unitprice, unitprice_unit="л")
+
+    html = _page(
+        _paint("/product/paint-a/", "400"),
+        _paint("/product/paint-b/", "500"),
+        _paint("/product/paint-c/", "600"),
+        _paint("/product/paint-d/", "700"),
+        _paint("/product/paint-e/", "800"),
+        _paint("/product/paint-f/", "900"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    economy = LemanParser().fetch_price("Краска для стен эконом")
+    premium = LemanParser().fetch_price("Краска для стен премиум")
+    standard = LemanParser().fetch_price("Краска для стен")
+
+    assert economy.price_max <= Decimal("500")
+    assert premium.price_min >= Decimal("800")
+    assert economy.source_url != premium.source_url
+    assert standard.price_min == Decimal("400")
+    assert standard.price_max == Decimal("900")
+
+
+def test_fetch_price_shares_category_fetch_across_variants(monkeypatch):
+    """#341: 'Краска для стен'/'эконом'/'премиум' указывают на тот же base_urls —
+    браузер должен дёргаться один раз на весь update_prices, а не по разу на вариант."""
+    def _paint(href, unitprice):
+        return _item(href, price="1", price_unit="шт.", unitprice=unitprice, unitprice_unit="л")
+
+    html = _page(
+        _paint("/product/paint-a/", "400"),
+        _paint("/product/paint-b/", "500"),
+        _paint("/product/paint-c/", "600"),
+        _paint("/product/paint-d/", "700"),
+        _paint("/product/paint-e/", "800"),
+        _paint("/product/paint-f/", "900"),
+    )
+    monkeypatch.setattr(leman_parser.settings, "LEMAN_LIVE", True)
+    calls = []
+
+    def fake_fetch_pages(base_url, max_pages):
+        calls.append(base_url)
+        return [html]
+
+    monkeypatch.setattr(leman_parser.leman_browser, "fetch_pages", fake_fetch_pages)
+
+    parser = LemanParser()
+    parser.fetch_price("Краска для стен")
+    parser.fetch_price("Краска для стен эконом")
+    parser.fetch_price("Краска для стен премиум")
+
+    # Один браузерный фетч категории на все три материала, не три.
+    assert len(calls) == 1
+
+
+def test_fetch_price_does_not_share_cache_across_different_categories(monkeypatch):
+    # Разные категории (краска vs плитка) не должны путать кэш друг с другом.
+    paint_html = _page(_item("/product/paint-a/", price="1", price_unit="шт.", unitprice="400", unitprice_unit="л"))
+    tile_html = _page(_item("/product/tile-a/", price="500", price_unit="м²"))
+
+    def _pages_by_url(base_url, max_pages):
+        if "napolnaya-plitka" in base_url:
+            return [tile_html]
+        return [paint_html]
+
+    monkeypatch.setattr(leman_parser.settings, "LEMAN_LIVE", True)
+    monkeypatch.setattr(leman_parser.leman_browser, "fetch_pages", _pages_by_url)
+
+    parser = LemanParser()
+    paint = parser.fetch_price("Краска для стен")
+    tile = parser.fetch_price("Плитка")
+
+    assert paint.price_avg == Decimal("400")
+    assert tile.price_avg == Decimal("500")
+
+
+def test_fetch_price_refetches_category_after_ttl_expires(monkeypatch):
+    """#341: кэш живёт не вечно — по истечении TTL повторный вызов идёт в браузер
+    заново, а не отдаёт снимок категории многочасовой давности."""
+    def _paint(href, unitprice):
+        return _item(href, price="1", price_unit="шт.", unitprice=unitprice, unitprice_unit="л")
+
+    html = _page(_paint("/product/paint-a/", "400"))
+    monkeypatch.setattr(leman_parser.settings, "LEMAN_LIVE", True)
+    calls = []
+
+    def fake_fetch_pages(base_url, max_pages):
+        calls.append(base_url)
+        return [html]
+
+    fake_now = [1000.0]
+    monkeypatch.setattr(leman_parser.leman_browser, "fetch_pages", fake_fetch_pages)
+    monkeypatch.setattr(leman_parser.time, "monotonic", lambda: fake_now[0])
+
+    parser = LemanParser()
+    parser.fetch_price("Краска для стен")
+    assert len(calls) == 1
+
+    fake_now[0] += leman_parser._CATEGORY_CACHE_TTL_SECONDS + 1
+    parser.fetch_price("Краска для стен эконом")
+    assert len(calls) == 2  # TTL истёк — категория скачана заново
 
 
 def test_fetch_price_excludes_irrelevant_subtypes_by_name(monkeypatch):
@@ -566,3 +838,54 @@ def test_fetch_price_uses_injected_session_instead_of_module_fetch_pages(monkeyp
     parsed = parser.fetch_price("Краска для стен")
 
     assert parsed.price_avg == Decimal("200")
+
+
+# --- Региональные инстансы (#345) ---
+# LEMAN_MOSCOW/LEMAN_SPB — тот же класс/CATEGORY_MAP, домен и facet "в наличии"
+# подменяются на лету (_localize_url) вместо переписывания ~20 URL под каждый
+# город. Живого прогона здесь нет (только юнит-тесты на URL-строках) — реальный
+# ответ сайта для новых доменов не сверялся live в этой сессии.
+
+def test_default_leman_parser_urls_unchanged():
+    # Базовый инстанс (Казань) не должен отличаться от «сырого» CATEGORY_MAP —
+    # регионализация не должна задевать поведение единственного региона,
+    # который уже был в проде.
+    parser = LemanParser()
+    assert parser._category_urls("Краска для стен") == CATEGORY_MAP["Краска для стен"]
+
+
+def test_leman_moscow_localizes_domain_and_facet():
+    urls = LEMAN_MOSCOW._category_urls("Краска для стен")
+    assert len(urls) == 1
+    assert urls[0].startswith("https://lemanapro.ru/")
+    assert "kazan.lemanapro.ru" not in urls[0]
+    assert "eligibilityByStores=Киевское Шоссе_" in urls[0]
+    assert "Казань" not in urls[0]
+    # Прочие facet'ы категории (назначение "Стена") не задеваются подменой.
+    assert "00277=Стена" in urls[0]
+
+
+def test_leman_spb_localizes_domain_facet_and_appends_from_region():
+    urls = LEMAN_SPB._category_urls("Краска для стен")
+    assert len(urls) == 1
+    assert urls[0].startswith("https://spb.lemanapro.ru/")
+    assert "eligibilityByStores=Партизана Германа_" in urls[0]
+    assert urls[0].endswith("&fromRegion=34")
+
+
+def test_leman_moscow_localizes_url_without_facet():
+    # "Паркетная доска" — единственная категория без _IN_STOCK_KAZAN в URL (вся
+    # категория "только онлайн-заказ", см. CATEGORY_MAP) — регионализация не
+    # должна ничего туда подставлять, только сменить домен.
+    urls = LEMAN_MOSCOW._category_urls("Паркетная доска")
+    assert urls == ("https://lemanapro.ru/catalogue/parketnaya-doska/inzhenernaya/",)
+
+
+def test_regional_leman_instances_declare_region_and_covered_cities():
+    assert LEMAN_MOSCOW.region == "Москва"
+    assert LEMAN_MOSCOW.covered_cities == frozenset({"Москва"})
+    assert LEMAN_SPB.region == "Санкт-Петербург"
+    assert LEMAN_SPB.covered_cities == frozenset({"Санкт-Петербург"})
+    # Базовый инстанс (Казань) — без городской привязки, как раньше.
+    assert LemanParser().region is None
+    assert LemanParser().covered_cities is None

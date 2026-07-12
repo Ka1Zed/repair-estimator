@@ -1,6 +1,8 @@
 import logging
 import re
 import statistics
+import threading
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -10,7 +12,7 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.parsers import leman_browser
-from app.parsers._stats import filter_outliers
+from app.parsers._stats import filter_outliers, price_band_slice
 from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
@@ -30,20 +32,57 @@ class UnitSpec:
     # Плинтус продаётся рейкой (витринная единица "шт."), а наша база — метр:
     # цену делим на длину рейки, извлечённую из названия товара ("...2.2 м").
     normalize_length: bool = False
+    # Вариант по уровню комплектации (#331): "low"/"high" — нижняя/верхняя
+    # треть цен категории (price_band_slice), None — вся категория (стандарт).
+    # Как и у Мегастроя — приближение через терции, а не курированный facet
+    # по бренду (сайт даёт такой facet только у краски, стена/потолок).
+    price_band: str | None = None
 
 
 MATERIAL_UNITS: dict[str, UnitSpec] = {
     "Краска для стен": UnitSpec(frozenset({"л"})),
+    "Краска для стен эконом": UnitSpec(frozenset({"л"}), price_band="low"),
+    "Краска для стен премиум": UnitSpec(frozenset({"л"}), price_band="high"),
     "Краска потолочная": UnitSpec(frozenset({"л"})),
+    "Краска потолочная премиум": UnitSpec(frozenset({"л"}), price_band="high"),
     "Шпаклевка стартовая": UnitSpec(frozenset({"кг"})),
     "Шпаклевка финишная": UnitSpec(frozenset({"кг"})),
     "Грунтовка": UnitSpec(frozenset({"л"})),
     "Плиточный клей": UnitSpec(frozenset({"кг"})),
     "Затирка": UnitSpec(frozenset({"кг"})),
     "Плитка": UnitSpec(frozenset({"м²"})),
+    "Плитка эконом": UnitSpec(frozenset({"м²"}), price_band="low"),
+    "Плитка премиум": UnitSpec(frozenset({"м²"}), price_band="high"),
     "Ламинат": UnitSpec(frozenset({"м²"})),
+    "Ламинат эконом": UnitSpec(frozenset({"м²"}), price_band="low"),
+    "Ламинат премиум": UnitSpec(frozenset({"м²"}), price_band="high"),
     "Обои": UnitSpec(frozenset({"шт."})),  # 1 шт. = 1 рулон
+    "Обои эконом": UnitSpec(frozenset({"шт."}), price_band="low"),
+    "Обои премиум": UnitSpec(frozenset({"шт."}), price_band="high"),
     "Плинтус": UnitSpec(frozenset({"шт."}), normalize_length=True),
+    # #335: розетка продаётся штучно, витринная единица "шт." и есть цена за
+    # штуку — как у обоев (per-roll), нормализация не нужна.
+    "Розетка": UnitSpec(frozenset({"шт."})),
+    "Розетка эконом": UnitSpec(frozenset({"шт."}), price_band="low"),
+    # #335: как плитка/ламинат — основной блок уже "₽/м²" (см. _PACKAGE_UNITS
+    # выше про то, почему вторичный блок "₽/пог.м" не идёт в package_size).
+    "Линолеум": UnitSpec(frozenset({"м²"})),
+    # #335: у паркета вторичный блок — "₽/кор." (как у плитки/ламината), не
+    # "₽/пог.м" — package_size считается штатно.
+    "Паркетная доска": UnitSpec(frozenset({"м²"})),
+    # #335: точечные светильники (споты) — цена "₽/шт" как есть, как у обоев.
+    "Светильник": UnitSpec(frozenset({"шт."})),
+    # #335: кабель — карточка бухты САМА даёт вторичный normализованный блок
+    # "₽/м" (как у краски "₽/л") — доп. парсинг длины из названия не нужен, в
+    # отличие от Мегастроя (там такого блока нет). У "на отрез"-товаров
+    # основной блок и так уже "₽/м". package_size = длина бухты в метрах —
+    # осмысленная фасовка (в отличие от "пог.м" у линолеума, тут единица
+    # вторичного блока "шт." — целая бухта, есть в _PACKAGE_UNITS).
+    "Кабель электрический": UnitSpec(frozenset({"м"})),
+    # #335: труба продаётся штукой фиксированной длины (обычно 2 м), карточка
+    # даёт только один блок "₽/шт." (в отличие от кабеля — вторичного "₽/м" нет)
+    # — как у плинтуса, длина в конце названия ("...2 м").
+    "Труба водопроводная": UnitSpec(frozenset({"шт."}), normalize_length=True),
 }
 
 # Карта: материал в БД -> URL категории, сужённый фасетами (#319, #277). Общая
@@ -61,9 +100,35 @@ _PAINT_CATEGORY = "https://kazan.lemanapro.ru/catalogue/kraski-dlya-sten-i-potol
 _SHPAKLEVKA_CATEGORY = "https://kazan.lemanapro.ru/catalogue/shpaklevki/"
 _IN_STOCK_KAZAN = "eligibilityByStores=Казань_Казань Солнечный_Казань Залесный"
 
+# Домен по умолчанию, зашитый в CATEGORY_MAP ниже (Казань) — регионализация
+# инстанса (#345) подменяет его строковой заменой в _localize_url, сам
+# CATEGORY_MAP не переписывается (меньше риск/диф на ~20 URL).
+_DEFAULT_HOST = "kazan.lemanapro.ru"
+
+# Региональные facet'ы "в наличии" (#345) — сверено вживую 06-07.2026 на
+# категории "Краски для стен и потолков", тот же принцип, что у _IN_STOCK_KAZAN
+# (магазин города + ближайшие пригороды/сателлиты). Пробелы вместо "+" — как и
+# у _IN_STOCK_KAZAN, браузерный фетч (patchright) сам перц-энкодит при переходе.
+_IN_STOCK_MOSCOW = (
+    "eligibilityByStores=Киевское Шоссе_Люберцы_Зеленоград_Лефортово_ЗИЛ_"
+    "Новая Рига_Алтуфьево_Пушкино_Красногорск_Юдино_Мытищи_Выхино_Шолохово_"
+    "Каширское шоссе_Рязанский проспект_Ногинск_Варшавское шоссе_Климовск_"
+    "Химки_Троицк_Домодедово_Жуковский_Истра"
+)
+_IN_STOCK_SPB = (
+    "eligibilityByStores=Партизана Германа_Бугры_Коллонтай_Испытателей_"
+    "Парашютная_Выборгское шоссе_Московское шоссе_Петергофское шоссе_"
+    "Уральская_Таллинское шоссе_Руставели"
+)
+
 CATEGORY_MAP: dict[str, tuple[str, ...]] = {
     "Краска для стен": (f"{_PAINT_CATEGORY}?{_IN_STOCK_KAZAN}&00277=Стена",),
+    # Варианты по уровню (#331) — тот же URL категории, price_band (MATERIAL_UNITS)
+    # режет уже найденные товары на терции вместо ещё одного facet-сужения.
+    "Краска для стен эконом": (f"{_PAINT_CATEGORY}?{_IN_STOCK_KAZAN}&00277=Стена",),
+    "Краска для стен премиум": (f"{_PAINT_CATEGORY}?{_IN_STOCK_KAZAN}&00277=Стена",),
     "Краска потолочная": (f"{_PAINT_CATEGORY}?{_IN_STOCK_KAZAN}&00277=Потолок",),
+    "Краска потолочная премиум": (f"{_PAINT_CATEGORY}?{_IN_STOCK_KAZAN}&00277=Потолок",),
     "Шпаклевка стартовая": (f"{_SHPAKLEVKA_CATEGORY}?14431=Базовая шпатлёвка&{_IN_STOCK_KAZAN}",),
     "Шпаклевка финишная": (f"{_SHPAKLEVKA_CATEGORY}?14431=Финишная шпатлевка&{_IN_STOCK_KAZAN}",),
     "Грунтовка": (f"https://kazan.lemanapro.ru/search/?q=грунтовки&{_IN_STOCK_KAZAN}",),
@@ -81,9 +146,44 @@ CATEGORY_MAP: dict[str, tuple[str, ...]] = {
         f"https://kazan.lemanapro.ru/catalogue/zatirki-silikonovye-dlya-plitki/?{_IN_STOCK_KAZAN}",
     ),
     "Плитка": (f"https://kazan.lemanapro.ru/catalogue/napolnaya-plitka/?{_IN_STOCK_KAZAN}",),
+    "Плитка эконом": (f"https://kazan.lemanapro.ru/catalogue/napolnaya-plitka/?{_IN_STOCK_KAZAN}",),
+    "Плитка премиум": (f"https://kazan.lemanapro.ru/catalogue/napolnaya-plitka/?{_IN_STOCK_KAZAN}",),
     "Ламинат": (f"https://kazan.lemanapro.ru/catalogue/laminat/?{_IN_STOCK_KAZAN}",),
+    "Ламинат эконом": (f"https://kazan.lemanapro.ru/catalogue/laminat/?{_IN_STOCK_KAZAN}",),
+    "Ламинат премиум": (f"https://kazan.lemanapro.ru/catalogue/laminat/?{_IN_STOCK_KAZAN}",),
     "Обои": (f"https://kazan.lemanapro.ru/catalogue/dekorativnye-oboi/?{_IN_STOCK_KAZAN}",),
+    "Обои эконом": (f"https://kazan.lemanapro.ru/catalogue/dekorativnye-oboi/?{_IN_STOCK_KAZAN}",),
+    "Обои премиум": (f"https://kazan.lemanapro.ru/catalogue/dekorativnye-oboi/?{_IN_STOCK_KAZAN}",),
     "Плинтус": (f"https://kazan.lemanapro.ru/catalogue/napolnye-plintusy/?{_IN_STOCK_KAZAN}",),
+    # #335: 22088=Розетка — facet "Тип продукта" внутри уже предфильтрованной по
+    # монтажу категории (rozetki-i-vyklyuchateli-skrytye — аналог field846[]=
+    # скрытая проводка у Мегастроя), исключает выключатели/рамки/диммеры и
+    # RJ45/RTV/USB/ТВ/телефонные розетки (слаботочка).
+    "Розетка": (f"https://kazan.lemanapro.ru/catalogue/rozetki-i-vyklyuchateli-skrytye/?22088=Розетка&{_IN_STOCK_KAZAN}",),
+    "Розетка эконом": (f"https://kazan.lemanapro.ru/catalogue/rozetki-i-vyklyuchateli-skrytye/?22088=Розетка&{_IN_STOCK_KAZAN}",),
+    "Линолеум": (f"https://kazan.lemanapro.ru/catalogue/linoleum/?24700=Бытовой&{_IN_STOCK_KAZAN}",),
+    # #335: инженерная доска (типовая для квартиры, не массив/трёхполосная/
+    # ёлочка) — вся категория "только онлайн-заказ" (нет в наличии ни в одном
+    # казанском магазине), поэтому без _IN_STOCK_KAZAN — с ним выборка была бы
+    # пустой. Мегастрой паркет вообще не продаёт в Казани (нет такой категории
+    # в каталоге) — CATEGORY_MAP там не заводим, известный пробел (см.
+    # docs/price-sources.md).
+    "Паркетная доска": ("https://kazan.lemanapro.ru/catalogue/parketnaya-doska/inzhenernaya/",),
+    "Светильник": (f"https://kazan.lemanapro.ru/catalogue/tochechnye-svetilniki/?{_IN_STOCK_KAZAN}",),
+    # #335: 15070= — тип кабеля, ВВГнг(А)-LS/ВВГпнг(A)-LS (стандарт для скрытой
+    # проводки в квартире, тот же выбор, что и "ВВГ" у Мегастроя). Кириллица/
+    # латиница "А"/"A" в значениях — не опечатка, это два разных facet-значения
+    # сайта (сверено вживую), нормализовать нельзя — сломает фильтр.
+    "Кабель электрический": (
+        f"https://kazan.lemanapro.ru/catalogue/silovye-kabeli/"
+        f"?15070=ВВГнг(А)-LS_ВВГпнг(A)-LS&{_IN_STOCK_KAZAN}",
+    ),
+    # #335: 22088= — тип продукта "Труба полипропиленовая", сужает от общей
+    # категории (трубы+фитинги) до собственно труб (45 позиций).
+    "Труба водопроводная": (
+        f"https://kazan.lemanapro.ru/catalogue/polipropilenovye-truby-i-fitingi/"
+        f"?22088=Труба полипропиленовая&{_IN_STOCK_KAZAN}",
+    ),
 }
 
 # Обходим не всю выдачу: после ~15-й страницы у Лемана идут серые/нерелевантные
@@ -91,6 +191,13 @@ CATEGORY_MAP: dict[str, tuple[str, ...]] = {
 # осмысленных страниц ещё меньше — ранний стоп в leman_browser обычно срабатывает
 # раньше этого потолка.
 MAX_PAGES = 15
+
+# Вариантные материалы (эконом/премиум, #331) указывают на тот же base_urls, что
+# и стандарт — кэш карточек категории по base_urls (#341), чтобы update_prices не
+# гонял браузер за одной и той же выдачей 2-3 раза подряд для трёх вариантов.
+# TTL небольшой — нужен только на время обработки одной группы вариантов в
+# рамках одного прогона (см. megastroy_parser._CATEGORY_CACHE_TTL_SECONDS).
+_CATEGORY_CACHE_TTL_SECONDS = 600
 
 CARD_SELECTOR = '[data-qa="product"]'
 _PRODUCT_ID_RE = re.compile(r"-(\d+)/?$")
@@ -208,10 +315,69 @@ def _select_price(candidates: list[tuple[Decimal, str]], spec: UnitSpec) -> Deci
     return None
 
 
+# Единицы вторичного ценового блока, которые реально означают "цена за
+# упаковку/тару целиком" (банка/мешок/коробка) — из них законно выводить
+# package_size делением на цену базовой единицы. Другие "не свои" единицы не
+# считаются package_size: у линолеума (#335) вторичный блок — "₽/пог.м" (цена
+# за погонный метр рулона), а отношение его к "₽/м²" — это ШИРИНА рулона в
+# метрах, а не фасовка; слепое деление (как было раньше) протащило бы ширину
+# рулона в package_size и сломало бы округление площади в смете.
+_PACKAGE_UNITS = frozenset({"шт.", "кор.", "уп."})
+
+
+def _select_package_size(
+    candidates: list[tuple[Decimal, str]], spec: UnitSpec, base_price: Decimal
+) -> Decimal | None:
+    # Карточка Лемана держит до двух ценовых блоков: тот, что совпал с
+    # ожидаемой единицей (base_price — уже выбран в _select_price выше), и,
+    # если карточка его показывает, второй — цена за упаковку/коробку целиком
+    # ("2 232 ₽/шт.", "1 295 ₽/кор."). У краски/шпаклёвки/грунтовки/клея это
+    # ВТОРОЙ блок относительно unitprice, у плитки/ламината — наоборот
+    # (unitprice там и есть цена за коробку, см. #319 в docs/price-sources.md),
+    # но формула не зависит от того, какой блок какой: package_size = цена
+    # упаковки / цена базовой единицы. Берём первый кандидат с ДРУГОЙ единицей,
+    # но только если она из _PACKAGE_UNITS (см. выше) — иначе не считаем.
+    if base_price <= 0:
+        return None
+    for price, unit in candidates:
+        if unit not in spec.accepted and unit in _PACKAGE_UNITS:
+            return price / base_price
+    return None
+
+
 class LemanParser(BaseParser):
     source_name = "Леман"
 
-    def __init__(self):
+    def __init__(
+        self,
+        region: str | None = None,
+        host: str = _DEFAULT_HOST,
+        in_stock_facet: str = _IN_STOCK_KAZAN,
+        extra_query: str | None = None,
+        covered_cities: frozenset[str] | None = None,
+    ):
+        # Регионализация инстанса (#345): один и тот же класс/CATEGORY_MAP,
+        # но домен и facet "в наличии" подменяются на лету под конкретный
+        # город (Москва/СПб — свои поддомен и список магазинов, см.
+        # _localize_url). region=None — прежнее поведение (Казань, зашита в
+        # CATEGORY_MAP как есть) — обратная совместимость, нулевой риск для
+        # существующего единственного региона.
+        #
+        # region — тег, под которым цены ЭТОГО инстанса пишутся/читаются в
+        # MaterialPrice (см. price_aggregator_service.get_price) — НЕ путать с
+        # аргументом region у get_price/get_material_price (тот — только для
+        # seed-fallback, ветки парсера не касается).
+        self.region = region
+        self._host = host
+        self._in_stock_facet = in_stock_facet
+        self._extra_query = extra_query
+        # covered_cities — города, для которых ЭТОТ инстанс — единственный
+        # применимый источник материалов (см. price_aggregator_service.
+        # get_material_price._select_regional_parsers). None — "базовый"
+        # источник без городской привязки (участвует, когда для запрошенного
+        # города нет выделенного регионального парсера — как сейчас для всех
+        # городов, кроме Москвы/СПб).
+        self.covered_cities = covered_cities
         # Опциональная общая браузерная сессия (см. leman_browser.LemanBrowserSession) —
         # update_prices() открывает её один раз на весь прогон материалов Лемана
         # и подставляет через set_session, чтобы не поднимать Chrome заново на
@@ -219,6 +385,28 @@ class LemanParser(BaseParser):
         # None — прежнее поведение: каждый fetch_price сам открывает и закрывает
         # свою сессию через модульную leman_browser.fetch_pages.
         self._session = None
+        # Кэш карточек категории по base_urls (#341) — см. _CATEGORY_CACHE_TTL_SECONDS.
+        # Инстанс — синглтон в registry.py и переживает весь процесс (в т.ч. live
+        # API-путь), поэтому конкурентные запросы возможны; лок сериализует
+        # проверку кэша и браузерный фетч, чтобы два запроса на одну категорию не
+        # поднимали браузер одновременно.
+        self._raw_cache: dict[tuple[str, ...], tuple[float, list]] = {}
+        self._raw_cache_lock = threading.Lock()
+
+    def _localize_url(self, url: str) -> str:
+        # Меняем только домен и facet "в наличии" — путь категории и остальные
+        # facet'ы (00277=, 14431=, 22088=...) не зависят от города. Порядок
+        # query-параметров при добавлении extra_query (fromRegion=34 у СПб) не
+        # совпадает с URL, который скопировали из адресной строки браузера,
+        # но серверу порядок параметров не важен.
+        localized = url.replace(_DEFAULT_HOST, self._host).replace(_IN_STOCK_KAZAN, self._in_stock_facet)
+        if self._extra_query:
+            sep = "&" if "?" in localized else "?"
+            localized = f"{localized}{sep}{self._extra_query}"
+        return localized
+
+    def _category_urls(self, material_name: str) -> tuple[str, ...]:
+        return tuple(self._localize_url(url) for url in CATEGORY_MAP[material_name])
 
     def set_session(self, session) -> None:
         self._session = session
@@ -233,6 +421,59 @@ class LemanParser(BaseParser):
 
     def known_materials(self) -> list[str]:
         return list(CATEGORY_MAP.keys())
+
+    def _fetch_raw_candidates(
+        self, base_urls: tuple[str, ...], material_name: str
+    ) -> list[tuple[list[tuple[Decimal, str]], str | None, str | None]]:
+        # Тройки (кандидаты цены, ссылка, имя) со всех страниц категории, уже
+        # дедуплицированные по id товара — разбор, не зависящий от spec конкретного
+        # варианта (тот применяется выше по стеку в fetch_price). Вариантные
+        # материалы (эконом/премиум) шлют тот же base_urls — при повторном вызове
+        # в пределах TTL отдаём уже скачанное, не поднимая браузер заново.
+        with self._raw_cache_lock:
+            cached = self._raw_cache.get(base_urls)
+            if cached is not None:
+                fetched_at, raw = cached
+                if time.monotonic() - fetched_at < _CATEGORY_CACHE_TTL_SECONDS:
+                    logger.info(
+                        f"  Леман '{material_name}': категория {base_urls[0]} из кэша "
+                        f"({len(raw)} карточек, без повторного фетча)"
+                    )
+                    return raw
+
+            fetch_pages = self._session.fetch_pages if self._session is not None else leman_browser.fetch_pages
+
+            raw: list[tuple[list[tuple[Decimal, str]], str | None, str | None]] = []
+            seen_ids: set[str] = set()
+            any_pages_loaded = False
+
+            for base_url in base_urls:
+                pages_html = fetch_pages(base_url, MAX_PAGES)
+                if not pages_html:
+                    logger.warning(f"  Леман '{material_name}' {base_url}: браузер не вернул ни одной страницы")
+                    continue
+                any_pages_loaded = True
+
+                for page_num, html in enumerate(pages_html, start=1):
+                    page_url = _build_page_url(base_url, page_num)
+                    page_items = _parse_page(html, page_url)
+                    new_items = []
+                    for candidates, url, name in page_items:
+                        product_id = _product_id(url)
+                        if product_id is not None:
+                            if product_id in seen_ids:
+                                continue
+                            seen_ids.add(product_id)
+                        new_items.append((candidates, url, name))
+
+                    raw.extend(new_items)
+                    logger.info(f"  Леман '{material_name}' {base_url} стр.{page_num}: +{len(new_items)} карточек")
+
+            if not any_pages_loaded:
+                raise RuntimeError(f"Леман: браузерный фетч не вернул ни одной страницы для '{material_name}'")
+
+            self._raw_cache[base_urls] = (time.monotonic(), raw)
+            return raw
 
     def fetch_price(self, material_name: str) -> ParsedPrice:
         if material_name not in CATEGORY_MAP:
@@ -249,50 +490,30 @@ class LemanParser(BaseParser):
             )
 
         spec = MATERIAL_UNITS[material_name]
-        base_urls = CATEGORY_MAP[material_name]
-        fetch_pages = self._session.fetch_pages if self._session is not None else leman_browser.fetch_pages
+        base_urls = self._category_urls(material_name)
+        raw = self._fetch_raw_candidates(base_urls, material_name)
 
-        items: list[tuple[Decimal, str | None, str | None]] = []
-        seen_ids: set[str] = set()
-        any_pages_loaded = False
-
-        for base_url in base_urls:
-            pages_html = fetch_pages(base_url, MAX_PAGES)
-            if not pages_html:
-                logger.warning(f"  Леман '{material_name}' {base_url}: браузер не вернул ни одной страницы")
+        items: list[tuple[Decimal, str | None, str | None, Decimal | None]] = []
+        for candidates, url, name in raw:
+            price = _select_price(candidates, spec)
+            if price is None:
+                # Ни основной, ни вторичный блок не дали нужную единицу
+                # (напр. клей без price-block-unitprice) — не считаем товар.
                 continue
-            any_pages_loaded = True
 
-            for page_num, html in enumerate(pages_html, start=1):
-                page_url = _build_page_url(base_url, page_num)
-                page_items = _parse_page(html, page_url)
-                new_items = []
-                for candidates, url, name in page_items:
-                    product_id = _product_id(url)
-                    if product_id is not None:
-                        if product_id in seen_ids:
-                            continue
-                        seen_ids.add(product_id)
+            if spec.normalize_length:
+                length_m = _length_m_from_title(name)
+                if not length_m:
+                    continue
+                # Длина рейки — она же и есть package_size (м на упаковку).
+                package_size = length_m
+                price = price / length_m
+            else:
+                # package_size (#306) — фасовка ЭТОГО товара, если карточка
+                # показывает второй ценовой блок (см. _select_package_size).
+                package_size = _select_package_size(candidates, spec, price)
 
-                    price = _select_price(candidates, spec)
-                    if price is None:
-                        # Ни основной, ни вторичный блок не дали нужную единицу
-                        # (напр. клей без price-block-unitprice) — не считаем товар.
-                        continue
-
-                    if spec.normalize_length:
-                        length_m = _length_m_from_title(name)
-                        if not length_m:
-                            continue
-                        price = price / length_m
-
-                    new_items.append((price, url, name))
-
-                items.extend(new_items)
-                logger.info(f"  Леман '{material_name}' {base_url} стр.{page_num}: +{len(new_items)} цен")
-
-        if not any_pages_loaded:
-            raise RuntimeError(f"Леман: браузерный фетч не вернул ни одной страницы для '{material_name}'")
+            items.append((price, url, name, package_size))
 
         if not items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (единица/размер не распознаны)")
@@ -317,13 +538,26 @@ class LemanParser(BaseParser):
                 f"{raw_count - len(items)} из {raw_count}"
             )
 
-        all_prices = [price for price, _, _ in items]
+        # Вариант по уровню комплектации (#331): нижняя/верхняя треть цен категории
+        # вместо всей выборки — см. price_band_slice и docs/price-sources.md.
+        if spec.price_band:
+            band_count = len(items)
+            items = price_band_slice(items, spec.price_band, key=lambda it: it[0])
+            logger.info(
+                f"  Леман '{material_name}': price_band={spec.price_band}, "
+                f"{len(items)} из {band_count} цен"
+            )
+
+        all_prices = [price for price, _, _, _ in items]
         price_min = min(all_prices)
         price_max = max(all_prices)
         price_avg = Decimal(round(statistics.mean(all_prices)))
 
+        # package_size берём у ТОГО ЖЕ товара-представителя (#306) — иначе
+        # фасовка в смете и фасовка на странице source_url могут не совпадать.
         representative = min(items, key=lambda it: abs(it[0] - price_avg))
         source_url = representative[1] or base_urls[0]
+        package_size = representative[3]
 
         logger.info(
             f"Леман: '{material_name}' — всего {len(all_prices)} цен, "
@@ -335,4 +569,25 @@ class LemanParser(BaseParser):
             price_avg=price_avg,
             price_max=price_max,
             source_url=source_url,
+            package_size=package_size,
         )
+
+
+# Региональные инстансы (#345) — тот же класс/CATEGORY_MAP, свой домен и facet
+# "в наличии" (см. _localize_url). Мегастрой в эти города не заводим — сеть
+# физически не работает вне Поволжья (сверено вживую, см. docs/price-sources.md),
+# поэтому только Леман — единственный источник материалов для Москвы/СПб
+# (covered_cities — см. price_aggregator_service.get_material_price).
+LEMAN_MOSCOW = LemanParser(
+    region="Москва",
+    host="lemanapro.ru",
+    in_stock_facet=_IN_STOCK_MOSCOW,
+    covered_cities=frozenset({"Москва"}),
+)
+LEMAN_SPB = LemanParser(
+    region="Санкт-Петербург",
+    host="spb.lemanapro.ru",
+    in_stock_facet=_IN_STOCK_SPB,
+    extra_query="fromRegion=34",
+    covered_cities=frozenset({"Санкт-Петербург"}),
+)

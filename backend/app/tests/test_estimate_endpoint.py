@@ -359,6 +359,42 @@ def test_parser_source_url_in_response(stub_material_parser):
         assert lab["source_url"] is None
 
 
+def test_parser_package_size_overrides_static_and_stays_consistent_with_quantity(stub_material_parser):
+    """package_size (#306): парсер отдал фасовку КОНКРЕТНОГО товара (2.5 л) —
+    отличную от статичной Material.package_size (9 л, см. conftest). В ответе
+    package_size должен быть от парсера, а не статика, и инвариант из api.md
+    (quantity == packs × package_size) обязан сойтись — иначе source_url на
+    странице (product за 2.5 л) и число упаковок в смете снова разъедутся."""
+    from decimal import Decimal
+    from app.parsers.base import ParsedPrice
+
+    card_url = "https://kazan.megastroy.com/products/kraska-2.5l"
+
+    def fake_fetch(material_name):
+        if material_name != "Краска для стен":
+            raise ValueError(f"нет категории для '{material_name}'")
+        return ParsedPrice(
+            price_min=Decimal("500"),
+            price_avg=Decimal("700"),
+            price_max=Decimal("900"),
+            source_url=card_url,
+            package_size=Decimal("2.5"),
+        )
+
+    stub_material_parser(fake_fetch)
+
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    materials = response.json()["materials"]
+    paint = next((m for m in materials if m["name"] == "Краска для стен"), None)
+
+    assert paint is not None
+    assert paint["source_url"] == card_url
+    assert paint["package_size"] == pytest.approx(2.5)
+    assert paint["package_size"] != 9  # не статика из materials.json
+    assert paint["quantity"] == pytest.approx(paint["packs"] * paint["package_size"], rel=1e-6)
+
+
 def test_parser_fallback_on_error():
     """Когда парсер падает, расчёт не ломается и source остаётся 'seed'.
     Парсер по умолчанию заглушён падающим stub_material_parser → seed."""
@@ -611,6 +647,30 @@ def test_finish_only_is_default_and_labeled():
     assert all("stage" in lab for lab in data["labor"])
 
 
+def test_finish_only_keeps_engineering_wiring():
+    """scope=finish_only + электрика/сантехника включены: разводка (Прокладка кабеля,
+    Монтаж труб, stage=rough) остаётся — она не входит в «жёсткие связки», которыми
+    управляет scope (#304). Монтаж приборов (finish) при этом тоже присутствует —
+    в finish_only чистовая отделка не исключается, исключаются только черновые."""
+    response = client.post("/api/estimates/calculate", json=_bathroom_payload())
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "finish_only"
+
+    labor = {x["service"]: x for x in data["labor"]}
+    for wiring in ("Прокладка кабеля", "Монтаж труб"):
+        assert wiring in labor, f"разводка «{wiring}» должна остаться в finish_only"
+        assert labor[wiring]["stage"] == "rough"
+        assert labor[wiring]["total_avg"] > 0
+
+    for fixture in ("Монтаж розетки", "Монтаж светильника", "Сантехнические работы"):
+        assert fixture in labor, f"монтаж приборов «{fixture}» должен остаться в finish_only"
+        assert labor[fixture]["stage"] == "finish"
+
+    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+        assert rough not in labor, f"черновая работа «{rough}» не должна попасть в finish_only"
+
+
 def test_rough_scope_adds_rough_works():
     """scope=rough_and_finish: черновые работы санузла попадают в смету со стадией rough (#190)."""
     response = client.post("/api/estimates/calculate",
@@ -627,6 +687,119 @@ def test_rough_scope_adds_rough_works():
 
     # Гидроизоляция санузла обязательна и считается по площади пола (4 м²).
     assert labor["Гидроизоляция"]["volume"] == pytest.approx(4.0)
+
+
+def test_rough_only_excludes_finish_labor():
+    """scope=rough_only: черновая+предчистовая есть, чистовой отделки нет (#303)."""
+    response = client.post("/api/estimates/calculate",
+                           json={**PAINT_PAYLOAD, "scope": "rough_only"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "rough_only"
+
+    labor = {x["service"]: x for x in data["labor"]}
+    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Грунтование",
+                  "Прокладка кабеля"):
+        assert rough in labor, f"нет черновой работы «{rough}»"
+        assert labor[rough]["stage"] == "rough"
+
+    # Шпаклёвка стен (предчистовая) не входит в жёсткие связки scope — остаётся всегда.
+    assert "Шпаклевка стен" in labor
+    assert labor["Шпаклевка стен"]["stage"] == "pre_finish"
+
+    for finish in ("Покраска стен", "Покраска потолка", "Укладка ламината",
+                   "Монтаж розетки", "Монтаж светильника"):
+        assert finish not in labor, f"чистовая работа «{finish}» не должна попасть в rough_only"
+
+    assert all(x["stage"] != "finish" for x in data["labor"])
+
+
+def test_rough_only_excludes_finish_materials():
+    """scope=rough_only: остаются грунт/стартовая шпаклёвка, чистовых материалов нет (#303)."""
+    response = client.post("/api/estimates/calculate",
+                           json={**PAINT_PAYLOAD, "scope": "rough_only"})
+    assert response.status_code == 200
+    data = response.json()
+
+    names = {m["name"] for m in data["materials"]}
+    assert {"Грунтовка", "Шпаклевка стартовая"} <= names
+    # Разводка (кабель) — черновой этап, материал остаётся; приборы (розетка/светильник) —
+    # чистовые, их монтажа в rough_only нет, значит и закупки быть не должно (#303).
+    assert "Кабель электрический" in names
+    for finish in ("Ламинат", "Краска для стен", "Краска потолочная", "Плинтус",
+                   "Шпаклевка финишная", "Розетка", "Светильник"):
+        assert finish not in names, f"чистовой материал «{finish}» не должен попасть в rough_only"
+
+
+def test_rough_only_bathroom_keeps_waterproof_no_tile():
+    """scope=rough_only в мокрой зоне: гидроизоляция есть, плитка/клей/затирка — нет (#303)."""
+    response = client.post("/api/estimates/calculate",
+                           json=_bathroom_payload("rough_only"))
+    assert response.status_code == 200
+    data = response.json()
+
+    labor = {x["service"]: x for x in data["labor"]}
+    assert "Гидроизоляция" in labor
+    assert labor["Гидроизоляция"]["stage"] == "rough"
+    assert "Укладка плитки" not in labor
+
+    names = {m["name"] for m in data["materials"]}
+    assert not ({"Плитка", "Плиточный клей", "Затирка"} & names)
+
+
+WALLPAPER_PAYLOAD = {
+    "city": "Казань",
+    "rooms": [
+        {
+            "name": "Комната",
+            "height": 2.7,
+            "points": [
+                {"x": 0, "y": 0}, {"x": 4, "y": 0},
+                {"x": 4, "y": 3}, {"x": 0, "y": 3}
+            ],
+            "room_type": "living",
+            "openings": [],
+            "works": W(walls="wallpaper")
+        }
+    ]
+}
+
+
+def test_wallpaper_adds_wall_prep_materials():
+    """walls=wallpaper: под обои считаются грунт и стартовая шпаклёвка, финишная — нет (#325)."""
+    response = client.post("/api/estimates/calculate", json=WALLPAPER_PAYLOAD)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "finish_only"
+
+    materials = {m["name"]: m for m in data["materials"]}
+    for name in ("Грунтовка", "Шпаклевка стартовая", "Обои"):
+        assert name in materials, f"нет материала «{name}» под обои"
+
+    # Финишная шпаклёвка под обои избыточна — полотно скрывает огрехи (#325).
+    assert "Шпаклевка финишная" not in materials
+
+    # wall_area = (4+3)*2*2.7 = 37.8 (проёмов нет)
+    wall_area = data["geometry"]["wall_area"]
+    assert wall_area == pytest.approx(37.8, 0.01)
+
+    primer = materials["Грунтовка"]
+    assert primer["base_quantity"] == pytest.approx(wall_area * 0.12, rel=0.01)
+
+    putty_start = materials["Шпаклевка стартовая"]
+    assert putty_start["base_quantity"] == pytest.approx(wall_area * 5.0, rel=0.01)
+
+
+def test_wallpaper_rough_only_keeps_prep_drops_wallpaper():
+    """scope=rough_only под обои: грунт/стартовая шпаклёвка остаются, сами обои — нет (#325)."""
+    response = client.post("/api/estimates/calculate",
+                           json={**WALLPAPER_PAYLOAD, "scope": "rough_only"})
+    assert response.status_code == 200
+    data = response.json()
+
+    names = {m["name"] for m in data["materials"]}
+    assert {"Грунтовка", "Шпаклевка стартовая"} <= names
+    assert "Обои" not in names
 
 
 def test_hidden_works_block_present_and_not_in_summary():
@@ -701,7 +874,7 @@ def test_hidden_works_waterproof_only_wet_floor():
 
 
 def test_hidden_works_independent_of_scope():
-    """Блок скрытых работ одинаков при finish_only и rough_and_finish (#239).
+    """Блок скрытых работ одинаков при всех трёх scope (#239, #303).
 
     Скрытые работы — риск неизвестного основания, ортогональный глубине сметы:
     в summary они не входят ни при каком scope, состав от scope не зависит.
@@ -710,17 +883,25 @@ def test_hidden_works_independent_of_scope():
                          json=_bathroom_payload("finish_only")).json()
     rough = client.post("/api/estimates/calculate",
                         json=_bathroom_payload("rough_and_finish")).json()
+    rough_only = client.post("/api/estimates/calculate",
+                             json=_bathroom_payload("rough_only")).json()
 
     def services(d):
         return {x["service"] for x in d["hidden_works"]["items"]}
 
-    assert services(finish) == services(rough)
+    assert services(finish) == services(rough) == services(rough_only)
     assert finish["hidden_works"]["total_avg"] == pytest.approx(
         rough["hidden_works"]["total_avg"])
+    assert finish["hidden_works"]["total_avg"] == pytest.approx(
+        rough_only["hidden_works"]["total_avg"])
 
 
 def test_invalid_scope_rejected():
-    """Неизвестный scope отклоняется валидацией (422)."""
+    """rough_only — валидный scope; неизвестная строка отклоняется (422)."""
+    response = client.post("/api/estimates/calculate",
+                           json=_bathroom_payload("rough_only"))
+    assert response.status_code == 200
+
     response = client.post("/api/estimates/calculate",
                            json=_bathroom_payload("only_rough"))
     assert response.status_code == 422
@@ -887,3 +1068,277 @@ def test_non_positive_opening_depth_rejected():
 
     assert client.post("/api/estimates/calculate", json=_payload(0)).status_code == 422
     assert client.post("/api/estimates/calculate", json=_payload(-0.1)).status_code == 422
+
+
+def test_labor_tier_consistency():
+    """Проверка, что labor[] содержит полную вилку цен, а сводка согласована со строками."""
+    # Базовый payload с одной комнатой
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Спальня",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0},
+                    {"x": 4, "y": 0},
+                    {"x": 4, "y": 3},
+                    {"x": 0, "y": 3}
+                ],
+                "room_type": "living",
+                "openings": [
+                    {"type": "door", "width": 0.8, "height": 2.0},
+                    {"type": "window", "width": 1.5, "height": 1.4}
+                ],
+                "works": {
+                    "floor": {"enabled": True, "finish": "laminate"},
+                    "walls": {"enabled": True, "finish": "paint"},
+                    "ceiling": {"enabled": True, "finish": "paint"},
+                    "electric": {"enabled": True, "sockets": 5, "lights": 3, "cable_m": 20},
+                    "plumbing": {"enabled": False, "pipe_m": 0}
+                }
+            }
+        ],
+        "tier": "avg"   # задаём уровень
+    }
+
+    # 1. Запрос с tier="avg"
+    resp_avg = client.post("/api/estimates/calculate", json=payload)
+    assert resp_avg.status_code == 200
+    data_avg = resp_avg.json()
+    labor_items_avg = data_avg["labor"]
+
+    # Проверяем, что у каждой работы есть все поля вилки
+    for item in labor_items_avg:
+        assert "price_min" in item
+        assert "price_avg" in item
+        assert "price_max" in item
+        assert "total_min" in item
+        assert "total_avg" in item
+        assert "total_max" in item
+        assert item["tier"] == "avg"
+        # Для avg-уровня price и total должны равняться avg
+        assert item["price"] == item["price_avg"]
+        assert item["total"] == item["total_avg"]
+
+    # Проверяем согласованность сводки
+    summary_avg = data_avg["summary"]
+    total_avg_sum = sum(item["total_avg"] for item in labor_items_avg)
+    assert total_avg_sum == pytest.approx(summary_avg["labor_avg"], 0.01)
+
+    total_min_sum = sum(item["total_min"] for item in labor_items_avg)
+    assert total_min_sum == pytest.approx(summary_avg["labor_min"], 0.01)
+
+    total_max_sum = sum(item["total_max"] for item in labor_items_avg)
+    assert total_max_sum == pytest.approx(summary_avg["labor_max"], 0.01)
+
+    # 2. Запрос с tier="min"
+    payload_min = {**payload, "tier": "min"}
+    resp_min = client.post("/api/estimates/calculate", json=payload_min)
+    assert resp_min.status_code == 200
+    data_min = resp_min.json()
+    labor_items_min = data_min["labor"]
+
+    for item in labor_items_min:
+        assert item["tier"] == "min"
+        assert item["price"] == item["price_min"]
+        assert item["total"] == item["total_min"]
+
+    # 3. Запрос с tier="max"
+    payload_max = {**payload, "tier": "max"}
+    resp_max = client.post("/api/estimates/calculate", json=payload_max)
+    assert resp_max.status_code == 200
+    data_max = resp_max.json()
+    labor_items_max = data_max["labor"]
+
+    for item in labor_items_max:
+        assert item["tier"] == "max"
+        assert item["price"] == item["price_max"]
+        assert item["total"] == item["total_max"]
+
+    # Дополнительно: убедимся, что min < avg < max (если цены различаются)
+    # Находим одну работу, которая точно есть (например, "Покраска стен")
+    paint_avg = next(item for item in labor_items_avg if item["service"] == "Покраска стен")
+    assert paint_avg["price_min"] < paint_avg["price_avg"] < paint_avg["price_max"]
+
+
+def test_material_tier_consistency():
+    """Проверка, что materials[] содержит полную вилку цен, а сводка согласована со строками."""
+    # Базовый payload с одной комнатой (включая электрику для разнообразия)
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Спальня",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0},
+                    {"x": 4, "y": 0},
+                    {"x": 4, "y": 3},
+                    {"x": 0, "y": 3}
+                ],
+                "room_type": "living",
+                "openings": [
+                    {"type": "door", "width": 0.8, "height": 2.0},
+                    {"type": "window", "width": 1.5, "height": 1.4}
+                ],
+                "works": {
+                    "floor": {"enabled": True, "finish": "laminate"},
+                    "walls": {"enabled": True, "finish": "paint"},
+                    "ceiling": {"enabled": True, "finish": "paint"},
+                    "electric": {"enabled": True, "sockets": 5, "lights": 3, "cable_m": 20},
+                    "plumbing": {"enabled": False, "pipe_m": 0}
+                }
+            }
+        ],
+        "tier": "avg"   # задаём уровень
+    }
+
+    # 1. Запрос с tier="avg"
+    resp_avg = client.post("/api/estimates/calculate", json=payload)
+    assert resp_avg.status_code == 200
+    data_avg = resp_avg.json()
+    materials_avg = data_avg["materials"]
+
+    # Проверяем, что у каждого материала есть все поля вилки
+    for item in materials_avg:
+        assert "price_min" in item
+        assert "price_avg" in item
+        assert "price_max" in item
+        assert "total_min" in item
+        assert "total_avg" in item
+        assert "total_max" in item
+        assert item["tier"] == "avg"
+        # Для avg-уровня price и total должны равняться avg
+        assert item["price"] == item["price_avg"]
+        assert item["total"] == item["total_avg"]
+
+    # Проверяем согласованность сводки
+    summary_avg = data_avg["summary"]
+    total_avg_sum = sum(item["total_avg"] for item in materials_avg)
+    assert total_avg_sum == pytest.approx(summary_avg["materials_avg"], 0.01)
+
+    total_min_sum = sum(item["total_min"] for item in materials_avg)
+    assert total_min_sum == pytest.approx(summary_avg["materials_min"], 0.01)
+
+    total_max_sum = sum(item["total_max"] for item in materials_avg)
+    assert total_max_sum == pytest.approx(summary_avg["materials_max"], 0.01)
+
+    # 2. Запрос с tier="min"
+    payload_min = {**payload, "tier": "min"}
+    resp_min = client.post("/api/estimates/calculate", json=payload_min)
+    assert resp_min.status_code == 200
+    data_min = resp_min.json()
+    materials_min = data_min["materials"]
+
+    for item in materials_min:
+        assert item["tier"] == "min"
+        assert item["price"] == item["price_min"]
+        assert item["total"] == item["total_min"]
+
+    # 3. Запрос с tier="max"
+    payload_max = {**payload, "tier": "max"}
+    resp_max = client.post("/api/estimates/calculate", json=payload_max)
+    assert resp_max.status_code == 200
+    data_max = resp_max.json()
+    materials_max = data_max["materials"]
+
+    for item in materials_max:
+        assert item["tier"] == "max"
+        assert item["price"] == item["price_max"]
+        assert item["total"] == item["total_max"]
+
+    # Дополнительно: убедимся, что min < avg < max (если цены различаются)
+    # Находим один материал, который точно есть (например, "Краска для стен")
+    paint_avg = next(item for item in materials_avg if item["name"] == "Краска для стен")
+    assert paint_avg["price_min"] < paint_avg["price_avg"] < paint_avg["price_max"]
+
+
+def test_material_tier_selects_different_sku():
+    """#331: tier=min/max на floor.laminate отдают РАЗНЫЕ товары (name/source_url/
+    package_size), а не одну цену с разбросом (в отличие от #327/#293-интерима)."""
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Спальня",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}
+                ],
+                "room_type": "living",
+                "openings": [{"type": "door", "width": 0.8, "height": 2.0}],
+                "works": {
+                    "floor": {"enabled": True, "finish": "laminate"},
+                    "walls": {"enabled": False, "finish": None},
+                    "ceiling": {"enabled": False, "finish": None},
+                    "electric": {"enabled": False},
+                    "plumbing": {"enabled": False},
+                }
+            }
+        ],
+    }
+
+    def _laminate_row(tier):
+        resp = client.post("/api/estimates/calculate", json={**payload, "tier": tier})
+        assert resp.status_code == 200
+        materials = resp.json()["materials"]
+        return next(m for m in materials if m["unit"] == "м²")
+
+    row_min = _laminate_row("min")
+    row_avg = _laminate_row("avg")
+    row_max = _laminate_row("max")
+
+    assert row_min["name"] == "Ламинат эконом"
+    assert row_avg["name"] == "Ламинат"
+    assert row_max["name"] == "Ламинат премиум"
+    # package_size различается по варианту → у quantity/packs тоже другое число,
+    # не только цена (как проверить из issue #331).
+    assert row_min["package_size"] == 1.5
+    assert row_max["package_size"] == 2.5
+    assert row_min["packs"] != row_max["packs"]
+
+
+def test_missing_price_handled_gracefully(monkeypatch):
+    """Проверка, что при отсутствии цены у материала (get_material_price возвращает None)
+    ответ остаётся 200, строка присутствует со source='нет цены' и все ценовые поля = 0.
+    """
+    # Подменяем get_material_price в модуле app.api.estimates, где она используется
+    def mock_get_material_price(*args, **kwargs):
+        return None
+    monkeypatch.setattr("app.api.estimates.get_material_price", mock_get_material_price)
+
+    payload = {
+        "city": "Казань",
+        "rooms": [{
+            "name": "Спальня",
+            "height": 2.7,
+            "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+            "room_type": "living",
+            "openings": [],
+            "works": {
+                "floor": {"enabled": True, "finish": "laminate"},
+                "walls": {"enabled": True, "finish": "paint"},
+                "ceiling": {"enabled": False, "finish": None},
+                "electric": {"enabled": False},
+                "plumbing": {"enabled": False},
+            }
+        }],
+        "tier": "avg"
+    }
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+
+    for item in data["materials"]:
+        assert item["source"] == "нет цены"
+        assert item["price"] == 0.0
+        assert item["total"] == 0.0
+        assert item["price_min"] == 0.0
+        assert item["price_avg"] == 0.0
+        assert item["price_max"] == 0.0
+        assert item["total_min"] == 0.0
+        assert item["total_avg"] == 0.0
+        assert item["total_max"] == 0.0
+        assert item["tier"] == "avg"
+

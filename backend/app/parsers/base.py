@@ -24,6 +24,12 @@ class ParsedPrice:
     # Ссылка на карточку/страницу, откуда взяты цены (для отображения источника
     # в смете). Необязательна: парсер может не знать ссылку → остаётся None.
     source_url: str | None = None
+    # Фасовка КОНКРЕТНОГО товара, чья цена ушла в price_avg/source_url (#306) —
+    # не справочное значение из materials.json, а то, что реально стоит за
+    # ссылкой. Парсер может не суметь её извлечь (категория без фасовки в
+    # названии/карточке) → остаётся None, вызывающий код откатывается на
+    # статичный Material.package_size (см. price_aggregator_service.get_price).
+    package_size: Decimal | None = None
 
 
 class BaseParser(ABC):
@@ -36,6 +42,20 @@ class BaseParser(ABC):
     # Имя источника - должно совпадать с полем PriceSource.name в БД
     # Например: "Мегастрой"
     source_name: str
+
+    # Регион (город), которому принадлежат цены ЭТОГО инстанса парсера (#345,
+    # напр. LEMAN_MOSCOW.region == "Москва") — пишется/читается в MaterialPrice.region
+    # веткой парсера в price_aggregator_service.get_price. None (по умолчанию) —
+    # источник без городской привязки, region IS NULL, как раньше.
+    region: str | None = None
+
+    # Города, для которых этот инстанс — единственный применимый источник
+    # материалов (#345, напр. LEMAN_MOSCOW). None (по умолчанию) — источник
+    # без городской привязки, участвует, когда для запрошенного города нет
+    # выделенного регионального парсера (см. price_aggregator_service.
+    # get_material_price._select_regional_parsers). Парсеров работ не
+    # касается — у них своя региональность через REGIONAL_LABOR_PARSERS.
+    covered_cities: frozenset[str] | None = None
 
     def known_materials(self) -> list[str]:
         '''

@@ -1,0 +1,48 @@
+.cards {
+  display: flex;
+  gap: 20px;
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+.card {
+  border: 1px solid #ccc;
+  padding: 16px;
+  border-radius: 8px;
+  flex: 1;
+}
+
+.cardTitle {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 18px;
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.cardTotal {
+  border: 2px solid #007bff;
+  padding: 16px;
+  border-radius: 8px;
+  flex: 1;
+  background-color: #f8f9fa;
+}
+
+.cardTotalTitle {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 18px;
+  color: #007bff;
+}
+
+.cardTotalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 15px;
+}

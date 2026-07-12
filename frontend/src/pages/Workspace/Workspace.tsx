@@ -48,8 +48,31 @@ const formatNum = (n: number) =>
 const formatQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
 
-// Регион, по которому реально взялась цена; null → базовая seed-цена (не зависит от города).
-const regionLabel = (region?: string | null) => region ?? "базовая цена";
+// Регион, по которому реально взялась цена; null → нерегиональный источник
+// (парсер отдаёт один и тот же каталог на все города, см. docs/price-sources.md).
+// Мегастрой и базовый Леман физически используют домен kazan.* при ЛЮБОМ выбранном
+// городе (проверено вживую: тот же source_url для Москвы/Новосибирска/Казани) —
+// подставлять "Казань" им всегда было бы неправдой. Честно можно показать город
+// только когда пользователь и правда выбрал Казань — тогда это совпадает с фактом.
+const regionLabel = (
+  region: string | null | undefined,
+  sourceUrl: string | null | undefined,
+  selectedCity: string,
+) => {
+  if (region) return region;
+  if (selectedCity === "Казань" && sourceUrl?.includes("kazan.")) return "Казань";
+  return "базовая цена";
+};
+
+// "company_price" — источник rembrigada116.ru (казанская компания), но так
+// исторически называется в БД (см. rembrigada_parser.py) — не показываем сырой
+// внутренний код клиенту.
+const LABOR_SOURCE_NAMES: Record<string, string> = { company_price: "rembrigada116.ru" };
+const laborSourceName = (source: string) => LABOR_SOURCE_NAMES[source] ?? source;
+
+// Резерв на непредвиденные (CONTINGENCY, backend/app/services/repair_coeffs_service.py),
+// уже включён в "Итог по позиции" — поэтому итог не равен цене за единицу × кол-во.
+const CONTINGENCY_PCT: Record<PriceMode, number> = { min: 10, avg: 12, max: 15 };
 
 export type PriceMode = "min" | "avg" | "max";
 
@@ -397,13 +420,13 @@ export function Workspace() {
       );
       const sourceLabel = sourceNames.length > 0 ? sourceNames.join(", ") : activeSource;
 
-      return { m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, sourceLabel, variants };
+      return { m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, sourceLabel, sourceCount: sourceNames.length, variants };
     });
   }, [data, priceScale, priceMode, materialOverrides, toggleMaterialOverride]);
 
   const materialRows: LedgerRow[] = useMemo(
     () =>
-      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, sourceLabel, variants }) => ({
+      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, sourceLabel, sourceCount, variants }) => ({
         name: activeName,
         volume: `${formatQty(m.quantity)} ${m.unit}`,
         price: rub(Math.round(activePrice)),
@@ -415,19 +438,22 @@ export function Workspace() {
           { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
           { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
           { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
-          { label: "Итог по позиции", value: rub(Math.round(activeTotal)) },
           {
-            label: "Источник цены",
+            label: "Итог по позиции",
+            value: `${rub(Math.round(activeTotal))} (с резервом +${CONTINGENCY_PCT[effectiveMode]}%)`,
+          },
+          {
+            label: sourceCount > 1 ? "Источники цены" : "Источник цены",
             value: sourceLabel,
             ...(variants.length > 0 ? {} : { url: activeUrl }),
           },
-          { label: "Регион", value: regionLabel(m.region) },
+          { label: "Регион", value: regionLabel(m.region, activeUrl, city) },
           ...(m.updated_at
             ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
             : []),
         ],
       })),
-    [materialsActive],
+    [materialsActive, city],
   );
 
   // Работы с учётом эффективного уровня по каждой строке. В отличие от материалов,
@@ -458,26 +484,30 @@ export function Workspace() {
       // Мин./макс. цена в коридоре — это реально цены разных компаний из l.sources
       // (посчитаны на бэкенде из нескольких прайс-листов), но бэкенд не сообщает,
       // ЧЬЯ именно цена дала каждую границу — только "представительный" source_url,
-      // общий для всей строки. Ссылку на конкретную карточку варианта поэтому не
-      // приписываем (была бы одинаковой у всех трёх и выглядела как обман); список
-      // компаний — одной строкой в "Источник цены" ниже.
+      // общий для всей строки (по документации — тот, чья средняя ближе к итоговой,
+      // т.е. соответствует именно avg). Поэтому ссылку ставим только на «Стандарт»,
+      // у «Эконом»/«Премиум» её быть не может — компания неизвестна; список всех
+      // участников — одной строкой в "Источник(и) цены" ниже.
       const variants: LedgerRowVariant[] = hasCorridor
         ? [
             { mode: "min", title: "Эконом", name: l.service, price: rub(Math.round(l.price_min!)), onClick: () => toggleLaborOverride(i, "min") },
-            { mode: "avg", title: "Стандарт", name: l.service, price: rub(Math.round(l.price_avg)), onClick: () => toggleLaborOverride(i, "avg") },
+            { mode: "avg", title: "Стандарт", name: l.service, price: rub(Math.round(l.price_avg)), url: l.source_url, onClick: () => toggleLaborOverride(i, "avg") },
             { mode: "max", title: "Премиум", name: l.service, price: rub(Math.round(l.price_max!)), onClick: () => toggleLaborOverride(i, "max") },
           ]
         : [];
 
+      const sourceCount = l.sources?.length ?? (l.source ? 1 : 0);
       const sourceLabel =
-        l.sources && l.sources.length > 1 ? l.sources.join(", ") : l.source;
+        l.sources && l.sources.length > 1
+          ? l.sources.map(laborSourceName).join(", ")
+          : laborSourceName(l.source);
 
-      return { l, effectiveMode, activePrice, activeTotal, variants, sourceLabel };
+      return { l, effectiveMode, activePrice, activeTotal, variants, sourceLabel, sourceCount };
     });
   }, [data, priceScale, priceMode, laborOverrides, toggleLaborOverride]);
 
   const laborItemToRow = useCallback(
-    ({ l, effectiveMode, activePrice, activeTotal, variants, sourceLabel }: (typeof laborActive)[number]): LedgerRow => ({
+    ({ l, effectiveMode, activePrice, activeTotal, variants, sourceLabel, sourceCount }: (typeof laborActive)[number]): LedgerRow => ({
       name: l.service,
       subtitle: l.specialist,
       volume: `${formatQty(l.volume)} ${l.unit}`,
@@ -487,16 +517,19 @@ export function Workspace() {
       details: [
         { label: "Специалист", value: l.specialist },
         { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
-        { label: "Итог по позиции", value: rub(Math.round(activeTotal)) },
         {
-          label: "Источник цены",
-          value: sourceLabel,
-          ...(l.sources && l.sources.length > 1 ? {} : { url: l.source_url }),
+          label: "Итог по позиции",
+          value: `${rub(Math.round(activeTotal))} (с резервом +${CONTINGENCY_PCT[effectiveMode]}%)`,
         },
-        { label: "Регион", value: regionLabel(l.region) },
+        {
+          label: sourceCount > 1 ? "Источники цены" : "Источник цены",
+          value: sourceLabel,
+          ...(sourceCount > 1 ? {} : { url: l.source_url }),
+        },
+        { label: "Регион", value: regionLabel(l.region, l.source_url, city) },
       ],
     }),
-    [],
+    [city],
   );
 
   const laborRows: LedgerRow[] = useMemo(

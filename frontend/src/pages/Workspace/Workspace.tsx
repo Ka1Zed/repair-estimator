@@ -878,7 +878,7 @@ export function Workspace() {
                   <button
                     className={styles.exportBtn}
                     onClick={() =>
-                      data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode, materialOverrides))
+                      data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode, materialOverrides, laborOverrides))
                     }
                   >
                     Скачать PDF
@@ -886,7 +886,7 @@ export function Workspace() {
                   <button
                     className={styles.exportBtn}
                     onClick={() =>
-                      data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode, materialOverrides))
+                      data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode, materialOverrides, laborOverrides))
                     }
                   >
                     Экспорт в Excel

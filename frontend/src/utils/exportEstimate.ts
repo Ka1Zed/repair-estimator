@@ -21,7 +21,8 @@ export interface EstimateExportData {
 
 const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
 
-// Палитра Excel
+// Палитра Excel (те же цвета, что в PDF из index.css). xlsx-js-style пишет
+// заливки/шрифты/рамки ячеек через свойство cell.s — обычный xlsx это не умеет.
 const XLS = {
   accent: 'B07B5E',
   heading: '2A2A2A',
@@ -59,6 +60,8 @@ const cellAt = (ws: XLSX.WorkSheet, r: number, c: number) => {
   return ws[ref];
 };
 
+// Оформление таблицы: акцентная шапка, зебра, рамки, денежный формат
+// на money-колонках, синие подчёркнутые ячейки-ссылки на link-колонке.
 const styleTable = (
   ws: XLSX.WorkSheet,
   cfg: {
@@ -114,6 +117,10 @@ const MODE_LABELS: Record<PriceMode, string> = {
   max: 'Максимальный'
 };
 
+// Множитель уровня цен, СВОЙ для каждого раздела: у позиций без своей вилки (нет
+// min/max-товара) масштабируем total_avg коэффициентом из вилки этого раздела.
+// Общий total-множитель дал бы расхождение с «Итоговой стоимостью» — у материалов
+// и работ разный разброс. Совпадает с priceScale в UI (Workspace.tsx).
 const scaleFor = (s: SummaryData, priceMode: PriceMode, category: 'materials' | 'labor') => {
   const avg = category === 'materials' ? s.materials_avg : s.labor_avg;
   if (avg === 0) return 1;
@@ -160,23 +167,42 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
   return { activeName, activePrice, activeTotal, activeSource, activeUrl };
 };
 
+// Активные цена/итог работы с учётом уровня — зеркалит логику UI (Workspace.tsx):
+// у работ tier не меняет исполнителя, только точку коридора price_min/avg/max одной
+// и той же строки; при отсутствии коридора масштабируем avg множителем раздела.
+// source_url у работ всегда представительный (общий для строки) — от tier не зависит.
+const getActiveLaborData = (l: LaborItem, priceMode: PriceMode, scale: number) => {
+  const hasCorridor = l.price_min != null && l.price_max != null;
+  const activePrice = !hasCorridor
+    ? l.price_avg * scale
+    : priceMode === 'min' ? l.price_min! : priceMode === 'max' ? l.price_max! : l.price_avg;
+  const activeTotal = !hasCorridor
+    ? l.total_avg * scale
+    : priceMode === 'min' ? (l.total_min ?? l.total_avg) : priceMode === 'max' ? (l.total_max ?? l.total_avg) : l.total_avg;
+  return { activePrice, activeTotal };
+};
+
+// Excel-версия сметы в одном стиле с PDF: акцентная шапка, зебра, рамки, город/дата,
+// кликабельные источники (синие подчёркнутые ячейки), детализация количества и запаса.
+// materialOverrides/laborOverrides — точечное закрепление уровня по строке из UI.
 export const exportXlsx = (
   data: EstimateExportData,
   city: string,
   priceMode: PriceMode = "avg",
   materialOverrides?: Record<number, PriceMode>,
+  laborOverrides?: Record<number, PriceMode>,
 ) => {
   const wb = XLSX.utils.book_new();
   const today = new Date().toLocaleDateString('ru-RU');
   const s = data.summary;
 
+  // Множители уровня цен — раздельные для материалов и работ (см. scaleFor).
   const scaleMat = scaleFor(s, priceMode, 'materials');
   const scaleLab = scaleFor(s, priceMode, 'labor');
-  const pLab = (val: number) => Math.round(val * scaleLab);
 
   const metaLine = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${today}`;
 
-  // ---------- Сводка ----------
+  // ---------- Сводка: город/дата, геометрия, итоги min/avg/max ----------
   const summaryAoa: (string | number)[][] = [
     ['Смета на ремонт'],
     [metaLine],
@@ -266,10 +292,13 @@ export const exportXlsx = (
     [metaLine],
     [],
     ['Услуга', 'Специалист', 'Объём', 'Ед. изм.', 'Цена за ед.', 'Итого', 'Источник'],
-    ...data.labor.map(l => [
-      l.service, l.specialist, l.volume, l.unit, pLab(l.price_avg), pLab(l.total_avg),
-      sourceLabel(l.source, l.region),
-    ]),
+    ...data.labor.map((l, i) => {
+      const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
+      return [
+        l.service, l.specialist, l.volume, l.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
+        sourceLabel(l.source, l.region),
+      ];
+    }),
   ];
   const labSheet = XLSX.utils.aoa_to_sheet(labAoa);
   const labFirst = 4;
@@ -295,7 +324,7 @@ export const exportXlsx = (
   }
   XLSX.utils.book_append_sheet(wb, labSheet, 'Работы');
 
-  // ---------- Детализация количества ----------
+  // ---------- Детализация количества: из чего сложилось «Кол-во» ----------
   const detAoa: (string | number)[][] = [
     ['Детализация количества материалов'],
     ['Количество = базовый расход × запас, округлённое вверх до целых упаковок'],
@@ -330,7 +359,7 @@ export const exportXlsx = (
   }
   XLSX.utils.book_append_sheet(wb, detSheet, 'Детализация');
 
-  // ---------- Скрытые работы ----------
+  // ---------- Скрытые работы (справочно, вилка не масштабируется) ----------
   if (data.hidden_works && data.hidden_works.items.length > 0) {
     const hw = data.hidden_works;
     const hwAoa: (string | number)[][] = [
@@ -381,6 +410,7 @@ const PDF_BORDER: RGB = [229, 229, 229];
 const PDF_ZEBRA: RGB = [250, 246, 243];
 const PDF_WHITE: RGB = [255, 255, 255];
 
+// Читаемая подпись источника цены: seed → «База», парсеры → человекочитаемо, + регион
 const sourceNames: Record<string, string> = { seed: 'База', megastroy: 'Мегастрой', leroy: 'Леруа', lemana: 'Лемана ПРО' };
 const sourceLabel = (source: string, region?: string | null) => {
   const src = !source ? '—' : sourceNames[source] ?? source;
@@ -390,7 +420,9 @@ const sourceLabel = (source: string, region?: string | null) => {
 const getFinalY = (d: jsPDF) =>
   (d as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
+// Числовое кол-во: без хвостовых нулей, максимум 2 знака
 const fmtQty = (x: number) => x.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+// Запас в процентах из множителя waste_factor (1.1 → «+10%»)
 const wastePct = (waste_factor: number) => `+${Math.round((waste_factor - 1) * 100)}%`;
 
 export const exportPdf = async (
@@ -398,13 +430,14 @@ export const exportPdf = async (
   city: string,
   priceMode: PriceMode = "avg",
   materialOverrides?: Record<number, PriceMode>,
+  laborOverrides?: Record<number, PriceMode>,
 ) => {
   const doc = new jsPDF();
   const s = data.summary;
 
+  // Множители уровня цен — раздельные для материалов и работ (см. scaleFor).
   const scaleMat = scaleFor(s, priceMode, 'materials');
   const scaleLab = scaleFor(s, priceMode, 'labor');
-  const pLab = (val: number) => Math.round(val * scaleLab);
 
   try {
     const response = await fetch('/Roboto-Regular.ttf');
@@ -457,7 +490,9 @@ export const exportPdf = async (
     doc.text(text, marginX, y);
   };
 
-  // Хелпер для ссылок — использует дженерик T для сохранения типобезопасности
+  // Делает ячейки колонки «Источник» кликабельными ссылками: подсвечивает акцентом
+  // и вешает doc.link поверх ячейки. getUrl — дженерик по T, чтобы брать url с учётом
+  // уровня (у материалов ссылка зависит от tier, у работ — общая на строку).
   const sourceLinks = <T,>(items: T[], col: number, getUrl: (item: T, index: number) => string | null | undefined) => ({
     didParseCell: (h: CellHookData) => {
       if (h.section === 'body' && h.column.index === col && getUrl(items[h.row.index], h.row.index)) {
@@ -471,6 +506,7 @@ export const exportPdf = async (
     },
   });
 
+  // Обложка: титул + акцентная линейка + мета
   doc.setFontSize(22);
   doc.setTextColor(...PDF_HEADING);
   doc.text('Смета на ремонт', marginX, 22);
@@ -527,9 +563,12 @@ export const exportPdf = async (
     ...sourceLinks(data.labor, 6, (l) => l.source_url),
     startY: currentY + 4,
     head: [['Услуга', 'Специалист', 'Объём', 'Ед.', 'Цена', 'Итого', 'Источник']],
-    body: data.labor.map(l => [
-      l.service, l.specialist, l.volume, l.unit, formatPricePDF(pLab(l.price_avg)), formatPricePDF(pLab(l.total_avg)), sourceLabel(l.source, l.region)
-    ]),
+    body: data.labor.map((l, i) => {
+      const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
+      return [
+        l.service, l.specialist, l.volume, l.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(l.source, l.region)
+      ];
+    }),
     columnStyles: {
       0: { halign: 'left', cellWidth: 40 },
       1: { halign: 'left', cellWidth: 28 },
@@ -566,7 +605,9 @@ export const exportPdf = async (
     }
   });
 
+  // Детализация количества материалов: из чего сложилось «Кол-во» в смете
   currentY = getFinalY(doc) + 14;
+  // не оставлять заголовок секции «висеть» внизу страницы — перенести целиком
   if (currentY > pageH - 45) {
     doc.addPage();
     currentY = 20;
@@ -600,6 +641,7 @@ export const exportPdf = async (
     }
   });
 
+  // Скрытые работы (справочно, не входят в итоговую смету)
   if (data.hidden_works && data.hidden_works.items.length > 0) {
     const hw = data.hidden_works;
     currentY = getFinalY(doc) + 14;
@@ -642,6 +684,7 @@ export const exportPdf = async (
     });
   }
 
+  // Футер: подпись слева, нумерация справа — на каждой странице
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);

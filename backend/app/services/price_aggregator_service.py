@@ -196,14 +196,18 @@ def get_price(
     return seed_price
 
 
-def _combine_material_prices(session, material_id: int, rows: list[MaterialPrice],
-                              region: str | None) -> MaterialPrice:
+def _combine_material_prices(session, material_id: int,
+                              rows: list[MaterialPrice]) -> MaterialPrice:
     '''
     Объединяет parser-цены нескольких источников материала (Мегастрой, Леман, ...)
     в одну вилку — аналог _combine_labor_prices (#166), но для материалов и с учётом
     package_size (#306): у представителя берём и source_url, и его package_size,
     т.к. это фасовка КОНКРЕТНОГО товара за этой ссылкой (расчёт упаковок должен
     остаться согласован с тем, что видно по ссылке).
+
+    region берём у представителя, а не из запроса: parser-цены материалов
+    нерегиональны (region IS NULL, одна цена на все города), и контракт (docs/api.md)
+    требует region=null для парсерной цены — как отдавал старый однопарсерный путь.
 
     Работает и для одного элемента rows (тогда вилка/представитель — этот же элемент),
     чтобы contributing_sources был заполнен и для единственного источника (как у labor).
@@ -225,7 +229,7 @@ def _combine_material_prices(session, material_id: int, rows: list[MaterialPrice
         price_min=price_min,
         price_avg=price_avg,
         price_max=price_max,
-        region=region,
+        region=representative.region,
         source_url=representative.source_url,
         package_size=representative.package_size,
         updated_at=representative.updated_at,
@@ -272,7 +276,7 @@ def get_material_price(
             parser_results.append(result)
 
     if parser_results:
-        combined = _combine_material_prices(db, material.id, parser_results, region)
+        combined = _combine_material_prices(db, material.id, parser_results)
         logger.info(
             f"Цена материала '{material_name}': источник=parser "
             f"({', '.join(combined.contributing_sources)}), region={region}"

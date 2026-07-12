@@ -182,6 +182,9 @@ class TestMaterialPriceCombination:
             assert price.price_max == Decimal("200")   # максимум по источникам
             assert price.price_avg == Decimal("140")   # среднее средних (120+160)/2
             assert set(price.contributing_sources) == {"Мегастрой", "Леман"}
+            # parser-цены нерегиональны (region IS NULL) → объединённая тоже null,
+            # хотя в запросе был регион (контракт docs/api.md: парсерная → region=null).
+            assert price.region is None
         finally:
             self._clear_parser_prices(db_session)
 
@@ -218,4 +221,3 @@ class TestMaterialPriceCombination:
             assert getattr(price, "contributing_sources", None) is None
         finally:
             self._clear_parser_prices(db_session)
-        assert getattr(price, "contributing_sources", None) is None

@@ -54,14 +54,18 @@ const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
 // городе (проверено вживую: тот же source_url для Москвы/Новосибирска/Казани) —
 // подставлять "Казань" им всегда было бы неправдой. Честно можно показать город
 // только когда пользователь и правда выбрал Казань — тогда это совпадает с фактом.
+// "базовая цена" — только для настоящего seed-резерва (нет живого источника вообще).
+// Если источник — реальный парсер (Мегастрой/Леман), просто не привязанный к городу,
+// так его называть неверно: это не "запасной" вариант, а актуальная живая цена.
 const regionLabel = (
   region: string | null | undefined,
   sourceUrl: string | null | undefined,
   selectedCity: string,
+  source: string,
 ) => {
   if (region) return region;
   if (selectedCity === "Казань" && sourceUrl?.includes("kazan.")) return "Казань";
-  return "базовая цена";
+  return source === "seed" ? "базовая цена" : "не привязан к городу";
 };
 
 // "company_price" — источник rembrigada116.ru (казанская компания), но так
@@ -221,9 +225,13 @@ export function Workspace() {
           calculateEstimate({ ...payload, tier: "max" }),
         ])) as [EstimateResponse, EstimateResponse, EstimateResponse];
 
+        // ВАЖНО: price/total — цена именно ЭТОГО tier (backend/app/schemas/estimate.py).
+        // price_avg/total_avg — статичное среднее ВНУТРИ разрешённого товара, оно
+        // одинаковое во всех трёх ответах для не-finish_key материалов (тот же товар) —
+        // подставить его сюда значило бы показать одну и ту же цену на всех уровнях.
         const toVariant = (m?: MaterialItem): PriceVariant | null =>
           m
-            ? { name: m.name, price: m.price_avg, total: m.total_avg, source: m.source, source_url: m.source_url ?? null }
+            ? { name: m.name, price: m.price, total: m.total, source: m.source, source_url: m.source_url ?? null }
             : null;
 
         const sameLength =
@@ -241,8 +249,8 @@ export function Workspace() {
 
         const summary = sameLength
           ? (() => {
-              const materialsMin = minRes.materials.reduce((s, m) => s + (m.total_avg ?? 0), 0);
-              const materialsMax = maxRes.materials.reduce((s, m) => s + (m.total_avg ?? 0), 0);
+              const materialsMin = minRes.materials.reduce((s, m) => s + (m.total ?? 0), 0);
+              const materialsMax = maxRes.materials.reduce((s, m) => s + (m.total ?? 0), 0);
               return {
                 ...avgRes.summary,
                 materials_min: materialsMin,
@@ -401,10 +409,19 @@ export function Workspace() {
     return (data?.materials ?? []).map((m, i) => {
       const effectiveMode = materialOverrides[i] ?? priceMode;
 
+      // finish_key-позиции (ламинат/плитка/покраска/обои/розетка, #331) реально меняют
+      // товар по tier — у каждого варианта тогда свой достоверный source_url. У остальных
+      // материалов на всех tier одна и та же строка/товар — только другая точка коридора
+      // (комбинация price_min/avg/max из m.sources), а какая именно компания дала какую
+      // границу, бэкенд не сообщает — ссылку на карточку в этом случае не приписываем
+      // (кроме "Стандарт" — она соответствует представительному source_url строки).
+      const namesDiffer =
+        new Set([m.min_item?.name, m.avg_item?.name, m.max_item?.name].filter((n): n is string => !!n)).size > 1;
+
       const variants: LedgerRowVariant[] = [];
-      if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: m.min_item.source_url, onClick: () => toggleMaterialOverride(i, "min") });
+      if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: namesDiffer ? m.min_item.source_url : undefined, onClick: () => toggleMaterialOverride(i, "min") });
       if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: m.avg_item.source_url, onClick: () => toggleMaterialOverride(i, "avg") });
-      if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: m.max_item.source_url, onClick: () => toggleMaterialOverride(i, "max") });
+      if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: namesDiffer ? m.max_item.source_url : undefined, onClick: () => toggleMaterialOverride(i, "max") });
 
       const activeVariant = effectiveMode === "min" ? m.min_item : effectiveMode === "max" ? m.max_item : m.avg_item;
       const activeName = activeVariant?.name ?? m.name;
@@ -413,20 +430,17 @@ export function Workspace() {
       const activeUrl = activeVariant?.source_url ?? m.source_url;
       const activeSource = activeVariant?.source ?? m.source;
 
-      // Ссылка на товар уже есть у каждой карточки в "Варианты материалов" —
-      // здесь просто перечисляем источники без дублирования ссылки.
-      const sourceNames = Array.from(
-        new Set([m.min_item?.source, m.avg_item?.source, m.max_item?.source].filter((s): s is string => !!s)),
-      );
-      const sourceLabel = sourceNames.length > 0 ? sourceNames.join(", ") : activeSource;
+      const combinedSources = !namesDiffer && m.sources && m.sources.length > 1 ? m.sources : null;
+      const sourceLabel = combinedSources ? combinedSources.join(", ") : activeSource;
+      const sourceCount = combinedSources ? combinedSources.length : 1;
 
-      return { m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, sourceLabel, sourceCount: sourceNames.length, variants };
+      return { m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, sourceLabel, sourceCount, variants };
     });
   }, [data, priceScale, priceMode, materialOverrides, toggleMaterialOverride]);
 
   const materialRows: LedgerRow[] = useMemo(
     () =>
-      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, sourceLabel, sourceCount, variants }) => ({
+      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, sourceLabel, sourceCount, variants }) => ({
         name: activeName,
         volume: `${formatQty(m.quantity)} ${m.unit}`,
         price: rub(Math.round(activePrice)),
@@ -447,7 +461,7 @@ export function Workspace() {
             value: sourceLabel,
             ...(variants.length > 0 ? {} : { url: activeUrl }),
           },
-          { label: "Регион", value: regionLabel(m.region, activeUrl, city) },
+          { label: "Регион", value: regionLabel(m.region, activeUrl, city, activeSource) },
           ...(m.updated_at
             ? [{ label: "Обновлено", value: new Date(m.updated_at).toLocaleDateString("ru-RU") }]
             : []),
@@ -526,7 +540,7 @@ export function Workspace() {
           value: sourceLabel,
           ...(sourceCount > 1 ? {} : { url: l.source_url }),
         },
-        { label: "Регион", value: regionLabel(l.region, l.source_url, city) },
+        { label: "Регион", value: regionLabel(l.region, l.source_url, city, l.source) },
       ],
     }),
     [city],

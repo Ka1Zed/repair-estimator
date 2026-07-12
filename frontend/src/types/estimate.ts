@@ -14,12 +14,23 @@ export interface MaterialItem {
   package_size: number;
   packs: number;
   unit: string;
+  // Цена/итог ИМЕННО для запрошенного tier (backend/app/schemas/estimate.py) —
+  // то, что реально нужно показывать как "цену этого уровня". НЕ путать с
+  // price_avg/total_avg ниже: это средняя ЦЕНА ВНУТРИ разрешённого для этого
+  // запроса товара (корид ор ±источники), она статична и не равна price для
+  // min/max-запроса — баг, если использовать её как "цену уровня" (было в #291).
+  price: number;
+  total: number;
   price_avg: number;
   total_avg: number;
   source: string;
   region?: string | null;
   updated_at?: string;
   source_url?: string | null;
+
+  // Все источники, чьи цены объединены в вилку (#333). Один элемент — цена от
+  // одного источника; null — seed-цена. source/source_url указывают на представителя.
+  sources?: string[] | null;
 
   // Материал по каждому tier (#291): для 6 finish_key-позиций (ламинат, покраска
   // стен/потолка, плитка, обои, розетка) это разные товары (name/source_url),

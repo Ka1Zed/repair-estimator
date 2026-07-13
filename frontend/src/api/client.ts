@@ -129,6 +129,13 @@ class ApiClient {
     }
     return response.json();
   }
+
+  // 8. Эталонный демо-чертёж (GET /api/blueprints/demo-image) — возвращает PNG blob
+  async getDemoBlueprint(): Promise<Blob> {
+    const response = await fetch(`${this.baseUrl}/api/blueprints/demo-image`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
+  }
 }
 
 // Экспортируем готовый экземпляр класса

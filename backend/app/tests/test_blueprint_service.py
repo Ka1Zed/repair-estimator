@@ -4,13 +4,18 @@
 масштаб из размеров рёбер, нормализованные координаты, fallback и валидацию.
 Claude-путь проверяется с замоканным SDK-клиентом (без ключа и сети).
 """
+import hashlib
 import sys
 import types
 from unittest.mock import MagicMock
 
 from PIL import Image
 
-from app.services.blueprint_service import BlueprintService
+from app.services.blueprint_service import (
+    BlueprintService,
+    DEMO_IMAGE_SHA256,
+    DEMO_FIXTURE_RESULT,
+)
 
 RECT = [
     {"x": 100, "y": 100},
@@ -186,3 +191,63 @@ def test_process_blueprint_falls_back_when_claude_call_fails(monkeypatch):
 
     assert r["method"] == "ollama"
     assert r["success"] is True
+
+
+# ---- демо-фикстура (#297) ----
+
+def test_demo_image_file_exists_and_matches_sha256():
+    """Файл fixtures/demo_room.png присутствует и его SHA-256 совпадает с константой.
+    Если хеш изменился (файл пересоздан скриптом), демо-сценарий сломается — тест
+    сразу укажет на расхождение."""
+    data = BlueprintService.demo_image_bytes()
+    sha = hashlib.sha256(data).hexdigest()
+    assert sha == DEMO_IMAGE_SHA256, (
+        f"SHA-256 demo_room.png изменился: {sha}. "
+        "Обнови DEMO_IMAGE_SHA256 и DEMO_FIXTURE_RESULT в blueprint_service.py."
+    )
+
+
+def test_demo_fixture_bypasses_llm(monkeypatch):
+    """Загрузка точного демо-файла возвращает предзаписанный ответ без вызова LLM.
+    Ни _prepare_image, ни _method_priority не должны вызываться."""
+    svc = _svc()
+    called = []
+    monkeypatch.setattr(svc, "_prepare_image", lambda *a: called.append("prepare"))
+    monkeypatch.setattr(svc, "_method_priority", lambda: called.append("priority") or [])
+
+    demo_bytes = BlueprintService.demo_image_bytes()
+    r = svc.process_blueprint(demo_bytes, "demo_room.png")
+
+    assert called == [], "LLM-путь не должен вызываться для демо-файла"
+    assert r["method"] == "fixture"
+    assert r["success"] is True
+    assert len(r["points"]) == 4
+    assert abs(r["points"][1]["x"] - 4.0) < 0.01
+    assert abs(r["points"][2]["y"] - 3.0) < 0.01
+    assert r["height"] == 2.7
+
+
+def test_demo_fixture_result_matches_constant():
+    """Убеждаемся, что предзаписанный ответ содержит полные данные комнаты."""
+    r = DEMO_FIXTURE_RESULT
+    assert r["success"] is True
+    assert r["confidence"] >= 0.9
+    assert len(r["points"]) == 4
+    assert r["height"] == 2.7
+    assert any(o["type"] == "door" for o in r["openings"])
+    assert any(o["type"] == "window" for o in r["openings"])
+    assert r["raw_dimensions"] == ["4000", "3000", "2700"]
+
+
+def test_demo_fixture_result_is_deep_copied():
+    """process_blueprint возвращает глубокую копию: мутация результата не меняет константу."""
+    svc = BlueprintService()
+    demo_bytes = BlueprintService.demo_image_bytes()
+    r1 = svc.process_blueprint(demo_bytes, "demo_room.png")
+    r2 = svc.process_blueprint(demo_bytes, "demo_room.png")
+
+    assert r1["points"] is not DEMO_FIXTURE_RESULT["points"]
+    assert r1["points"] is not r2["points"]
+
+    r1["points"][0]["x"] = 999.0
+    assert DEMO_FIXTURE_RESULT["points"][0]["x"] == 0.0

@@ -412,16 +412,16 @@ export function Workspace() {
       // finish_key-позиции (ламинат/плитка/покраска/обои/розетка, #331) реально меняют
       // товар по tier — у каждого варианта тогда свой достоверный source_url. У остальных
       // материалов на всех tier одна и та же строка/товар — только другая точка коридора
-      // (комбинация price_min/avg/max из m.sources), а какая именно компания дала какую
-      // границу, бэкенд не сообщает — ссылку на карточку в этом случае не приписываем
-      // (кроме "Стандарт" — она соответствует представительному source_url строки).
+      // (комбинация price_min/avg/max из m.sources); чья именно компания дала эту границу,
+      // бэкенд сообщает в m.min_source_url/m.max_source_url (#348, null — если граница
+      // совпадает с представителем, дублировать нечего).
       const namesDiffer =
         new Set([m.min_item?.name, m.avg_item?.name, m.max_item?.name].filter((n): n is string => !!n)).size > 1;
 
       const variants: LedgerRowVariant[] = [];
-      if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: namesDiffer ? m.min_item.source_url : undefined, onClick: () => toggleMaterialOverride(i, "min") });
+      if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: namesDiffer ? m.min_item.source_url : (m.min_source_url ?? undefined), onClick: () => toggleMaterialOverride(i, "min") });
       if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: m.avg_item.source_url, onClick: () => toggleMaterialOverride(i, "avg") });
-      if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: namesDiffer ? m.max_item.source_url : undefined, onClick: () => toggleMaterialOverride(i, "max") });
+      if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: namesDiffer ? m.max_item.source_url : (m.max_source_url ?? undefined), onClick: () => toggleMaterialOverride(i, "max") });
 
       const activeVariant = effectiveMode === "min" ? m.min_item : effectiveMode === "max" ? m.max_item : m.avg_item;
       const activeName = activeVariant?.name ?? m.name;
@@ -496,17 +496,15 @@ export function Workspace() {
             : l.total_avg;
 
       // Мин./макс. цена в коридоре — это реально цены разных компаний из l.sources
-      // (посчитаны на бэкенде из нескольких прайс-листов), но бэкенд не сообщает,
-      // ЧЬЯ именно цена дала каждую границу — только "представительный" source_url,
-      // общий для всей строки (по документации — тот, чья средняя ближе к итоговой,
-      // т.е. соответствует именно avg). Поэтому ссылку ставим только на «Стандарт»,
-      // у «Эконом»/«Премиум» её быть не может — компания неизвестна; список всех
-      // участников — одной строкой в "Источник(и) цены" ниже.
+      // (посчитаны на бэкенде из нескольких прайс-листов); чья именно компания дала
+      // каждую границу — в l.min_source_url/l.max_source_url (#348, null — если
+      // граница совпадает с представителем). Список всех участников — одной строкой
+      // в "Источник(и) цены" ниже.
       const variants: LedgerRowVariant[] = hasCorridor
         ? [
-            { mode: "min", title: "Эконом", name: l.service, price: rub(Math.round(l.price_min!)), onClick: () => toggleLaborOverride(i, "min") },
+            { mode: "min", title: "Эконом", name: l.service, price: rub(Math.round(l.price_min!)), url: l.min_source_url ?? undefined, onClick: () => toggleLaborOverride(i, "min") },
             { mode: "avg", title: "Стандарт", name: l.service, price: rub(Math.round(l.price_avg)), url: l.source_url, onClick: () => toggleLaborOverride(i, "avg") },
-            { mode: "max", title: "Премиум", name: l.service, price: rub(Math.round(l.price_max!)), onClick: () => toggleLaborOverride(i, "max") },
+            { mode: "max", title: "Премиум", name: l.service, price: rub(Math.round(l.price_max!)), url: l.max_source_url ?? undefined, onClick: () => toggleLaborOverride(i, "max") },
           ]
         : [];
 

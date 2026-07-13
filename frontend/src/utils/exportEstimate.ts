@@ -144,12 +144,19 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
   let activeSource = m.source;
   let activeUrl = m.source_url;
 
+  // finish_key-позиции (#331) реально меняют товар по tier — у min/avg/max_item тогда
+  // разные name/source_url. У остальных материалов name совпадает на всех tier (тот же
+  // товар, другая точка коридора) — для них границу атрибутирует m.min_source_url/
+  // m.max_source_url (#348), а не source_url представителя из min_item/max_item.
+  const namesDiffer =
+    new Set([m.min_item?.name, m.avg_item?.name, m.max_item?.name].filter((n): n is string => !!n)).size > 1;
+
   if (priceMode === 'min' && m.min_item) {
     activeName = m.min_item.name;
     activePrice = m.min_item.price;
     activeTotal = m.min_item.total;
-    activeSource = m.min_item.source || m.source;
-    activeUrl = m.min_item.source_url || m.source_url;
+    activeSource = (namesDiffer ? m.min_item.source : m.min_source) || m.source;
+    activeUrl = (namesDiffer ? m.min_item.source_url : m.min_source_url) || m.source_url;
   } else if (priceMode === 'avg' && m.avg_item) {
     activeName = m.avg_item.name;
     activePrice = m.avg_item.price;
@@ -160,8 +167,8 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
     activeName = m.max_item.name;
     activePrice = m.max_item.price;
     activeTotal = m.max_item.total;
-    activeSource = m.max_item.source || m.source;
-    activeUrl = m.max_item.source_url || m.source_url;
+    activeSource = (namesDiffer ? m.max_item.source : m.max_source) || m.source;
+    activeUrl = (namesDiffer ? m.max_item.source_url : m.max_source_url) || m.source_url;
   }
 
   return { activeName, activePrice, activeTotal, activeSource, activeUrl };
@@ -170,7 +177,8 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
 // Активные цена/итог работы с учётом уровня — зеркалит логику UI (Workspace.tsx):
 // у работ tier не меняет исполнителя, только точку коридора price_min/avg/max одной
 // и той же строки; при отсутствии коридора масштабируем avg множителем раздела.
-// source_url у работ всегда представительный (общий для строки) — от tier не зависит.
+// Источник/ссылка для min/max берутся из l.min_source(_url)/l.max_source(_url) (#348),
+// если граница вилки не совпадает с представителем — иначе как и раньше, представитель.
 const getActiveLaborData = (l: LaborItem, priceMode: PriceMode, scale: number) => {
   const hasCorridor = l.price_min != null && l.price_max != null;
   const activePrice = !hasCorridor
@@ -179,7 +187,18 @@ const getActiveLaborData = (l: LaborItem, priceMode: PriceMode, scale: number) =
   const activeTotal = !hasCorridor
     ? l.total_avg * scale
     : priceMode === 'min' ? (l.total_min ?? l.total_avg) : priceMode === 'max' ? (l.total_max ?? l.total_avg) : l.total_avg;
-  return { activePrice, activeTotal };
+
+  let activeSource = l.source;
+  let activeUrl = l.source_url;
+  if (priceMode === 'min') {
+    activeSource = l.min_source || l.source;
+    activeUrl = l.min_source_url || l.source_url;
+  } else if (priceMode === 'max') {
+    activeSource = l.max_source || l.source;
+    activeUrl = l.max_source_url || l.source_url;
+  }
+
+  return { activePrice, activeTotal, activeSource, activeUrl };
 };
 
 // Excel-версия сметы в одном стиле с PDF: акцентная шапка, зебра, рамки, город/дата,
@@ -296,7 +315,7 @@ export const exportXlsx = (
       const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
       return [
         l.service, l.specialist, l.volume, l.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
-        sourceLabel(l.source, l.region),
+        sourceLabel(act.activeSource, l.region),
       ];
     }),
   ];
@@ -304,9 +323,10 @@ export const exportXlsx = (
   const labFirst = 4;
   const labLast = labFirst + data.labor.length - 1;
   data.labor.forEach((l, i) => {
-    if (!l.source_url) return;
+    const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
+    if (!act.activeUrl) return;
     const ref = XLSX.utils.encode_cell({ r: labFirst + i, c: 6 });
-    labSheet[ref].l = { Target: l.source_url, Tooltip: 'Открыть источник цены' };
+    labSheet[ref].l = { Target: act.activeUrl, Tooltip: 'Открыть источник цены' };
   });
   labSheet['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 24 }];
   labSheet['!merges'] = [
@@ -318,7 +338,7 @@ export const exportXlsx = (
   if (data.labor.length) {
     styleTable(labSheet, {
       headerRow: 3, firstData: labFirst, lastData: labLast, firstCol: 0, lastCol: 6,
-      moneyCols: [4, 5], linkCol: 6, isLink: (i) => !!data.labor[i].source_url,
+      moneyCols: [4, 5], linkCol: 6, isLink: (i) => !!getActiveLaborData(data.labor[i], resolveTier(i, priceMode, laborOverrides), scaleLab).activeUrl,
     });
     labSheet['!autofilter'] = { ref: `${XLSX.utils.encode_cell({ r: 3, c: 0 })}:${XLSX.utils.encode_cell({ r: labLast, c: 6 })}` };
   }
@@ -560,13 +580,13 @@ export const exportPdf = async (
   sectionHeading('Работы', currentY);
   autoTable(doc, {
     ...tableBase,
-    ...sourceLinks(data.labor, 6, (l) => l.source_url),
+    ...sourceLinks(data.labor, 6, (l, i) => getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab).activeUrl),
     startY: currentY + 4,
     head: [['Услуга', 'Специалист', 'Объём', 'Ед.', 'Цена', 'Итого', 'Источник']],
     body: data.labor.map((l, i) => {
       const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
       return [
-        l.service, l.specialist, l.volume, l.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(l.source, l.region)
+        l.service, l.specialist, l.volume, l.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, l.region)
       ];
     }),
     columnStyles: {

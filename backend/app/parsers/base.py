@@ -2,6 +2,18 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
 
+# Заголовки/таймаут по умолчанию для requests-парсеров (были продублированы в
+# labor_table_parser.py, rembrigada_parser.py, megastroy_parser.py — #278).
+# Парсер может расширить/переопределить (см. megastroy_parser._build_headers).
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+    ),
+    "Accept-Language": "ru-RU,ru;q=0.9",
+}
+DEFAULT_REQUEST_TIMEOUT = 10
+
 
 @dataclass
 class ParsedPrice:
@@ -12,18 +24,48 @@ class ParsedPrice:
     # Ссылка на карточку/страницу, откуда взяты цены (для отображения источника
     # в смете). Необязательна: парсер может не знать ссылку → остаётся None.
     source_url: str | None = None
+    # Фасовка КОНКРЕТНОГО товара, чья цена ушла в price_avg/source_url (#306) —
+    # не справочное значение из materials.json, а то, что реально стоит за
+    # ссылкой. Парсер может не суметь её извлечь (категория без фасовки в
+    # названии/карточке) → остаётся None, вызывающий код откатывается на
+    # статичный Material.package_size (см. price_aggregator_service.get_price).
+    package_size: Decimal | None = None
 
 
 class BaseParser(ABC):
     '''
     Базовый класс для всех парсеров цен
-    Каждый конкретный парсер (Мегастрой, Avito и т.д.) наследует этот класс
+    Каждый конкретный парсер (Мегастрой и т.д.) наследует этот класс
     и реализует метод fetch_price
     '''
 
     # Имя источника - должно совпадать с полем PriceSource.name в БД
-    # Например: "Мегастрой", "Avito"
+    # Например: "Мегастрой"
     source_name: str
+
+    # Регион (город), которому принадлежат цены ЭТОГО инстанса парсера (#345,
+    # напр. LEMAN_MOSCOW.region == "Москва") — пишется/читается в MaterialPrice.region
+    # веткой парсера в price_aggregator_service.get_price. None (по умолчанию) —
+    # источник без городской привязки, region IS NULL, как раньше.
+    region: str | None = None
+
+    # Города, для которых этот инстанс — единственный применимый источник
+    # материалов (#345, напр. LEMAN_MOSCOW). None (по умолчанию) — источник
+    # без городской привязки, участвует, когда для запрошенного города нет
+    # выделенного регионального парсера (см. price_aggregator_service.
+    # get_material_price._select_regional_parsers). Парсеров работ не
+    # касается — у них своя региональность через REGIONAL_LABOR_PARSERS.
+    covered_cities: frozenset[str] | None = None
+
+    def known_materials(self) -> list[str]:
+        '''
+        Список материалов, которые парсер умеет обрабатывать (используется
+        CLI update_prices, чтобы знать, какие имена ему передавать). Пустой
+        список по умолчанию — переопределяется парсерами материалов (см.
+        MegastroyParser). Парсеры работ используют общий LABOR_SERVICE_MAP,
+        а не этот метод.
+        '''
+        return []
 
     @abstractmethod
     def fetch_price(self, material_name: str) -> ParsedPrice:

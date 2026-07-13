@@ -3,7 +3,8 @@ import autoTable, { type CellHookData } from 'jspdf-autotable';
 import * as XLSX from 'xlsx-js-style';
 
 import type { SummaryData } from '../components/EstimateSummary';
-import type { MaterialItem, LaborItem } from '../types/estimate';
+import type { MaterialItem, LaborItem, HiddenWorks, HiddenWorkItem } from '../types/estimate';
+import type { PriceMode } from '../pages/Workspace/Workspace';
 
 export interface EstimateExportData {
   summary: SummaryData;
@@ -15,6 +16,7 @@ export interface EstimateExportData {
   };
   materials: MaterialItem[];
   labor: LaborItem[];
+  hidden_works?: HiddenWorks;
 }
 
 const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
@@ -109,14 +111,124 @@ const geometryUnits: Record<string, string> = {
   perimeter: 'м'
 };
 
-// Excel-версия сметы в одном стиле с PDF: акцентная шапка, зебра, рамки,
-// город/дата, геометрия, кликабельные источники (синие подчёркнутые ячейки),
-// детализация количества и запаса. Оформление ячеек даёт xlsx-js-style.
-export const exportXlsx = (data: EstimateExportData, city: string) => {
+const MODE_LABELS: Record<PriceMode, string> = {
+  min: 'Минимальный',
+  avg: 'Средний',
+  max: 'Максимальный'
+};
+
+// Множитель уровня цен, СВОЙ для каждого раздела: у позиций без своей вилки (нет
+// min/max-товара) масштабируем total_avg коэффициентом из вилки этого раздела.
+// Общий total-множитель дал бы расхождение с «Итоговой стоимостью» — у материалов
+// и работ разный разброс. Совпадает с priceScale в UI (Workspace.tsx).
+const scaleFor = (s: SummaryData, priceMode: PriceMode, category: 'materials' | 'labor') => {
+  const avg = category === 'materials' ? s.materials_avg : s.labor_avg;
+  if (avg === 0) return 1;
+  const min = category === 'materials' ? s.materials_min : s.labor_min;
+  const max = category === 'materials' ? s.materials_max : s.labor_max;
+  if (priceMode === 'min') return min / avg;
+  if (priceMode === 'max') return max / avg;
+  return 1;
+};
+
+// Точечное переопределение уровня для конкретного материала (по индексу в data.materials)
+// поверх глобального priceMode — синхронизировано с закреплением варианта в UI (Workspace.tsx).
+const resolveTier = (i: number, priceMode: PriceMode, overrides?: Record<number, PriceMode>): PriceMode =>
+  overrides?.[i] ?? priceMode;
+
+// Хелпер для получения РЕАЛЬНЫХ данных материала (с учетом выбранного уровня min/avg/max)
+const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: number) => {
+  let activeName = m.name;
+  let activePrice = m.price_avg * scale;
+  let activeTotal = m.total_avg * scale;
+  let activeSource = m.source;
+  let activeUrl = m.source_url;
+
+  // finish_key-позиции (#331) реально меняют товар по tier — у min/avg/max_item тогда
+  // разные name/source_url. У остальных материалов name совпадает на всех tier (тот же
+  // товар, другая точка коридора) — для них границу атрибутирует m.min_source_url/
+  // m.max_source_url (#348), а не source_url представителя из min_item/max_item.
+  const namesDiffer =
+    new Set([m.min_item?.name, m.avg_item?.name, m.max_item?.name].filter((n): n is string => !!n)).size > 1;
+
+  if (priceMode === 'min' && m.min_item) {
+    activeName = m.min_item.name;
+    activePrice = m.min_item.price;
+    activeTotal = m.min_item.total;
+    activeSource = (namesDiffer ? m.min_item.source : m.min_source) || m.source;
+    activeUrl = (namesDiffer ? m.min_item.source_url : m.min_source_url) || m.source_url;
+  } else if (priceMode === 'avg' && m.avg_item) {
+    activeName = m.avg_item.name;
+    activePrice = m.avg_item.price;
+    activeTotal = m.avg_item.total;
+    // Тот же товар на всех tier + несколько источников → «Стандарт» это среднее по
+    // их средним, число не живёт на одной карточке. Ссылку оставляем на представителя
+    // (ближайший к средней оффер) и помечаем «(ближайшее)», а не прячем (зеркалит UI).
+    const blend = !namesDiffer && !!(m.sources && m.sources.length > 1);
+    const avgSource = m.avg_item.source || m.source;
+    activeSource = blend ? `${avgSource} (ближайшее)` : avgSource;
+    activeUrl = m.avg_item.source_url || m.source_url;
+  } else if (priceMode === 'max' && m.max_item) {
+    activeName = m.max_item.name;
+    activePrice = m.max_item.price;
+    activeTotal = m.max_item.total;
+    activeSource = (namesDiffer ? m.max_item.source : m.max_source) || m.source;
+    activeUrl = (namesDiffer ? m.max_item.source_url : m.max_source_url) || m.source_url;
+  }
+
+  return { activeName, activePrice, activeTotal, activeSource, activeUrl };
+};
+
+// Активные цена/итог работы с учётом уровня — зеркалит логику UI (Workspace.tsx):
+// у работ tier не меняет исполнителя, только точку коридора price_min/avg/max одной
+// и той же строки; при отсутствии коридора масштабируем avg множителем раздела.
+// Источник/ссылка для min/max берутся из l.min_source(_url)/l.max_source(_url) (#348),
+// если граница вилки не совпадает с представителем — иначе представитель. Для avg при
+// нескольких источниках число — среднее по их средним (ничьё), но ссылку оставляем на
+// представителя (ближайший к средней оффер) и помечаем «(ближайшее)» (зеркалит UI).
+const getActiveLaborData = (l: LaborItem, priceMode: PriceMode, scale: number) => {
+  const hasCorridor = l.price_min != null && l.price_max != null;
+  const activePrice = !hasCorridor
+    ? l.price_avg * scale
+    : priceMode === 'min' ? l.price_min! : priceMode === 'max' ? l.price_max! : l.price_avg;
+  const activeTotal = !hasCorridor
+    ? l.total_avg * scale
+    : priceMode === 'min' ? (l.total_min ?? l.total_avg) : priceMode === 'max' ? (l.total_max ?? l.total_avg) : l.total_avg;
+
+  let activeSource = l.source;
+  let activeUrl = l.source_url;
+  if (priceMode === 'min') {
+    activeSource = l.min_source || l.source;
+    activeUrl = l.min_source_url || l.source_url;
+  } else if (priceMode === 'max') {
+    activeSource = l.max_source || l.source;
+    activeUrl = l.max_source_url || l.source_url;
+  } else if (l.sources && l.sources.length > 1) {
+    activeSource = `${l.source} (ближайшее)`;
+  }
+
+  return { activePrice, activeTotal, activeSource, activeUrl };
+};
+
+// Excel-версия сметы в одном стиле с PDF: акцентная шапка, зебра, рамки, город/дата,
+// кликабельные источники (синие подчёркнутые ячейки), детализация количества и запаса.
+// materialOverrides/laborOverrides — точечное закрепление уровня по строке из UI.
+export const exportXlsx = (
+  data: EstimateExportData,
+  city: string,
+  priceMode: PriceMode = "avg",
+  materialOverrides?: Record<number, PriceMode>,
+  laborOverrides?: Record<number, PriceMode>,
+) => {
   const wb = XLSX.utils.book_new();
   const today = new Date().toLocaleDateString('ru-RU');
-  const metaLine = `Город: ${city}    ·    Дата: ${today}`;
   const s = data.summary;
+
+  // Множители уровня цен — раздельные для материалов и работ (см. scaleFor).
+  const scaleMat = scaleFor(s, priceMode, 'materials');
+  const scaleLab = scaleFor(s, priceMode, 'labor');
+
+  const metaLine = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${today}`;
 
   // ---------- Сводка: город/дата, геометрия, итоги min/avg/max ----------
   const summaryAoa: (string | number)[][] = [
@@ -151,7 +263,7 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
   cellAt(summarySheet, 0, 0).s = titleStyle;
   cellAt(summarySheet, 1, 0).s = metaStyle;
   if (geomEntries.length) cellAt(summarySheet, 3, 0).s = sectionStyle;
-  cellAt(summarySheet, costFirst - 2, 0).s = sectionStyle; // «Итоговая стоимость»
+  cellAt(summarySheet, costFirst - 2, 0).s = sectionStyle;
   styleTable(summarySheet, {
     headerRow: costFirst - 1,
     firstData: costFirst,
@@ -169,18 +281,22 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
     [metaLine],
     [],
     ['Наименование', 'Кол-во', 'Ед. изм.', 'Цена за ед.', 'Итого', 'Источник', 'Дата цены'],
-    ...data.materials.map(m => [
-      m.name, m.quantity, m.unit, m.price_avg, m.total_avg,
-      sourceLabel(m.source, m.region), fmtDate(m.updated_at),
-    ]),
+    ...data.materials.map((m, i) => {
+      const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
+      return [
+        act.activeName, m.quantity, m.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
+        sourceLabel(act.activeSource, m.region), fmtDate(m.updated_at),
+      ];
+    }),
   ];
   const matSheet = XLSX.utils.aoa_to_sheet(matAoa);
   const matFirst = 4;
   const matLast = matFirst + data.materials.length - 1;
   data.materials.forEach((m, i) => {
-    if (!m.source_url) return;
+    const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
+    if (!act.activeUrl) return;
     const ref = XLSX.utils.encode_cell({ r: matFirst + i, c: 5 });
-    matSheet[ref].l = { Target: m.source_url, Tooltip: 'Открыть источник цены' };
+    matSheet[ref].l = { Target: act.activeUrl, Tooltip: 'Открыть источник цены' };
   });
   matSheet['!cols'] = [{ wch: 38 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 14 }];
   matSheet['!merges'] = [
@@ -192,7 +308,7 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
   if (data.materials.length) {
     styleTable(matSheet, {
       headerRow: 3, firstData: matFirst, lastData: matLast, firstCol: 0, lastCol: 6,
-      moneyCols: [3, 4], linkCol: 5, isLink: (i) => !!data.materials[i].source_url,
+      moneyCols: [3, 4], linkCol: 5, isLink: (i) => !!getActiveMaterialData(data.materials[i], resolveTier(i, priceMode, materialOverrides), scaleMat).activeUrl,
     });
     matSheet['!autofilter'] = { ref: `${XLSX.utils.encode_cell({ r: 3, c: 0 })}:${XLSX.utils.encode_cell({ r: matLast, c: 6 })}` };
   }
@@ -204,18 +320,22 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
     [metaLine],
     [],
     ['Услуга', 'Специалист', 'Объём', 'Ед. изм.', 'Цена за ед.', 'Итого', 'Источник'],
-    ...data.labor.map(l => [
-      l.service, l.specialist, l.volume, l.unit, l.price_avg, l.total_avg,
-      sourceLabel(l.source, l.region),
-    ]),
+    ...data.labor.map((l, i) => {
+      const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
+      return [
+        l.service, l.specialist, l.volume, l.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
+        sourceLabel(act.activeSource, l.region),
+      ];
+    }),
   ];
   const labSheet = XLSX.utils.aoa_to_sheet(labAoa);
   const labFirst = 4;
   const labLast = labFirst + data.labor.length - 1;
   data.labor.forEach((l, i) => {
-    if (!l.source_url) return;
+    const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
+    if (!act.activeUrl) return;
     const ref = XLSX.utils.encode_cell({ r: labFirst + i, c: 6 });
-    labSheet[ref].l = { Target: l.source_url, Tooltip: 'Открыть источник цены' };
+    labSheet[ref].l = { Target: act.activeUrl, Tooltip: 'Открыть источник цены' };
   });
   labSheet['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 24 }];
   labSheet['!merges'] = [
@@ -227,7 +347,7 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
   if (data.labor.length) {
     styleTable(labSheet, {
       headerRow: 3, firstData: labFirst, lastData: labLast, firstCol: 0, lastCol: 6,
-      moneyCols: [4, 5], linkCol: 6, isLink: (i) => !!data.labor[i].source_url,
+      moneyCols: [4, 5], linkCol: 6, isLink: (i) => !!getActiveLaborData(data.labor[i], resolveTier(i, priceMode, laborOverrides), scaleLab).activeUrl,
     });
     labSheet['!autofilter'] = { ref: `${XLSX.utils.encode_cell({ r: 3, c: 0 })}:${XLSX.utils.encode_cell({ r: labLast, c: 6 })}` };
   }
@@ -239,14 +359,17 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
     ['Количество = базовый расход × запас, округлённое вверх до целых упаковок'],
     [],
     ['Материал', 'Базовый расход', 'Запас', 'Фасовка', 'Упаковок', 'Итого'],
-    ...data.materials.map(m => [
-      m.name,
-      `${fmtQty(m.base_quantity)} ${m.unit}`,
-      wastePct(m.waste_factor),
-      `${fmtQty(m.package_size)} ${m.unit}`,
-      m.packs,
-      `${fmtQty(m.quantity)} ${m.unit}`,
-    ]),
+    ...data.materials.map((m, i) => {
+      const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
+      return [
+        act.activeName,
+        `${fmtQty(m.base_quantity)} ${m.unit}`,
+        wastePct(m.waste_factor),
+        `${fmtQty(m.package_size)} ${m.unit}`,
+        m.packs,
+        `${fmtQty(m.quantity)} ${m.unit}`,
+      ];
+    }),
   ];
   const detSheet = XLSX.utils.aoa_to_sheet(detAoa);
   detSheet['!cols'] = [{ wch: 38 }, { wch: 18 }, { wch: 10 }, { wch: 16 }, { wch: 12 }, { wch: 16 }];
@@ -265,16 +388,55 @@ export const exportXlsx = (data: EstimateExportData, city: string) => {
   }
   XLSX.utils.book_append_sheet(wb, detSheet, 'Детализация');
 
+  // ---------- Скрытые работы (справочно, вилка не масштабируется) ----------
+  if (data.hidden_works && data.hidden_works.items.length > 0) {
+    const hw = data.hidden_works;
+    const hwAoa: (string | number)[][] = [
+      ['Скрытые работы · возможные доплаты'],
+      [hw.note],
+      [],
+      ['Работа', 'Специалист', 'Причина', 'Объём', 'Ед.', 'Мин.', 'Ср.', 'Макс.'],
+      ...hw.items.map(item => [
+        item.service, item.specialist, item.reason,
+        item.volume, item.unit,
+        item.total_min, item.total_avg, item.total_max,
+      ]),
+      [],
+      ['Итого возможных доплат', '', '', '', '', hw.total_min, hw.total_avg, hw.total_max],
+    ];
+    const hwSheet = XLSX.utils.aoa_to_sheet(hwAoa);
+    const hwFirst = 4;
+    const hwLast = hwFirst + hw.items.length - 1;
+    hwSheet['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 8 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
+    hwSheet['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
+    ];
+    cellAt(hwSheet, 0, 0).s = titleStyle;
+    cellAt(hwSheet, 1, 0).s = noteStyle;
+    if (hw.items.length) {
+      styleTable(hwSheet, {
+        headerRow: 3, firstData: hwFirst, lastData: hwLast, firstCol: 0, lastCol: 7,
+        moneyCols: [5, 6, 7],
+      });
+    }
+    const totalRow = hwLast + 2;
+    for (let c = 0; c <= 7; c++) {
+      cellAt(hwSheet, totalRow, c).s = { ...totalStyle, ...(c >= 5 ? { numFmt: MONEY_FMT, alignment: { horizontal: 'right', vertical: 'center' } } : {}) };
+    }
+    XLSX.utils.book_append_sheet(wb, hwSheet, 'Скрытые работы');
+  }
+
   XLSX.writeFile(wb, 'Смета.xlsx');
 };
 
 // Палитра из index.css, чтобы PDF был в одном стиле с сайтом
 type RGB = [number, number, number];
-const PDF_ACCENT: RGB = [176, 123, 94]; // --accent #B07B5E
-const PDF_HEADING: RGB = [42, 42, 42]; // --text-h #2A2A2A
-const PDF_MUTED: RGB = [107, 99, 99]; // --text #6b6363
-const PDF_BORDER: RGB = [229, 229, 229]; // --border #E5E5E5
-const PDF_ZEBRA: RGB = [250, 246, 243]; // тёплый оттенок для чётных строк
+const PDF_ACCENT: RGB = [176, 123, 94];
+const PDF_HEADING: RGB = [42, 42, 42];
+const PDF_MUTED: RGB = [107, 99, 99];
+const PDF_BORDER: RGB = [229, 229, 229];
+const PDF_ZEBRA: RGB = [250, 246, 243];
 const PDF_WHITE: RGB = [255, 255, 255];
 
 // Читаемая подпись источника цены: seed → «База», парсеры → человекочитаемо, + регион
@@ -289,12 +451,22 @@ const getFinalY = (d: jsPDF) =>
 
 // Числовое кол-во: без хвостовых нулей, максимум 2 знака
 const fmtQty = (x: number) => x.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
-
 // Запас в процентах из множителя waste_factor (1.1 → «+10%»)
 const wastePct = (waste_factor: number) => `+${Math.round((waste_factor - 1) * 100)}%`;
 
-export const exportPdf = async (data: EstimateExportData, city: string) => {
+export const exportPdf = async (
+  data: EstimateExportData,
+  city: string,
+  priceMode: PriceMode = "avg",
+  materialOverrides?: Record<number, PriceMode>,
+  laborOverrides?: Record<number, PriceMode>,
+) => {
   const doc = new jsPDF();
+  const s = data.summary;
+
+  // Множители уровня цен — раздельные для материалов и работ (см. scaleFor).
+  const scaleMat = scaleFor(s, priceMode, 'materials');
+  const scaleLab = scaleFor(s, priceMode, 'labor');
 
   try {
     const response = await fetch('/Roboto-Regular.ttf');
@@ -321,7 +493,6 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
   const pageH = doc.internal.pageSize.getHeight();
   const marginX = 14;
 
-  // Общий стиль таблиц — тёплая шапка вместо синей темы по умолчанию
   const tableBase = {
     theme: 'grid' as const,
     styles: {
@@ -348,17 +519,18 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
     doc.text(text, marginX, y);
   };
 
-  // Делает ячейки колонки «Источник» кликабельными ссылками на source_url:
-  // подсвечивает акцентом и вешает doc.link поверх ячейки.
-  const sourceLinks = (items: { source_url?: string | null }[], col: number) => ({
+  // Делает ячейки колонки «Источник» кликабельными ссылками: подсвечивает акцентом
+  // и вешает doc.link поверх ячейки. getUrl — дженерик по T, чтобы брать url с учётом
+  // уровня (у материалов ссылка зависит от tier, у работ — общая на строку).
+  const sourceLinks = <T,>(items: T[], col: number, getUrl: (item: T, index: number) => string | null | undefined) => ({
     didParseCell: (h: CellHookData) => {
-      if (h.section === 'body' && h.column.index === col && items[h.row.index]?.source_url) {
+      if (h.section === 'body' && h.column.index === col && getUrl(items[h.row.index], h.row.index)) {
         h.cell.styles.textColor = PDF_ACCENT;
       }
     },
     didDrawCell: (h: CellHookData) => {
       if (h.section !== 'body' || h.column.index !== col) return;
-      const url = items[h.row.index]?.source_url;
+      const url = getUrl(items[h.row.index], h.row.index);
       if (url) doc.link(h.cell.x, h.cell.y, h.cell.width, h.cell.height, { url });
     },
   });
@@ -372,7 +544,8 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
   doc.line(marginX, 26, pageW - marginX, 26);
   doc.setFontSize(10);
   doc.setTextColor(...PDF_MUTED);
-  const meta = `Город: ${city}    ·    Дата: ${new Date().toLocaleDateString('ru-RU')}`;
+  
+  const meta = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${new Date().toLocaleDateString('ru-RU')}`;
   doc.text(meta, marginX, 33);
 
   let currentY = 44;
@@ -393,12 +566,15 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
   sectionHeading('Материалы', currentY);
   autoTable(doc, {
     ...tableBase,
-    ...sourceLinks(data.materials, 5),
+    ...sourceLinks(data.materials, 5, (m, i) => getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat).activeUrl),
     startY: currentY + 4,
     head: [['Наименование', 'Кол-во', 'Ед.', 'Цена', 'Итого', 'Источник']],
-    body: data.materials.map(m => [
-      m.name, m.quantity, m.unit, formatPricePDF(m.price_avg), formatPricePDF(m.total_avg), sourceLabel(m.source, m.region)
-    ]),
+    body: data.materials.map((m, i) => {
+      const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
+      return [
+        act.activeName, m.quantity, m.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, m.region)
+      ];
+    }),
     columnStyles: {
       0: { halign: 'left', cellWidth: 58 },
       1: { halign: 'right', cellWidth: 18 },
@@ -413,12 +589,15 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
   sectionHeading('Работы', currentY);
   autoTable(doc, {
     ...tableBase,
-    ...sourceLinks(data.labor, 6),
+    ...sourceLinks(data.labor, 6, (l, i) => getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab).activeUrl),
     startY: currentY + 4,
     head: [['Услуга', 'Специалист', 'Объём', 'Ед.', 'Цена', 'Итого', 'Источник']],
-    body: data.labor.map(l => [
-      l.service, l.specialist, l.volume, l.unit, formatPricePDF(l.price_avg), formatPricePDF(l.total_avg), sourceLabel(l.source, l.region)
-    ]),
+    body: data.labor.map((l, i) => {
+      const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
+      return [
+        l.service, l.specialist, l.volume, l.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, l.region)
+      ];
+    }),
     columnStyles: {
       0: { halign: 'left', cellWidth: 40 },
       1: { halign: 'left', cellWidth: 28 },
@@ -430,7 +609,6 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
     }
   });
 
-  const s = data.summary;
   currentY = getFinalY(doc) + 14;
   sectionHeading('Итоговая стоимость', currentY);
   autoTable(doc, {
@@ -471,14 +649,17 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
     ...tableBase,
     startY: currentY + 9,
     head: [['Материал', 'Базовый расход', 'Запас', 'Фасовка', 'Упаковок', 'Итого']],
-    body: data.materials.map(m => [
-      m.name,
-      `${fmtQty(m.base_quantity)} ${m.unit}`,
-      wastePct(m.waste_factor),
-      `${fmtQty(m.package_size)} ${m.unit}`,
-      m.packs,
-      `${fmtQty(m.quantity)} ${m.unit}`,
-    ]),
+    body: data.materials.map((m, i) => {
+      const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
+      return [
+        act.activeName,
+        `${fmtQty(m.base_quantity)} ${m.unit}`,
+        wastePct(m.waste_factor),
+        `${fmtQty(m.package_size)} ${m.unit}`,
+        m.packs,
+        `${fmtQty(m.quantity)} ${m.unit}`,
+      ];
+    }),
     columnStyles: {
       0: { halign: 'left', cellWidth: 58 },
       1: { halign: 'right', cellWidth: 32 },
@@ -488,6 +669,49 @@ export const exportPdf = async (data: EstimateExportData, city: string) => {
       5: { halign: 'right', cellWidth: 26 }
     }
   });
+
+  // Скрытые работы (справочно, не входят в итоговую смету)
+  if (data.hidden_works && data.hidden_works.items.length > 0) {
+    const hw = data.hidden_works;
+    currentY = getFinalY(doc) + 14;
+    if (currentY > pageH - 45) {
+      doc.addPage();
+      currentY = 20;
+    }
+    sectionHeading('Скрытые работы · возможные доплаты', currentY);
+    doc.setFontSize(8);
+    doc.setTextColor(...PDF_MUTED);
+    const noteLines = doc.splitTextToSize(hw.note, pageW - marginX * 2);
+    doc.text(noteLines, marginX, currentY + 5);
+    autoTable(doc, {
+      ...tableBase,
+      startY: currentY + 5 + noteLines.length * 4,
+      head: [['Работа', 'Специалист', 'Причина', 'Объём', 'Мин.', 'Макс.']],
+      body: hw.items.map((item: HiddenWorkItem) => [
+        item.service,
+        item.specialist,
+        item.reason,
+        `${fmtQty(item.volume)} ${item.unit}`,
+        formatPricePDF(item.total_min),
+        formatPricePDF(item.total_max),
+      ]),
+      foot: [['Итого возможных доплат', '', '', '', formatPricePDF(hw.total_min), formatPricePDF(hw.total_max)]],
+      footStyles: {
+        fillColor: PDF_BORDER,
+        textColor: PDF_HEADING,
+        fontStyle: 'normal' as const,
+        halign: 'right' as const,
+      },
+      columnStyles: {
+        0: { halign: 'left', cellWidth: 32 },
+        1: { halign: 'left', cellWidth: 24 },
+        2: { halign: 'left', cellWidth: 52 },
+        3: { halign: 'right', cellWidth: 18 },
+        4: { halign: 'right', cellWidth: 24 },
+        5: { halign: 'right', cellWidth: 32 },
+      },
+    });
+  }
 
   // Футер: подпись слева, нумерация справа — на каждой странице
   const pageCount = doc.getNumberOfPages();

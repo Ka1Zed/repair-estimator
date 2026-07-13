@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
-import type { BlueprintResult } from "./BlueprintUpload";
+import { useState, useRef, useEffect } from "react";
+import type { BlueprintResult, Opening } from "./BlueprintUpload";
+import styles from "./BlueprintReview.module.css";
 
 interface NormPoint {
   nx: number;
@@ -9,14 +10,18 @@ interface NormPoint {
 interface Props {
   imageUrl: string;
   result: BlueprintResult;
-  onApply: (points: { x: number; y: number }[], height: number | null) => void;
+  onApply: (points: { x: number; y: number }[], height: number | null, openings: Opening[]) => void;
   onCancel: () => void;
 }
 
 const SVG_W = 400;
-const SVG_H = 300;
+// Высота SVG-полотна по умолчанию (пока не известны реальные пропорции фото).
+// Как только картинка грузится, подгоняем под её реальный aspect ratio (см. useEffect
+// ниже) — иначе при preserveAspectRatio="xMidYMid meet" появляется леттербокс, и
+// nx*SVG_W / ny*SVG_H масштабируют оси по-разному (см. #297: демо 4×3м выходило как 4.07×2.95).
+const DEFAULT_SVG_H = 300;
 
-function initState(result: BlueprintResult): { points: NormPoint[]; mPerPx: number | null } {
+function computeGeometry(result: BlueprintResult, svgH: number): { points: NormPoint[]; mPerPx: number | null } {
   const raw = result.points;
   if (raw.length === 0) return { points: [], mPerPx: null };
 
@@ -32,7 +37,7 @@ function initState(result: BlueprintResult): { points: NormPoint[]; mPerPx: numb
       const mdy = raw[j].y - raw[i].y;
       const mLen = Math.sqrt(mdx * mdx + mdy * mdy);
       const pdx = (pts[j].nx - pts[i].nx) * SVG_W;
-      const pdy = (pts[j].ny - pts[i].ny) * SVG_H;
+      const pdy = (pts[j].ny - pts[i].ny) * svgH;
       const pLen = Math.sqrt(pdx * pdx + pdy * pdy);
       if (pLen > 0 && mLen > 0) { sum += mLen / pLen; count++; }
     }
@@ -56,10 +61,29 @@ function initState(result: BlueprintResult): { points: NormPoint[]; mPerPx: numb
 }
 
 export default function BlueprintReview({ imageUrl, result, onApply, onCancel }: Props) {
-  const { points: initPts, mPerPx: initScale } = initState(result);
-  const [points, setPoints] = useState<NormPoint[]>(initPts);
-  const [mPerPx, setMPerPx] = useState<number | null>(initScale);
+  const [svgH, setSvgH] = useState(DEFAULT_SVG_H);
+  const [points, setPoints] = useState<NormPoint[]>(() => computeGeometry(result, DEFAULT_SVG_H).points);
+  const [mPerPx, setMPerPx] = useState<number | null>(() => computeGeometry(result, DEFAULT_SVG_H).mPerPx);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const userCalibrated = useRef(false);
+
+  // Реальные пропорции фото узнаём только после загрузки — по умолчанию считаем 4:3,
+  // как и раньше. Если пропорции другие, подгоняем высоту полотна и пересчитываем
+  // масштаб (если пользователь ещё не откалибровал вручную — его выбор не трогаем).
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setSvgH(Math.round(SVG_W * (img.naturalHeight / img.naturalWidth)));
+      }
+    };
+    img.src = imageUrl;
+  }, [imageUrl]);
+
+  useEffect(() => {
+    if (userCalibrated.current || svgH === DEFAULT_SVG_H) return;
+    setMPerPx(computeGeometry(result, svgH).mPerPx);
+  }, [svgH, result]);
 
   // Редактирование длины ребра
   const [editingEdge, setEditingEdge] = useState<number | null>(null);
@@ -73,7 +97,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
   const svgRef = useRef<SVGSVGElement>(null);
 
   const sx = (nx: number) => nx * SVG_W;
-  const sy = (ny: number) => ny * SVG_H;
+  const sy = (ny: number) => ny * svgH;
   const polygonStr = points.map((p) => `${sx(p.nx)},${sy(p.ny)}`).join(" ");
 
   const toNorm = (e: React.PointerEvent): NormPoint | null => {
@@ -87,14 +111,14 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
     const local = pt.matrixTransform(ctm.inverse());
     return {
       nx: Math.max(0, Math.min(1, local.x / SVG_W)),
-      ny: Math.max(0, Math.min(1, local.y / SVG_H)),
+      ny: Math.max(0, Math.min(1, local.y / svgH)),
     };
   };
 
   const snapToVertex = (norm: NormPoint): NormPoint => {
     for (const p of points) {
       const dx = (norm.nx - p.nx) * SVG_W;
-      const dy = (norm.ny - p.ny) * SVG_H;
+      const dy = (norm.ny - p.ny) * svgH;
       if (Math.sqrt(dx * dx + dy * dy) <= 12) return { nx: p.nx, ny: p.ny };
     }
     return norm;
@@ -104,7 +128,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
   const edgeLenM = (a: NormPoint, b: NormPoint): number | null => {
     if (mPerPx === null) return null;
     const dx = (b.nx - a.nx) * SVG_W;
-    const dy = (b.ny - a.ny) * SVG_H;
+    const dy = (b.ny - a.ny) * svgH;
     return Math.sqrt(dx * dx + dy * dy) * mPerPx;
   };
 
@@ -142,9 +166,10 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
     if (isNaN(dist) || dist <= 0 || calibPts.length < 2) return;
     const [a, b] = calibPts;
     const dx = (b.nx - a.nx) * SVG_W;
-    const dy = (b.ny - a.ny) * SVG_H;
+    const dy = (b.ny - a.ny) * svgH;
     const pxDist = Math.sqrt(dx * dx + dy * dy);
     if (pxDist === 0) return;
+    userCalibrated.current = true;
     setMPerPx(dist / pxDist);
     setCalibMode(false);
     setCalibPts([]);
@@ -160,7 +185,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
     const j = (i + 1) % points.length;
     const a = points[i], b = points[j];
     const dx = (b.nx - a.nx) * SVG_W;
-    const dy = (b.ny - a.ny) * SVG_H;
+    const dy = (b.ny - a.ny) * svgH;
     const curPx = Math.sqrt(dx * dx + dy * dy);
     if (curPx === 0) return;
     const scale = (newLen / mPerPx) / curPx;
@@ -183,51 +208,42 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
     onApply(
       points.map((p) => ({
         x: Math.round(((p.nx - origin.nx) * SVG_W) * mPerPx * 100) / 100,
-        y: Math.round(((p.ny - origin.ny) * SVG_H) * mPerPx * 100) / 100,
+        y: Math.round(((p.ny - origin.ny) * svgH) * mPerPx * 100) / 100,
       })),
-      result.height
+      result.height,
+      result.openings
     );
   };
 
   const isCalibrated = mPerPx !== null;
 
-  const btn = (accent?: boolean, disabled?: boolean): React.CSSProperties => ({
-    padding: "6px 12px", fontSize: "12px", borderRadius: "3px",
-    cursor: disabled ? "default" : "pointer",
-    background: accent && !disabled ? "var(--text-h)" : "var(--bg)",
-    color: accent && !disabled ? "#fff" : "var(--text-h)",
-    border: accent && !disabled ? "none" : "1px solid var(--border)",
-    opacity: disabled ? 0.5 : 1,
-  });
+  const btnClass = (accent?: boolean, disabled?: boolean) =>
+    [styles.btn, accent && !disabled && styles.btnAccent, disabled && styles.btnDisabled]
+      .filter(Boolean)
+      .join(" ");
 
   return (
-    <div style={{ marginTop: "12px" }}>
-      <div style={{
-        fontSize: "11px", letterSpacing: ".16em", textTransform: "uppercase",
-        color: "var(--text)", marginBottom: "8px", display: "flex", gap: "12px", alignItems: "center",
-      }}>
+    <div className={styles.wrapper}>
+      <div className={styles.titleRow}>
         Проверка чертежа
         {!isCalibrated && (
-          <span style={{ color: "#ff9800", letterSpacing: 0, fontStyle: "italic", textTransform: "none" }}>
+          <span className={styles.calibWarning}>
             ⚠ нужна калибровка
           </span>
         )}
       </div>
 
-      <div style={{
-        border: "1px solid var(--border)", borderRadius: "4px", overflow: "hidden",
-        cursor: calibMode ? "crosshair" : "default",
-      }}>
+      <div className={`${styles.canvasFrame} ${calibMode ? styles.canvasFrameCalib : ""}`}>
         <svg
           ref={svgRef}
-          viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-          style={{ display: "block", width: "100%", height: "auto", touchAction: "none" }}
+          viewBox={`0 0 ${SVG_W} ${svgH}`}
+          className={styles.svgRoot}
           onPointerDown={handleSvgPointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
         >
-          <image href={imageUrl} x={0} y={0} width={SVG_W} height={SVG_H}
+          <image href={imageUrl} x={0} y={0} width={SVG_W} height={svgH}
             preserveAspectRatio="xMidYMid meet" />
 
           <polygon points={polygonStr} fill="rgba(176,123,94,0.15)"
@@ -243,7 +259,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
             if (editingEdge === i) {
               return (
                 <foreignObject key={`ei-${i}`} x={midX - 35} y={midY - 14} width="70" height="28"
-                  style={{ overflow: "visible" }}>
+                  className={styles.foreignObjectVisible}>
                   <input
                     autoFocus type="text" value={edgeInput}
                     onChange={(e) => setEdgeInput(e.target.value)}
@@ -253,11 +269,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
                       if (e.key === "Enter") submitEdge(i);
                       if (e.key === "Escape") { setEditingEdge(null); setEdgeInput(""); }
                     }}
-                    style={{
-                      width: "100%", height: "100%", textAlign: "center", fontSize: "11px",
-                      border: "1px solid var(--accent)", borderRadius: "3px",
-                      background: "#fff", color: "var(--text-h)", outline: "none", boxSizing: "border-box",
-                    }}
+                    className={styles.edgeInput}
                   />
                 </foreignObject>
               );
@@ -266,7 +278,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
             const label = len === null ? "?" : formatLen(len);
             return (
               <g key={`el-${i}`}
-                style={{ cursor: isCalibrated && !calibMode ? "pointer" : "default" }}
+                className={isCalibrated && !calibMode ? styles.edgeLabelGroupActive : styles.edgeLabelGroup}
                 onClick={() => {
                   if (!isCalibrated || calibMode || draggingIdx !== null) return;
                   setEditingEdge(i);
@@ -291,7 +303,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
                 fill={snapped ? "#4caf50" : draggingIdx === i ? "var(--accent)" : "#fff"}
                 stroke={snapped ? "#4caf50" : "var(--accent)"}
                 strokeWidth="1.5"
-                style={{ cursor: calibMode ? "crosshair" : "grab" }}
+                className={calibMode ? styles.vertexCircleCalib : styles.vertexCircle}
                 onPointerDown={(e) => handleVertexDown(e, i)} />
             );
           })}
@@ -311,45 +323,38 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
 
       {/* Панель калибровки */}
       {calibMode && (
-        <div style={{
-          marginTop: "8px", padding: "8px", background: "#edf6ed",
-          border: "1px solid #c8e6c9", borderRadius: "4px", fontSize: "12px", color: "#2e7d32",
-        }}>
+        <div className={styles.calibPanel}>
           {calibPts.length === 0 && "Кликните на первую вершину"}
           {calibPts.length === 1 && "Кликните на вторую вершину"}
           {calibPts.length === 2 && (
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <div className={styles.calibDistanceRow}>
               <span>Расстояние (м):</span>
               <input autoFocus type="text" value={calibInput}
                 onChange={(e) => setCalibInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && applyCalibration()}
-                style={{
-                  width: "60px", padding: "3px 6px", fontSize: "12px",
-                  background: "#fff", border: "1px solid #4caf50",
-                  borderRadius: "3px", color: "var(--text-h)", outline: "none",
-                }} />
-              <button onClick={applyCalibration} style={btn()}>OK</button>
+                className={styles.calibInput} />
+              <button onClick={applyCalibration} className={btnClass()}>OK</button>
               <button onClick={() => { setCalibMode(false); setCalibPts([]); setCalibInput(""); }}
-                style={btn()}>Отмена</button>
+                className={btnClass()}>Отмена</button>
             </div>
           )}
         </div>
       )}
 
-      <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap", alignItems: "center" }}>
+      <div className={styles.controlsRow}>
         {!calibMode && (
-          <button onClick={() => { setCalibMode(true); setCalibPts([]); }} style={btn()}>
+          <button onClick={() => { setCalibMode(true); setCalibPts([]); }} className={btnClass()}>
             {isCalibrated ? "Перекалибровать" : "Калибровка масштаба"}
           </button>
         )}
         <button onClick={handleApply} disabled={!isCalibrated || points.length < 3}
-          style={{ ...btn(true, !isCalibrated || points.length < 3), marginLeft: "auto" }}>
+          className={`${btnClass(true, !isCalibrated || points.length < 3)} ${styles.btnApply}`}>
           Применить
         </button>
-        <button onClick={onCancel} style={btn()}>Отмена</button>
+        <button onClick={onCancel} className={btnClass()}>Отмена</button>
       </div>
 
-      <p style={{ margin: "8px 0 0", fontSize: "11px", color: "var(--text)", fontStyle: "italic" }}>
+      <p className={styles.footerHint}>
         {isCalibrated
           ? "Тащи вершины · кликай на подпись ребра для точного ввода длины"
           : "Сначала откалибруй — кликни на две вершины и введи реальное расстояние"}

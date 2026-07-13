@@ -1,4 +1,5 @@
 import { useProjectStore } from "../store/projectStore";
+import styles from "./RoomPointsTable.module.css";
 
 export default function RoomPointsTable() {
   const activeRoomIndex = useProjectStore((state) => state.activeRoomIndex);
@@ -15,7 +16,7 @@ export default function RoomPointsTable() {
 
   const handleRemovePoint = (indexToRemove: number) => {
     if (points.length <= 3) {
-      alert("У помещения должно быть минимум 3 точки!");
+      alert("У комнаты должно быть минимум 3 точки!");
       return;
     }
     setPoints(points.filter((_, index) => index !== indexToRemove));
@@ -33,7 +34,6 @@ export default function RoomPointsTable() {
     }
 
     const num = Number(value);
-    // Убрали проверку на num >= 0, теперь можно вводить минус
     if (!isNaN(num)) {
       if (field === "x") updatePoint(index, num, points[index].y);
       else updatePoint(index, points[index].x, num);
@@ -41,35 +41,22 @@ export default function RoomPointsTable() {
   };
 
   return (
-    <div
-      style={{
-        marginTop: "30px",
-        borderTop: "1px solid #444",
-        paddingTop: "20px",
-      }}
-    >
-      <h3>Координаты углов (точки помещения)</h3>
+    <div className={styles.wrapper}>
+      <h3>Координаты углов (точки комнаты)</h3>
 
-      <table
-        style={{
-          width: "100%",
-          textAlign: "left",
-          borderCollapse: "collapse",
-          marginBottom: "15px",
-        }}
-      >
+      <table className={styles.table}>
         <thead>
           <tr>
-            <th style={{ paddingBottom: "10px" }}>№</th>
-            <th style={{ paddingBottom: "10px" }}>X (метры)</th>
-            <th style={{ paddingBottom: "10px" }}>Y (метры)</th>
-            <th style={{ paddingBottom: "10px" }}>Действие</th>
+            <th className={styles.th}>№</th>
+            <th className={styles.th}>X (метры)</th>
+            <th className={styles.th}>Y (метры)</th>
+            <th className={styles.th}>Действие</th>
           </tr>
         </thead>
         <tbody>
           {points.map((point, index) => (
             <tr key={index}>
-              <td style={{ padding: "5px 0" }}>{index + 1}</td>
+              <td className={styles.td}>{index + 1}</td>
               <td>
                 <input
                   type="number"
@@ -78,7 +65,7 @@ export default function RoomPointsTable() {
                   onChange={(e) =>
                     handlePointChange(index, "x", e.target.value)
                   }
-                  style={{ width: "80px", padding: "5px" }}
+                  className={styles.input}
                 />
               </td>
               <td>
@@ -89,20 +76,13 @@ export default function RoomPointsTable() {
                   onChange={(e) =>
                     handlePointChange(index, "y", e.target.value)
                   }
-                  style={{ width: "80px", padding: "5px" }}
+                  className={styles.input}
                 />
               </td>
               <td>
                 <button
                   onClick={() => handleRemovePoint(index)}
-                  style={{
-                    padding: "5px 10px",
-                    cursor: "pointer",
-                    background: "#fff",
-                    color: "#B5524A",
-                    border: "1px solid #E3C9C4",
-                    borderRadius: "3px",
-                  }}
+                  className={styles.deleteBtn}
                 >
                   Удалить
                 </button>
@@ -112,19 +92,7 @@ export default function RoomPointsTable() {
         </tbody>
       </table>
 
-      <button
-        onClick={handleAddPoint}
-        style={{
-          padding: "8px 15px",
-          cursor: "pointer",
-          background: "var(--accent)",
-          color: "#fff",
-          border: "none",
-          borderRadius: "3px",
-          fontSize: "13px",
-          letterSpacing: ".01em",
-        }}
-      >
+      <button onClick={handleAddPoint} className={styles.addBtn}>
         + Добавить точку
       </button>
     </div>

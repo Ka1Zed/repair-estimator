@@ -528,6 +528,142 @@
   color: var(--text-h);
 }
 
+.scopeNote {
+  font-size: 12px;
+  color: #9a9a9a;
+  margin: 8px 0 0;
+  font-style: italic;
+}
+
+/* скрытые работы */
+.hiddenSection {
+  margin-top: 36px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+}
+
+.hiddenNote {
+  font-size: 12px;
+  color: #9a9a9a;
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+.hiddenTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.hiddenTable th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: #9a9a9a;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.hiddenTable td {
+  padding: 10px 12px 10px 0;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.hiddenTable tr:last-child td {
+  border-bottom: none;
+}
+
+.hiddenReason {
+  color: #9a9a9a;
+  font-style: italic;
+}
+
+.hiddenVol {
+  white-space: nowrap;
+}
+
+.hiddenRange {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.hiddenTotal {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+/* переключатель глубины сметы (scope) */
+.scopeToggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.scopeBtn {
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  font-size: 12px;
+  color: #9a9a9a;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.scopeBtn:last-child {
+  border-right: none;
+}
+
+.scopeBtn:hover {
+  color: var(--text-h);
+}
+
+.scopeBtnActive {
+  background: var(--text-h);
+  color: #fff;
+}
+
+.scopeBtnActive:hover {
+  color: #fff;
+}
+
+/* подзаголовок стадии в таблице работ */
+.stageHeader {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+  margin: 20px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stageHeader:first-child {
+  margin-top: 0;
+}
+
+.stageSubtotal {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 12px;
+  color: #9a9a9a;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
 @media (max-width: 1080px) {
   .page {
     flex-direction: column;
@@ -559,4 +695,149 @@
     max-height: none;
     overflow: visible;
   }
+}
+/* Обертка для переключателя уровней и кнопок экспорта */
+.exportControlsWrapper {
+  display: flex;
+  gap: 24px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.rangeWrapper {
+  flex: 1;
+  min-width: 240px;
+}
+
+.rangeTrackCompact {
+  margin-bottom: 8px;
+}
+
+.exportRowPadded {
+  padding-bottom: 8px;
+}
+
+/* «Мои проекты» — строка над заголовком */
+.projectNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.myProjectsBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: #9a9a9a;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.12s;
+}
+
+.myProjectsBtn:hover {
+  color: var(--text-h);
+}
+
+/* Блок сохранения / шеринга под кнопкой «Рассчитать» */
+.saveArea {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.saveForm {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  width: 100%;
+}
+
+.saveInput {
+  flex: 1;
+  min-width: 160px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 13px;
+  color: var(--text-h);
+  background: none;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.saveInput:focus {
+  border-color: var(--accent-border, #9a9a9a);
+}
+
+.saveConfirmBtn {
+  padding: 7px 16px;
+  background: var(--text-h);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.12s;
+}
+
+.saveConfirmBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.saveCancelBtn {
+  padding: 7px 12px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 13px;
+  color: #9a9a9a;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.saveBtn {
+  padding: 7px 16px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 13px;
+  color: var(--text-h);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.saveBtn:hover {
+  border-color: var(--text-h);
+}
+
+.shareBtn {
+  padding: 7px 16px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 13px;
+  color: #9a9a9a;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.shareBtn:hover {
+  color: var(--text-h);
+  border-color: var(--text-h);
+}
+
+.saveError {
+  width: 100%;
+  font-size: 12px;
+  color: #b04a4a;
+  margin-top: 2px;
 }

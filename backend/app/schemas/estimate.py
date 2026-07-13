@@ -70,11 +70,12 @@ class RoomInput(BaseModel):
 class EstimateRequest(BaseModel):
     city: str
     rooms: List[RoomInput]
-    # Стадийность сметы (#190). finish_only (дефолт) — только чистовая отделка;
-    # rough_and_finish — добавить черновые работы (демонтаж, выравнивание, стяжка,
-    # гидроизоляция, грунт). Класса ремонта в контракте нет (#222) — объём задаётся
-    # составом works, а глубину (черновая+чистовая vs только финиш) задаёт scope.
-    scope: Literal["finish_only", "rough_and_finish"] = "finish_only"
+    tier: str = Field("avg", pattern="^(min|avg|max)$")  # уровень комплектации
+    # Стадийность сметы (#190, #303). finish_only (дефолт) — только чистовая отделка;
+    # rough_and_finish — черновая + чистовая; rough_only — черновая + предчистовая,
+    # БЕЗ чистовой отделки и её материалов (ремонт под чистовую сдачу). Класса ремонта
+    # в контракте нет (#222) — объём задаётся составом works, а глубину сметы — scope.
+    scope: Literal["finish_only", "rough_and_finish", "rough_only"] = "finish_only"
 
 
 class GeometrySummary(BaseModel):
@@ -83,9 +84,37 @@ class GeometrySummary(BaseModel):
     wall_area: float
     perimeter: float
 
+class MaterialTierItem(BaseModel):
+    """Товар конкретного уровня комплектации внутри MaterialItem.*_item (#349).
+
+    Для finish_key-позиций (ламинат, покраска стен/потолка, плитка, обои, розетка —
+    #331) min/avg/max — РАЗНЫЕ SKU (свои name/source_url) — эконом/стандарт/премиум.
+    Для остальных материалов (один товар на все tier) — совпадают между собой и со
+    значениями строки. quantity общая с родительской строкой (не пересчитывается по
+    норме расхода конкретного SKU) — только price/total и атрибуция источника меняются.
+    """
+    name: str
+    price: float
+    total: float
+    source: str
+    source_url: Optional[str] = None
+
 class MaterialItem(BaseModel):
     name: str
     quantity: float
+    # Уровень комплектации (min/avg/max) — эхо запроса
+    tier: str  # "min" | "avg" | "max"
+    # Цена за единицу для выбранного уровня
+    price: float
+    # Итог для выбранного уровня
+    total: float
+    # Полная вилка (min/avg/max) для отображения коридора
+    price_min: float
+    price_avg: float
+    price_max: float
+    total_min: float
+    total_avg: float
+    total_max: float
     # Из чего складывается quantity (#176): base_quantity — площадь/длина × норма
     # расхода, ДО запаса; waste_factor — применённый коэффициент запаса
     # (совмещает waste_factor материала и, для обоев под рисунок, раппорт);
@@ -96,8 +125,6 @@ class MaterialItem(BaseModel):
     # Число упаковок, до которого округлили: packs × package_size == quantity.
     packs: int
     unit: str
-    price_avg: float
-    total_avg: float
     source: str
     # Ссылка на карточку/категорию товара у источника цены: задана для парсерных
     # цен, null для seed и для позиций без цены. Фронт (F2-8) делает из неё ссылку.
@@ -106,6 +133,23 @@ class MaterialItem(BaseModel):
     # Регион, по которому реально взялась цена: город при региональной seed-цене
     # или null, если цена базовая (region IS NULL) / парсерная. См. city в запросе.
     region: Optional[str] = None
+    # Все источники, чьи цены объединены в эту вилку (#333, по аналогии с LaborItem.sources).
+    # Для одного источника — один элемент; для seed-цены — null. source/source_url —
+    # представительный источник (его средняя ближе к итоговой).
+    sources: Optional[List[str]] = None
+    # Источник границы вилки (#348), если он отличается от представителя (source/source_url):
+    # чья строка реально дала price_min/price_max при объединении нескольких источников.
+    # null, если источник один или граница совпадает с представителем (не дублируем ссылку).
+    min_source: Optional[str] = None
+    min_source_url: Optional[str] = None
+    max_source: Optional[str] = None
+    max_source_url: Optional[str] = None
+    # SKU-варианты по уровню комплектации (#349) — избавляют фронт от 3× запроса
+    # /calculate (tier=min/avg/max) ради имён/ссылок альтернативных товаров.
+    # Для finish_key-позиций разные (эконом/стандарт/премиум), иначе совпадают.
+    min_item: MaterialTierItem
+    avg_item: MaterialTierItem
+    max_item: MaterialTierItem
 
 class LaborItem(BaseModel):
     service: str
@@ -116,9 +160,21 @@ class LaborItem(BaseModel):
     stage: Literal["rough", "pre_finish", "finish"]
     volume: float
     unit: str
+    # Уровень комплектации (min/avg/max) — эхо запроса
+    tier: str  # "min" | "avg" | "max"
+    # Цена за единицу для выбранного уровня
+    price: float
+    # Итог для выбранного уровня
+    total: float
+    # Полная вилка (min/avg/max) для отображения коридора
+    price_min: float
     price_avg: float
+    price_max: float
+    total_min: float
     total_avg: float
+    total_max: float
     source: str
+    updated_at: str
     # Ссылка на страницу услуги у источника цены: задана для парсерных цен, null для seed.
     source_url: Optional[str] = None
     region: Optional[str] = None
@@ -126,6 +182,13 @@ class LaborItem(BaseModel):
     # один элемент; для seed-цены — null. В строке сметы source — представительный
     # сайт (его средняя ближе к итоговой), а sources — полный список через запятую.
     sources: Optional[List[str]] = None
+    # Источник границы вилки (#348), если он отличается от представителя (source/source_url):
+    # чей сайт реально дал price_min/price_max при объединении нескольких сайтов.
+    # null, если источник один или граница совпадает с представителем.
+    min_source: Optional[str] = None
+    min_source_url: Optional[str] = None
+    max_source: Optional[str] = None
+    max_source_url: Optional[str] = None
 
 class HiddenWorkItem(BaseModel):
     """Строка блока «может всплыть доплатой» (#239).

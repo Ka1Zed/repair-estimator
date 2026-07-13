@@ -1,13 +1,45 @@
+import copy
+import hashlib
 import os
 import io
 import json
 import re
 import logging
 import statistics
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+# SHA-256 эталонного чертежа (demo_room.png из app/fixtures/).
+# Если пользователь загружает именно этот файл — возвращаем предзаписанный ответ
+# без вызова LLM. Это и есть «надёжный демо-сценарий» (#297): детерминированно,
+# без ключей API, воспроизводится на любом прогоне.
+DEMO_IMAGE_SHA256 = "c312ebbb0bc8d24fbe6b337f6d99ca24ce2ce6d8e35ba66f16468732faeb6b8d"
+_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
+
+DEMO_FIXTURE_RESULT: Dict[str, Any] = {
+    "success": True,
+    "method": "fixture",
+    "confidence": 0.95,
+    "points": [
+        {"x": 0.0,  "y": 0.0, "nx": 0.1667, "ny": 0.1714},
+        {"x": 4.0,  "y": 0.0, "nx": 0.8333, "ny": 0.1714},
+        {"x": 4.0,  "y": 3.0, "nx": 0.8333, "ny": 0.8143},
+        {"x": 0.0,  "y": 3.0, "nx": 0.1667, "ny": 0.8143},
+    ],
+    "height": 2.7,
+    "openings": [
+        {"type": "door",   "width": 0.9, "height": 2.0},
+        {"type": "window", "width": 1.3, "height": 1.2},
+    ],
+    "raw_dimensions": ["4000", "3000", "2700"],
+    "warnings": [
+        "Демо-чертёж: результат предзаписан, LLM не вызывался. "
+        "Проверьте и скорректируйте контур перед применением."
+    ],
+}
 
 # Разрешение, до которого ужимаем картинку перед отправкой в модель.
 # 2048 (вместо прежних 1024) — чтобы оставались читаемыми подписи размеров на стенах.
@@ -97,8 +129,23 @@ class BlueprintService:
         # claude-opus-4-8 точнее и дороже.
         self.claude_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 
+    @staticmethod
+    def demo_image_bytes() -> bytes:
+        """Возвращает байты эталонного демо-чертежа из fixtures/."""
+        path = _FIXTURES_DIR / "demo_room.png"
+        if not path.exists():
+            raise FileNotFoundError(f"Демо-файл не найден: {path}")
+        return path.read_bytes()
+
     def process_blueprint(self, file_bytes: bytes, filename: str) -> Dict[str, Any]:
         logger.debug(f"START process_blueprint: {filename}")
+
+        # Детектируем демо-чертёж по SHA-256 — возвращаем предзаписанный ответ
+        # без вызова LLM. Гарантирует воспроизводимость демо-сценария (#297).
+        sha = hashlib.sha256(file_bytes).hexdigest()
+        if sha == DEMO_IMAGE_SHA256:
+            logger.debug("fixture match: returning demo result")
+            return copy.deepcopy(DEMO_FIXTURE_RESULT)
 
         if os.getenv("BLUEPRINT_MOCK", "").lower() == "true":
             logger.debug("MOCK mode")

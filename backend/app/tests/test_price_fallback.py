@@ -61,7 +61,7 @@ def test_zero_parser_falls_back_to_seed_and_does_not_persist(db_session):
     """Парсер вернул 0 → отдаём seed (не 0), нулевую цену в БД НЕ сохраняем."""
     assert _megastroy_price_row(db_session, "Краска для стен") is None  # предусловие
 
-    price = get_price("Краска для стен", parser=_ZeroParser())
+    price = get_price("Краска для стен", db=db_session, parser=_ZeroParser())
 
     assert price is not None
     assert price.price_avg == Decimal("120")  # базовая seed-цена из conftest
@@ -72,7 +72,7 @@ def test_zero_parser_falls_back_to_seed_and_does_not_persist(db_session):
 @pytest.mark.usefixtures("setup_test_db")
 def test_raising_parser_falls_back_to_seed(db_session):
     """Парсер бросил исключение → seed-цена, расчёт не падает (регресс ветки except)."""
-    price = get_price("Краска для стен", parser=_RaisingParser())
+    price = get_price("Краска для стен", db=db_session, parser=_RaisingParser())
 
     assert price is not None
     assert price.price_avg == Decimal("120")
@@ -86,7 +86,7 @@ def test_live_fetch_disabled_skips_network_and_uses_seed(db_session, monkeypatch
     monkeypatch.setattr(settings, "PARSER_LIVE_FETCH", False)
     parser = _RecordingParser()
 
-    price = get_price("Краска для стен", parser=parser)
+    price = get_price("Краска для стен", db=db_session, parser=parser)
 
     assert parser.called is False                  # сеть не трогали
     assert price is not None
@@ -101,12 +101,49 @@ def test_force_refresh_fetches_even_when_live_fetch_disabled(db_session, monkeyp
     monkeypatch.setattr(settings, "PARSER_LIVE_FETCH", False)
     parser = _RecordingParser()
 
-    price = get_price("Краска для стен", parser=parser, force_refresh=True)
+    price = get_price("Краска для стен", db=db_session, parser=parser, force_refresh=True)
 
     assert parser.called is True                    # сеть дёрнули
     assert price is not None
     assert price.price_avg == Decimal("250")        # цена парсера, не seed
     assert _megastroy_price_row(db_session, "Краска для стен") is not None  # кэш записан
+
+
+class _PackageSizeParser(BaseParser):
+    """Отдаёт валидную цену вместе с фасовкой конкретного товара (#306)."""
+    source_name = "Мегастрой"
+
+    def fetch_price(self, material_name: str) -> ParsedPrice:
+        return ParsedPrice(
+            price_min=Decimal("200"), price_avg=Decimal("250"), price_max=Decimal("300"),
+            source_url="https://kazan.megastroy.com/products/kraska-2.5l",
+            package_size=Decimal("2.5"),
+        )
+
+
+@pytest.mark.usefixtures("setup_test_db")
+def test_package_size_from_parser_is_persisted_to_price_row(db_session):
+    """package_size (#306) из ParsedPrice уходит в MaterialPrice — не теряется
+    между парсером и БД, откуда его читает estimates.py."""
+    price = get_price("Краска для стен", db=db_session, parser=_PackageSizeParser(), force_refresh=True)
+
+    assert price is not None
+    assert price.package_size == 2.5
+    row = _megastroy_price_row(db_session, "Краска для стен")
+    assert row.package_size == 2.5
+
+
+@pytest.mark.usefixtures("setup_test_db")
+def test_seed_price_has_no_package_size(db_session):
+    """seed-цена не несёт фасовку конкретного товара — вызывающий код (estimates.py)
+    откатывается на статичный Material.package_size. Материал взят другой (не
+    "Краска для стен"), чтобы не попасть в свежий parser-кэш, записанный
+    test_package_size_from_parser_is_persisted_to_price_row выше (БД в этом
+    файле session-scoped, между тестами не пересоздаётся)."""
+    price = get_price("Грунтовка", db=db_session, parser=_RaisingParser())
+
+    assert price is not None
+    assert price.package_size is None
 
 
 @pytest.mark.usefixtures("setup_test_db")
@@ -122,7 +159,7 @@ def test_labor_prefers_parser_over_seed(db_session):
     db_session.add(parsed_row)
     db_session.commit()
     try:
-        price = get_labor_price("Покраска стен", region=None)
+        price = get_labor_price("Покраска стен", db=db_session, region=None)
         assert price is not None
         assert price.source_id == src.id          # источник — парсер, не seed
         assert price.price_avg == Decimal("999")  # не базовая seed-цена 450
@@ -135,7 +172,7 @@ def test_labor_prefers_parser_over_seed(db_session):
 @pytest.mark.usefixtures("setup_test_db")
 def test_labor_falls_back_to_seed_when_no_parser_price(db_session):
     """Без спарсенной цены работа берётся из seed (значение > 0)."""
-    price = get_labor_price("Покраска стен", region=None)
+    price = get_labor_price("Покраска стен", db=db_session, region=None)
     assert price is not None
     assert price.price_avg == Decimal("450")  # базовая seed-цена из conftest
 
@@ -155,7 +192,7 @@ def test_labor_stale_parser_price_falls_back_to_seed(db_session):
     db_session.add(stale_row)
     db_session.commit()
     try:
-        price = get_labor_price("Покраска стен", region=None)
+        price = get_labor_price("Покраска стен", db=db_session, region=None)
         assert price is not None
         seed_src = db_session.query(PriceSource).filter(PriceSource.name == "seed").first()
         assert price.source_id == seed_src.id     # seed, не устаревший parser
@@ -180,7 +217,7 @@ def test_labor_fresh_parser_price_is_returned(db_session):
     db_session.add(fresh_row)
     db_session.commit()
     try:
-        price = get_labor_price("Покраска стен", region=None)
+        price = get_labor_price("Покраска стен", db=db_session, region=None)
         assert price is not None
         assert price.source_id == src.id          # источник — парсер
         assert price.price_avg == Decimal("999")  # не seed 450
@@ -213,8 +250,8 @@ def test_labor_multiple_parser_sources_freshest_wins_deterministically(db_sessio
     db_session.add_all([row_old, row_new])
     db_session.commit()
     try:
-        first = get_labor_price("Покраска стен", region=None)
-        second = get_labor_price("Покраска стен", region=None)
+        first = get_labor_price("Покраска стен", db=db_session, region=None)
+        second = get_labor_price("Покраска стен", db=db_session, region=None)
         assert first is not None and second is not None
         assert first.source_id == src_new.id      # свежайший источник
         assert first.source_id == second.source_id  # детерминированно

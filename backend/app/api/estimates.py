@@ -10,33 +10,37 @@ from app.db.session import get_db
 from app.db.models import PriceSource
 from app.schemas.estimate import (
     EstimateRequest, EstimateResponse, Summary, GeometrySummary,
-    MaterialItem, LaborItem, HiddenWorks, HiddenWorkItem, RoomInput,
+    MaterialItem, MaterialTierItem, LaborItem, HiddenWorks, HiddenWorkItem, RoomInput,
 )
 from app.services.geometry_service import calculate_room_geometry
 from app.services.material_calc_service import (
-    calculate_materials, calculate_engineering_materials, packs_to_buy,
+    calculate_materials, calculate_engineering_materials, packs_to_buy, resolve_material,
 )
 from app.services.labor_calc_service import (
     calculate_labor, calculate_engineering_labor, calculate_rough_labor,
     WET_ROOM_TYPES,
 )
 from app.services.repair_coeffs_service import CONTINGENCY
-from app.services.price_aggregator_service import get_price, get_labor_price
+from app.services.price_aggregator_service import get_material_price, get_labor_price
 from app.services.hidden_works_service import calculate_hidden_works
 from app.parsers.base import BaseParser
-from app.parsers.megastroy_parser import MegastroyParser
+from app.parsers.registry import MATERIAL_PARSERS, REGIONAL_MATERIAL_PARSERS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
 
-def get_material_parser() -> BaseParser:
-    '''Парсер цен материалов для расчёта сметы.
+def get_material_parsers() -> list[BaseParser]:
+    '''Все зарегистрированные источники цен материалов для расчёта сметы.
 
-    Вынесен в зависимость FastAPI, чтобы тесты могли подменить его заглушкой
-    (app.dependency_overrides) и не ходить в сеть. В проде — живой Мегастрой.
+    Вынесена в зависимость FastAPI, чтобы тесты могли подменить список заглушкой
+    (app.dependency_overrides) и не ходить в сеть. В проде — базовые парсеры из
+    app.parsers.registry.MATERIAL_PARSERS (Мегастрой, Леман-Казань) плюс
+    региональные (#345, REGIONAL_MATERIAL_PARSERS — Леман для Москвы/СПб);
+    get_material_price сам выбирает, какие из них применимы к запрошенному
+    городу (_select_regional_parsers), и объединяет их цены в одну вилку (#333).
     '''
-    return MegastroyParser()
+    return MATERIAL_PARSERS + REGIONAL_MATERIAL_PARSERS
 
 # Дефолты инженерки, когда группа works включена, а число не задано (null).
 # Явный 0 остаётся 0 (осознанный ноль). База — пресеты по типу комнаты; для типа
@@ -123,13 +127,64 @@ def _finish_options(room: RoomInput) -> Dict[str, Any]:
         "wall_condition": w.walls.wall_condition if w.walls.enabled else None,
     }
 
+def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> Decimal:
+    """Выбирает значение в зависимости от уровня комплектации."""
+    if tier == "min":
+        return v_min
+    if tier == "max":
+        return v_max
+    return v_avg
+
+
+def _tier_item(
+    material_key: str, tier: str, quantity: Decimal, db: Session,
+    parsers: list[BaseParser], region: str, sources_by_id: Dict[int, str],
+) -> MaterialTierItem:
+    """SKU-вариант позиции для одного уровня комплектации (#349, min_item/avg_item/max_item).
+
+    Резолвит SKU так же, как сама строка материала (resolve_material — с fallback
+    на ближайший уровень, если у finish_key нет варианта именно этого tier), затем
+    берёт цену тем же путём (get_material_price) и той же арифметикой band'ов
+    (pick_by_tier), что и основной расчёт строки — числа обязаны совпасть с тем,
+    что вернул бы отдельный /calculate с этим tier. quantity — общая с родительской
+    строкой (см. MaterialTierItem), доп. обращений к БД/парсеру сверх обычных для
+    resolve_material/get_material_price нет.
+    """
+    material = resolve_material(db, material_key, tier)
+    if material is None:
+        return MaterialTierItem(name="", price=0.0, total=0.0, source="нет цены", source_url=None)
+
+    price_obj = get_material_price(material.name, db=db, parsers=parsers, region=region)
+    if not price_obj:
+        return MaterialTierItem(
+            name=material.name, price=0.0, total=0.0, source="нет цены", source_url=None,
+        )
+
+    price = pick_by_tier(tier, price_obj.price_min, price_obj.price_avg, price_obj.price_max)
+    total = quantity * price * CONTINGENCY[tier]
+    return MaterialTierItem(
+        name=material.name,
+        price=float(price),
+        total=float(total),
+        source=sources_by_id.get(price_obj.source_id, "unknown"),
+        source_url=price_obj.source_url,
+    )
+
+# tier выбирает границу вилки (min/avg/max) уже ВЫБРАННОГО SKU-варианта.
+# Выбор самого варианта (эконом/стандарт/премиум — разные Material с одним
+# finish_key) происходит раньше, в calculate_materials/_resolve_material (#331) —
+# сюда попадает готовая цена одного конкретного товара.
 
 @router.post("/calculate", response_model=EstimateResponse)
 def calculate_estimate(
     request: EstimateRequest,
     db: Session = Depends(get_db),
-    parser: BaseParser = Depends(get_material_parser),
+    parsers: list[BaseParser] = Depends(get_material_parsers),
 ) -> EstimateResponse:
+    # Источники цен — маленький справочник (~10 строк), грузим один раз вместо
+    # точечного запроса на каждую строку материала/работы (устраняет N+1, #278).
+    sources_by_id = {s.id: s.name for s in db.query(PriceSource).all()}
+
     all_materials: List[Dict[str, Any]] = []
     all_labor: List[Dict[str, Any]] = []
     total_geometry = {
@@ -174,18 +229,24 @@ def calculate_estimate(
             hidden['has_floor'] = True
         if finish_options["walls"]:
             hidden['has_walls'] = True
+        # rough_only (#303): чистовая отделка и её материалы не считаются, остаётся
+        # предчистовая подготовка (шпаклёвка стен, грунт/стартовая шпаклёвка материалом).
+        include_finish = request.scope != "rough_only"
         all_materials.extend(calculate_materials(
-            geometry=geometry, repair_options=finish_options, db=db
+            geometry=geometry, repair_options=finish_options, db=db,
+            include_finish=include_finish, tier=request.tier,
         ))
         all_labor.extend(calculate_labor(
-            geometry=geometry, repair_options=finish_options, db=db
+            geometry=geometry, repair_options=finish_options, db=db,
+            sources_by_id=sources_by_id, include_finish=include_finish,
         ))
 
-        # --- черновые работы (#190): только при scope=rough_and_finish ---
-        if request.scope == "rough_and_finish":
+        # --- черновые работы (#190, #303): при rough_and_finish и rough_only ---
+        if request.scope in ("rough_and_finish", "rough_only"):
             all_labor.extend(calculate_rough_labor(
                 geometry=geometry, repair_options=finish_options,
                 room_type=room.room_type, db=db,
+                sources_by_id=sources_by_id,
             ))
 
         # --- инженерка по явным числам works (дефолты от типа/площади) ---
@@ -201,16 +262,14 @@ def calculate_estimate(
         if points > 0 or room.room_type in WET_ROOM_TYPES:
             hidden['wet_floor'] += Decimal(str(geometry['floor_area']))
         all_materials.extend(calculate_engineering_materials(
-            sockets=sockets, lights=lights, cable_m=cable_m, pipe_m=pipe_m, db=db
+            sockets=sockets, lights=lights, cable_m=cable_m, pipe_m=pipe_m, db=db,
+            include_finish=include_finish, tier=request.tier,
         ))
         all_labor.extend(calculate_engineering_labor(
             sockets=sockets, lights=lights, cable_m=cable_m,
-            plumbing_points=points, pipe_m=pipe_m, db=db
+            plumbing_points=points, pipe_m=pipe_m, db=db,
+            sources_by_id=sources_by_id, include_finish=include_finish,
         ))
-
-    # Множитель строк детализации: непредвиденные расходы (avg). Класса ремонта больше нет (#222).
-    # Нужен, чтобы сумма построчных total_avg точно совпадала с summary.*_avg.
-    line_factor = CONTINGENCY['avg']
 
     # Агрегация материалов с округлением до упаковок
     mat_groups: Dict[int, Dict] = {}
@@ -219,6 +278,7 @@ def calculate_estimate(
         if mid not in mat_groups:
             mat_groups[mid] = {
                 'name': mat['name'],
+                'material_key': mat['material_key'],
                 'unit': mat['unit'],
                 'package_size': Decimal(str(mat.get('package_size', 1))),
                 'quantity': Decimal(0),
@@ -235,56 +295,122 @@ def calculate_estimate(
 
     for mid, group in mat_groups.items():
         name = group['name']
-        packs = packs_to_buy(group['pack_quantity'])
-        final_quantity = Decimal(packs) * group['package_size']
         base_quantity = group['base_quantity']
         # Эффективный запас группы: quantity/base_quantity — по построению совпадает
         # с накрученным по факту коэффициентом даже после суммирования нескольких комнат.
         waste_factor = (group['quantity'] / base_quantity) if base_quantity > 0 else Decimal(1)
 
-        price_obj = get_price(name, parser=parser, region=request.city)
+        price_obj = get_material_price(name, db=db, parsers=parsers, region=request.city)
+
+        # package_size (#306): если цена пришла от парсера и он отдал фасовку
+        # КОНКРЕТНОГО товара за source_url — считаем упаковки по ней, а не по
+        # справочной Material.package_size, иначе то, что показано по ссылке,
+        # и то, что легло в расчёт, могут разойтись (краска 2.5 л на карточке
+        # против 9 л в смете). Нет цены/фасовки от парсера — прежнее поведение.
+        effective_package_size = (
+            Decimal(str(price_obj.package_size))
+            if price_obj is not None and price_obj.package_size
+            else group['package_size']
+        )
+        if effective_package_size > 0:
+            packs = packs_to_buy(group['quantity'] / effective_package_size)
+        else:
+            packs = packs_to_buy(group['pack_quantity'])
+        final_quantity = Decimal(packs) * effective_package_size
+
         if not price_obj:
-            # Цены нет даже в seed — не теряем позицию молча, показываем её с пометкой.
             logger.warning(f"Цена для материала '{name}' не найдена, показываем без цены")
+            no_price_item = MaterialTierItem(
+                name=name, price=0.0, total=0.0, source="нет цены", source_url=None,
+            )
             materials_response.append(MaterialItem(
                 name=name,
                 quantity=float(final_quantity),
                 base_quantity=float(base_quantity),
                 waste_factor=float(waste_factor),
-                package_size=float(group['package_size']),
+                package_size=float(effective_package_size),
                 packs=packs,
                 unit=group['unit'],
+                tier=request.tier,
+                price=0.0,
+                total=0.0,
+                price_min=0.0,
                 price_avg=0.0,
+                price_max=0.0,
+                total_min=0.0,
                 total_avg=0.0,
+                total_max=0.0,
                 source="нет цены",
                 source_url=None,
                 updated_at="",
-                region=None
+                region=None,
+                min_item=no_price_item,
+                avg_item=no_price_item,
+                max_item=no_price_item,
             ))
             continue
 
+        price_min = price_obj.price_min
         price_avg = price_obj.price_avg
-        # Строчный итог уже включает запас на непредвиденные (CONTINGENCY), чтобы
-        # сумма строк совпадала с summary (см. line_factor). Класса ремонта больше нет (#222).
-        total_avg = final_quantity * price_avg * line_factor
-        source = db.query(PriceSource).filter(PriceSource.id == price_obj.source_id).first()
-        source_name = source.name if source else "unknown"
+        price_max = price_obj.price_max
+        source_name = sources_by_id.get(price_obj.source_id, "unknown")
         updated_at = price_obj.updated_at.strftime("%Y-%m-%d") if price_obj.updated_at else ""
+        min_source_id = getattr(price_obj, "min_source_id", None)
+        max_source_id = getattr(price_obj, "max_source_id", None)
+        min_source_name = sources_by_id.get(min_source_id) if min_source_id else None
+        max_source_name = sources_by_id.get(max_source_id) if max_source_id else None
+        total_min = final_quantity * price_min * CONTINGENCY['min']
+        total_avg = final_quantity * price_avg * CONTINGENCY['avg']
+        total_max = final_quantity * price_max * CONTINGENCY['max']
+
+        price = pick_by_tier(request.tier, price_min, price_avg, price_max)
+        total = pick_by_tier(request.tier, total_min, total_avg, total_max)
+
+        # min_item/avg_item/max_item (#349): для request.tier переиспользуем уже
+        # посчитанные выше price/total/source — без лишнего resolve_material/
+        # get_material_price; для двух остальных уровней резолвим SKU-вариант
+        # тем же путём, что и основной расчёт (_tier_item).
+        current_tier_item = MaterialTierItem(
+            name=name, price=float(price), total=float(total),
+            source=source_name, source_url=price_obj.source_url,
+        )
+        tier_items = {request.tier: current_tier_item}
+        for t in ("min", "avg", "max"):
+            if t not in tier_items:
+                tier_items[t] = _tier_item(
+                    group['material_key'], t, final_quantity, db, parsers,
+                    request.city, sources_by_id,
+                )
 
         materials_response.append(MaterialItem(
             name=name,
             quantity=float(final_quantity),
             base_quantity=float(base_quantity),
             waste_factor=float(waste_factor),
-            package_size=float(group['package_size']),
+            package_size=float(effective_package_size),
             packs=packs,
             unit=group['unit'],
+            tier=request.tier,
+            price=float(price),
+            total=float(total),
+            price_min=float(price_min),
             price_avg=float(price_avg),
+            price_max=float(price_max),
+            total_min=float(total_min),
             total_avg=float(total_avg),
+            total_max=float(total_max),
             source=source_name,
             source_url=price_obj.source_url,
             updated_at=updated_at,
-            region=price_obj.region
+            region=price_obj.region,
+            sources=getattr(price_obj, "contributing_sources", None),
+            min_source=min_source_name,
+            min_source_url=getattr(price_obj, "min_source_url", None),
+            max_source=max_source_name,
+            max_source_url=getattr(price_obj, "max_source_url", None),
+            min_item=tier_items["min"],
+            avg_item=tier_items["avg"],
+            max_item=tier_items["max"],
         ))
 
         materials_sum['min'] += final_quantity * price_obj.price_min
@@ -308,18 +434,28 @@ def calculate_estimate(
     labor_sum = {'min': Decimal(0), 'avg': Decimal(0), 'max': Decimal(0)}
 
     for service, group in labor_groups.items():
-        labor_price = get_labor_price(service, region=request.city)
+        labor_price = get_labor_price(service, db=db, region=request.city)
         if not labor_price:
             continue
 
         volume = group['volume']
-        price_avg = labor_price.price_avg
-        # Строчный итог включает запас на непредвиденные (CONTINGENCY), как и у материалов.
-        total_avg = volume * price_avg * line_factor
-        labor_source = db.query(PriceSource).filter(
-            PriceSource.id == labor_price.source_id
-        ).first()
-        labor_source_name = labor_source.name if labor_source else "seed"
+        p_min, p_avg, p_max = labor_price.price_min, labor_price.price_avg, labor_price.price_max
+
+        # Применяем непредвиденные расходы для каждой границы
+        total_min = volume * p_min * CONTINGENCY['min']
+        total_avg = volume * p_avg * CONTINGENCY['avg']
+        total_max = volume * p_max * CONTINGENCY['max']
+
+        # Выбор цены и итога для текущего уровня (tier)
+        price = pick_by_tier(request.tier, p_min, p_avg, p_max)
+        total = pick_by_tier(request.tier, total_min, total_avg, total_max)
+
+        labor_source_name = sources_by_id.get(labor_price.source_id, "seed")
+        updated_at = labor_price.updated_at.strftime("%Y-%m-%d") if labor_price.updated_at else ""
+        labor_min_source_id = getattr(labor_price, "min_source_id", None)
+        labor_max_source_id = getattr(labor_price, "max_source_id", None)
+        labor_min_source_name = sources_by_id.get(labor_min_source_id) if labor_min_source_id else None
+        labor_max_source_name = sources_by_id.get(labor_max_source_id) if labor_max_source_id else None
 
         labor_response.append(LaborItem(
             service=service,
@@ -327,19 +463,29 @@ def calculate_estimate(
             stage=group['stage'],
             volume=float(volume),
             unit=group['unit'],
-            price_avg=float(price_avg),
+            tier=request.tier,
+            price=float(price),
+            total=float(total),
+            price_min=float(p_min),
+            price_avg=float(p_avg),
+            price_max=float(p_max),
+            total_min=float(total_min),
             total_avg=float(total_avg),
+            total_max=float(total_max),
             source=labor_source_name,
+            updated_at=updated_at,
             source_url=labor_price.source_url,
             region=labor_price.region,
-            # Полный список сайтов, объединённых в вилку (#166); None для seed.
             sources=getattr(labor_price, "contributing_sources", None),
+            min_source=labor_min_source_name,
+            min_source_url=getattr(labor_price, "min_source_url", None),
+            max_source=labor_max_source_name,
+            max_source_url=getattr(labor_price, "max_source_url", None),
         ))
 
-        labor_sum['min'] += volume * labor_price.price_min
-        labor_sum['avg'] += volume * labor_price.price_avg
-        labor_sum['max'] += volume * labor_price.price_max
-
+        labor_sum['min'] += volume * p_min
+        labor_sum['avg'] += volume * p_avg
+        labor_sum['max'] += volume * p_max
     # Итог = материалы + работы, каждый со своим запасом на непредвиденные (CONTINGENCY).
     # Классового множителя ремонта больше нет (#222).
     mat_final = {k: materials_sum[k] * CONTINGENCY[k] for k in ('min', 'avg', 'max')}
@@ -369,6 +515,7 @@ def calculate_estimate(
         wet_floor_area=hidden['wet_floor'],
         city=request.city,
         db=db,
+        sources_by_id=sources_by_id,
     )
     hidden_works = HiddenWorks(
         note=hidden_raw['note'],

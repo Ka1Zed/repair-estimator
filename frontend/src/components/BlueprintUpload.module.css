@@ -1,0 +1,153 @@
+.wrapper {
+  margin-bottom: 20px;
+}
+
+.labelRow {
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.betaBadge {
+  font-size: 10px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+  padding: 1px 6px;
+  letter-spacing: .08em;
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.dropzone {
+  border: 1.5px dashed var(--border);
+  border-radius: 6px;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 13px;
+  transition: border-color 0.15s;
+}
+
+.dropzoneDisabled {
+  cursor: not-allowed;
+}
+
+.dropzoneHint {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.errorBox {
+  margin-top: 10px;
+  padding: 10px;
+  background: #fdecea;
+  border: 1px solid #f5c6c2;
+  border-radius: 4px;
+  color: #c0392b;
+  font-size: 13px;
+}
+
+.resultBox {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.resultHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.resultMethod {
+  color: var(--text);
+}
+
+.confidence {
+  font-weight: 500;
+}
+
+.confidenceHigh {
+  color: #4caf50;
+}
+
+.confidenceMid {
+  color: #ff9800;
+}
+
+.confidenceLow {
+  color: #f44336;
+}
+
+.resultMeta {
+  color: var(--text-h);
+  margin-bottom: 6px;
+}
+
+.rawDimensions {
+  color: var(--text);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.warningRow {
+  color: #ff9800;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.appliedHint {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--text);
+  font-style: italic;
+}
+
+.demoRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.demoBtn {
+  padding: 5px 12px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--text-h);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.demoBtn:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.demoBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.demoHint {
+  font-size: 11px;
+  color: var(--text);
+}

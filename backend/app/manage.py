@@ -1,16 +1,18 @@
+import os
 import sys
 import logging
+from contextlib import nullcontext
 
-from app.parsers.megastroy_parser import MegastroyParser, CATEGORY_MAP
-from app.services.price_aggregator_service import get_price, update_labor_price
-
-from app.parsers.rembrigada_parser import RembrigadaParser
+from app.core.config import settings
+from app.db.session import SessionLocal
 from app.parsers.labor_table_parser import LABOR_SERVICE_MAP
-from app.parsers.garantstroikompleks_parser import GarantStroiParser
-from app.parsers.remont_uroven_parser import RemontUrovenParser
-from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
-from app.parsers.prorabneva_parser import ProrabnevaParser
-from app.parsers.kaz_stroyka_parser import KazStroykaParser
+from app.parsers.registry import (
+    BASE_LABOR_PARSER,
+    MATERIAL_PARSERS,
+    REGIONAL_LABOR_PARSERS,
+    REGIONAL_MATERIAL_PARSERS,
+)
+from app.services.price_aggregator_service import get_price, update_labor_price
 
 # Настройка логирования — чтобы видеть прогресс в консоли
 logging.basicConfig(
@@ -27,75 +29,107 @@ def update_prices():
     Каждый материал обрабатывается отдельно: ошибка одного
     не прерывает обработку остальных.
     '''
-    parser = MegastroyParser()
-
-    # Берем список материалов, которые умеет парсить Мегастрой
-    material_names = list(CATEGORY_MAP.keys())
-
-    logger.info(f"Старт обновления цен. Материалов к обработке: {len(material_names)}")
-
     success = 0
     failed = 0
 
-    for name in material_names:
-        try:
-            price = get_price(name, parser=parser, force_refresh=True)
-            if price:
-                logger.info(f"  ✓ {name}: avg={price.price_avg}")
-                success += 1
-            else:
-                logger.warning(f"  ✗ {name}: цена не найдена (нет в БД)")
-                failed += 1
-        except Exception as e:
-            # агрегатор и так глотает ошибки парсера, но на всякий случай
-            logger.error(f"  ✗ {name}: непредвиденная ошибка — {e}")
-            failed += 1
+    # update_prices — ручной наполнитель кэша с российского IP, где живой фетч
+    # нужен для ВСЕХ источников. Леман в config выключен по умолчанию ради
+    # прод/API-пути (см. LEMAN_LIVE в core/config.py), но здесь это ровно тот
+    # инструмент, ради которого его и включают, — поднимаем сами, чтобы не писать
+    # LEMAN_LIVE=1 перед каждым запуском. Явный LEMAN_LIVE=0 в окружении уважаем
+    # (напр. прогон только Мегастроя с не-РФ IP, чтобы не тратить время на браузер).
+    if "LEMAN_LIVE" not in os.environ:
+        settings.LEMAN_LIVE = True
 
-    # услуги по прайсам ремонтных компаний
+    # CLI не в FastAPI-запросе — сессию открываем и закрываем сами вокруг всей
+    # серии вызовов (Depends здесь недоступен).
+    db = SessionLocal()
+    try:
+        # Материалы: каждый зарегистрированный парсер обрабатывает свой список
+        # (parser.known_materials()) — добавление нового источника (напр. Леман,
+        # #276) или региона (#345, REGIONAL_MATERIAL_PARSERS — Леман для
+        # Москвы/СПб) не требует правок этой функции, только
+        # app/parsers/registry.py. get_price сам адресует кэш по region
+        # инстанса (parser.region), region в вызов ниже передавать не нужно.
+        for parser in MATERIAL_PARSERS + REGIONAL_MATERIAL_PARSERS:
+            material_names = parser.known_materials()
+            region_suffix = f" [{parser.region}]" if parser.region else ""
+            logger.info(
+                f"Обновление цен материалов ({parser.source_name}{region_suffix}): "
+                f"{len(material_names)} позиций"
+            )
+            # Браузерные парсеры (Леман) умеют отдать общую сессию — один Chrome
+            # на все материалы вместо нового процесса на каждую категорию (#277).
+            # Парсеры без такого метода (Мегастрой, requests-based) не затронуты.
+            open_session = getattr(parser, "open_session", None)
+            session_cm = open_session() if open_session else nullcontext(None)
+            with session_cm as session:
+                if session is not None and hasattr(parser, "set_session"):
+                    parser.set_session(session)
+                try:
+                    for name in material_names:
+                        try:
+                            price = get_price(name, db=db, parser=parser, force_refresh=True)
+                            if price:
+                                logger.info(f"  ✓ {name}{region_suffix}: avg={price.price_avg}")
+                                success += 1
+                            else:
+                                logger.warning(f"  ✗ {name}{region_suffix}: цена не найдена (нет в БД)")
+                                failed += 1
+                        except Exception as e:
+                            # агрегатор и так глотает ошибки парсера, но на всякий случай.
+                            # rollback — чтобы упавший commit не оставил сессию aborted
+                            # и не поронил остальные позиции InFailedSqlTransaction.
+                            db.rollback()
+                            logger.error(f"  ✗ {name}{region_suffix}: непредвиденная ошибка — {e}")
+                            failed += 1
+                finally:
+                    if hasattr(parser, "set_session"):
+                        parser.set_session(None)
 
-    labor_parser = RembrigadaParser()
-    logger.info(f"Обновление цен услуг: {len(LABOR_SERVICE_MAP)} позиций")
-    for service in LABOR_SERVICE_MAP:
-        try:
-            price = update_labor_price(service, parser=labor_parser)
-            if price:
-                logger.info(f"  ✓ {service}: avg={price.price_avg}")
-                success += 1
-            else:
-                logger.warning(f"  ✗ {service}: не обновлено (fallback на seed)")
-                failed += 1
-        except Exception as e:
-            logger.error(f"  ✗ {service}: {e}")
-            failed += 1
+        # услуги по прайсам ремонтных компаний
 
-    # Региональные прайсы отделочных работ: цены пишутся с region сайта.
-    # Ошибка одного сайта/услуги не прерывает остальные.
-    regional_labor_parsers = [
-        GarantStroiParser(), RemontUrovenParser(),   # Москва
-        OtdelkaSpbParser(), ProrabnevaParser(),       # Санкт-Петербург
-        KazStroykaParser(), RembrigadaParser(),       # Казань
-    ]
-    for labor_parser in regional_labor_parsers:
-        logger.info(
-            f"Региональный прайс работ: {labor_parser.source_name} "
-            f"({labor_parser.region}), {len(LABOR_SERVICE_MAP)} позиций"
-        )
+        logger.info(f"Обновление цен услуг: {len(LABOR_SERVICE_MAP)} позиций")
         for service in LABOR_SERVICE_MAP:
             try:
-                price = update_labor_price(
-                    service, parser=labor_parser, region=labor_parser.region
-                )
+                price = update_labor_price(service, parser=BASE_LABOR_PARSER, db=db)
                 if price:
-                    logger.info(f"  ✓ {service} [{labor_parser.region}]: avg={price.price_avg}")
+                    logger.info(f"  ✓ {service}: avg={price.price_avg}")
                     success += 1
                 else:
-                    logger.warning(
-                        f"  ✗ {service} [{labor_parser.region}]: не обновлено (fallback на seed)"
-                    )
+                    logger.warning(f"  ✗ {service}: не обновлено (fallback на seed)")
                     failed += 1
             except Exception as e:
-                logger.error(f"  ✗ {service} [{labor_parser.region}]: {e}")
+                db.rollback()
+                logger.error(f"  ✗ {service}: {e}")
                 failed += 1
+
+        # Региональные прайсы отделочных работ: цены пишутся с region сайта.
+        # Ошибка одного сайта/услуги не прерывает остальные.
+        for labor_parser in REGIONAL_LABOR_PARSERS:
+            logger.info(
+                f"Региональный прайс работ: {labor_parser.source_name} "
+                f"({labor_parser.region}), {len(LABOR_SERVICE_MAP)} позиций"
+            )
+            for service in LABOR_SERVICE_MAP:
+                try:
+                    price = update_labor_price(
+                        service, parser=labor_parser, region=labor_parser.region, db=db
+                    )
+                    if price:
+                        logger.info(f"  ✓ {service} [{labor_parser.region}]: avg={price.price_avg}")
+                        success += 1
+                    else:
+                        logger.warning(
+                            f"  ✗ {service} [{labor_parser.region}]: не обновлено (fallback на seed)"
+                        )
+                        failed += 1
+                except Exception as e:
+                    db.rollback()
+                    logger.error(f"  ✗ {service} [{labor_parser.region}]: {e}")
+                    failed += 1
+    finally:
+        db.close()
 
     logger.info(f"Готово. Успешно: {success}, с проблемами: {failed}")
 

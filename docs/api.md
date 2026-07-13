@@ -473,10 +473,11 @@
 **Запрос:** `multipart/form-data`, поле `file` — изображение чертежа.
 Форматы: PNG, JPG, JPEG, PDF. Максимальный размер — 10 MB.
 
-Метод распознавания выбирается автоматически по приоритету: Gemini Vision
-(`GEMINI_API_KEY`) → Claude Vision (`ANTHROPIC_API_KEY`) → Ollama LLaVA
-(`OLLAMA_BASE_URL`). Если ни один не настроен — вернётся `success: false` с
-предупреждением (сервер не падает). Координаты — в метрах.
+Метод распознавания выбирается автоматически по приоритету: Claude Vision
+(`ANTHROPIC_API_KEY`, основной путь) → Gemini Vision (`GEMINI_API_KEY`, fallback,
+если сервис доступен) → Ollama LLaVA (`OLLAMA_BASE_URL`). Если ни один не настроен
+или все методы недоступны — вернётся `success: false` с предупреждением (сервер
+не падает). Координаты — в метрах.
 
 ### Ответ `200 OK`
 

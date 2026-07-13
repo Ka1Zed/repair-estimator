@@ -11,7 +11,7 @@ interface Point {
   ny?: number;
 }
 
-interface Opening {
+export interface Opening {
   type: "door" | "window";
   width: number;
   height: number;
@@ -50,6 +50,7 @@ export default function BlueprintUpload() {
 
   const setPoints = useProjectStore((s) => s.setPoints);
   const setHeight = useProjectStore((s) => s.setHeight);
+  const setOpenings = useProjectStore((s) => s.setOpenings);
 
   const handleFile = async (file: File) => {
     setError(null);
@@ -75,9 +76,10 @@ export default function BlueprintUpload() {
     }
   };
 
-  const handleApply = (points: Point[], height: number | null) => {
+  const handleApply = (points: Point[], height: number | null, openings: Opening[]) => {
     setPoints(points);
     if (height !== null) setHeight(String(height));
+    if (openings.length > 0) setOpenings(openings);
     setReviewing(false);
   };
 

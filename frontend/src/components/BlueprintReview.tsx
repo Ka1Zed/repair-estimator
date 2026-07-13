@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { BlueprintResult, Opening } from "./BlueprintUpload";
 import styles from "./BlueprintReview.module.css";
 
@@ -15,9 +15,13 @@ interface Props {
 }
 
 const SVG_W = 400;
-const SVG_H = 300;
+// Высота SVG-полотна по умолчанию (пока не известны реальные пропорции фото).
+// Как только картинка грузится, подгоняем под её реальный aspect ratio (см. useEffect
+// ниже) — иначе при preserveAspectRatio="xMidYMid meet" появляется леттербокс, и
+// nx*SVG_W / ny*SVG_H масштабируют оси по-разному (см. #297: демо 4×3м выходило как 4.07×2.95).
+const DEFAULT_SVG_H = 300;
 
-function initState(result: BlueprintResult): { points: NormPoint[]; mPerPx: number | null } {
+function computeGeometry(result: BlueprintResult, svgH: number): { points: NormPoint[]; mPerPx: number | null } {
   const raw = result.points;
   if (raw.length === 0) return { points: [], mPerPx: null };
 
@@ -33,7 +37,7 @@ function initState(result: BlueprintResult): { points: NormPoint[]; mPerPx: numb
       const mdy = raw[j].y - raw[i].y;
       const mLen = Math.sqrt(mdx * mdx + mdy * mdy);
       const pdx = (pts[j].nx - pts[i].nx) * SVG_W;
-      const pdy = (pts[j].ny - pts[i].ny) * SVG_H;
+      const pdy = (pts[j].ny - pts[i].ny) * svgH;
       const pLen = Math.sqrt(pdx * pdx + pdy * pdy);
       if (pLen > 0 && mLen > 0) { sum += mLen / pLen; count++; }
     }
@@ -57,10 +61,29 @@ function initState(result: BlueprintResult): { points: NormPoint[]; mPerPx: numb
 }
 
 export default function BlueprintReview({ imageUrl, result, onApply, onCancel }: Props) {
-  const { points: initPts, mPerPx: initScale } = initState(result);
-  const [points, setPoints] = useState<NormPoint[]>(initPts);
-  const [mPerPx, setMPerPx] = useState<number | null>(initScale);
+  const [svgH, setSvgH] = useState(DEFAULT_SVG_H);
+  const [points, setPoints] = useState<NormPoint[]>(() => computeGeometry(result, DEFAULT_SVG_H).points);
+  const [mPerPx, setMPerPx] = useState<number | null>(() => computeGeometry(result, DEFAULT_SVG_H).mPerPx);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const userCalibrated = useRef(false);
+
+  // Реальные пропорции фото узнаём только после загрузки — по умолчанию считаем 4:3,
+  // как и раньше. Если пропорции другие, подгоняем высоту полотна и пересчитываем
+  // масштаб (если пользователь ещё не откалибровал вручную — его выбор не трогаем).
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setSvgH(Math.round(SVG_W * (img.naturalHeight / img.naturalWidth)));
+      }
+    };
+    img.src = imageUrl;
+  }, [imageUrl]);
+
+  useEffect(() => {
+    if (userCalibrated.current || svgH === DEFAULT_SVG_H) return;
+    setMPerPx(computeGeometry(result, svgH).mPerPx);
+  }, [svgH, result]);
 
   // Редактирование длины ребра
   const [editingEdge, setEditingEdge] = useState<number | null>(null);
@@ -74,7 +97,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
   const svgRef = useRef<SVGSVGElement>(null);
 
   const sx = (nx: number) => nx * SVG_W;
-  const sy = (ny: number) => ny * SVG_H;
+  const sy = (ny: number) => ny * svgH;
   const polygonStr = points.map((p) => `${sx(p.nx)},${sy(p.ny)}`).join(" ");
 
   const toNorm = (e: React.PointerEvent): NormPoint | null => {
@@ -88,14 +111,14 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
     const local = pt.matrixTransform(ctm.inverse());
     return {
       nx: Math.max(0, Math.min(1, local.x / SVG_W)),
-      ny: Math.max(0, Math.min(1, local.y / SVG_H)),
+      ny: Math.max(0, Math.min(1, local.y / svgH)),
     };
   };
 
   const snapToVertex = (norm: NormPoint): NormPoint => {
     for (const p of points) {
       const dx = (norm.nx - p.nx) * SVG_W;
-      const dy = (norm.ny - p.ny) * SVG_H;
+      const dy = (norm.ny - p.ny) * svgH;
       if (Math.sqrt(dx * dx + dy * dy) <= 12) return { nx: p.nx, ny: p.ny };
     }
     return norm;
@@ -105,7 +128,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
   const edgeLenM = (a: NormPoint, b: NormPoint): number | null => {
     if (mPerPx === null) return null;
     const dx = (b.nx - a.nx) * SVG_W;
-    const dy = (b.ny - a.ny) * SVG_H;
+    const dy = (b.ny - a.ny) * svgH;
     return Math.sqrt(dx * dx + dy * dy) * mPerPx;
   };
 
@@ -143,9 +166,10 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
     if (isNaN(dist) || dist <= 0 || calibPts.length < 2) return;
     const [a, b] = calibPts;
     const dx = (b.nx - a.nx) * SVG_W;
-    const dy = (b.ny - a.ny) * SVG_H;
+    const dy = (b.ny - a.ny) * svgH;
     const pxDist = Math.sqrt(dx * dx + dy * dy);
     if (pxDist === 0) return;
+    userCalibrated.current = true;
     setMPerPx(dist / pxDist);
     setCalibMode(false);
     setCalibPts([]);
@@ -161,7 +185,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
     const j = (i + 1) % points.length;
     const a = points[i], b = points[j];
     const dx = (b.nx - a.nx) * SVG_W;
-    const dy = (b.ny - a.ny) * SVG_H;
+    const dy = (b.ny - a.ny) * svgH;
     const curPx = Math.sqrt(dx * dx + dy * dy);
     if (curPx === 0) return;
     const scale = (newLen / mPerPx) / curPx;
@@ -184,7 +208,7 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
     onApply(
       points.map((p) => ({
         x: Math.round(((p.nx - origin.nx) * SVG_W) * mPerPx * 100) / 100,
-        y: Math.round(((p.ny - origin.ny) * SVG_H) * mPerPx * 100) / 100,
+        y: Math.round(((p.ny - origin.ny) * svgH) * mPerPx * 100) / 100,
       })),
       result.height,
       result.openings
@@ -212,14 +236,14 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
       <div className={`${styles.canvasFrame} ${calibMode ? styles.canvasFrameCalib : ""}`}>
         <svg
           ref={svgRef}
-          viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+          viewBox={`0 0 ${SVG_W} ${svgH}`}
           className={styles.svgRoot}
           onPointerDown={handleSvgPointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
         >
-          <image href={imageUrl} x={0} y={0} width={SVG_W} height={SVG_H}
+          <image href={imageUrl} x={0} y={0} width={SVG_W} height={svgH}
             preserveAspectRatio="xMidYMid meet" />
 
           <polygon points={polygonStr} fill="rgba(176,123,94,0.15)"

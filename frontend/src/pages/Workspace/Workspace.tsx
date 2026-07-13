@@ -86,9 +86,15 @@ interface WorkspaceProps {
   onNavigate: Navigate;
   projectId?: number;
   shareToken?: string;
+  projectName?: string;
 }
 
-export function Workspace({ onNavigate, projectId, shareToken: initialShareToken }: WorkspaceProps) {
+export function Workspace({
+  onNavigate,
+  projectId,
+  shareToken: initialShareToken,
+  projectName: initialProjectName,
+}: WorkspaceProps) {
   const rooms = useProjectStore((s) => s.rooms);
   const city = useProjectStore((s) => s.city);
   const setCity = useProjectStore((s) => s.setCity);
@@ -107,7 +113,7 @@ export function Workspace({ onNavigate, projectId, shareToken: initialShareToken
   // project save / share state
   const [savedProjectId, setSavedProjectId] = useState<number | null>(projectId ?? null);
   const [shareToken, setShareToken] = useState<string | null>(initialShareToken ?? null);
-  const [projectName, setProjectName] = useState("");
+  const [projectName, setProjectName] = useState(initialProjectName ?? "");
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);

@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import os
 import io
@@ -144,7 +145,7 @@ class BlueprintService:
         sha = hashlib.sha256(file_bytes).hexdigest()
         if sha == DEMO_IMAGE_SHA256:
             logger.debug("fixture match: returning demo result")
-            return dict(DEMO_FIXTURE_RESULT)
+            return copy.deepcopy(DEMO_FIXTURE_RESULT)
 
         if os.getenv("BLUEPRINT_MOCK", "").lower() == "true":
             logger.debug("MOCK mode")

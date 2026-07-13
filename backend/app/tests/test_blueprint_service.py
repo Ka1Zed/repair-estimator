@@ -237,3 +237,17 @@ def test_demo_fixture_result_matches_constant():
     assert any(o["type"] == "door" for o in r["openings"])
     assert any(o["type"] == "window" for o in r["openings"])
     assert r["raw_dimensions"] == ["4000", "3000", "2700"]
+
+
+def test_demo_fixture_result_is_deep_copied():
+    """process_blueprint возвращает глубокую копию: мутация результата не меняет константу."""
+    svc = BlueprintService()
+    demo_bytes = BlueprintService.demo_image_bytes()
+    r1 = svc.process_blueprint(demo_bytes, "demo_room.png")
+    r2 = svc.process_blueprint(demo_bytes, "demo_room.png")
+
+    assert r1["points"] is not DEMO_FIXTURE_RESULT["points"]
+    assert r1["points"] is not r2["points"]
+
+    r1["points"][0]["x"] = 999.0
+    assert DEMO_FIXTURE_RESULT["points"][0]["x"] == 0.0

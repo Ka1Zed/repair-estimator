@@ -255,7 +255,11 @@
       "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot",
       "updated_at": "2026-06-10",
       "region": "Москва",
-      "sources": ["Мегастрой", "Леман"]
+      "sources": ["Мегастрой", "Леман"],
+      "min_source": null,
+      "min_source_url": null,
+      "max_source": "Леман",
+      "max_source_url": "https://lemanapro.ru/catalog/kraski-dlya-vnutrennih-rabot"
     }
   ],
   "labor": [
@@ -275,7 +279,11 @@
       "source": "garantstroikompleks.ru",
       "source_url": "https://garantstroikompleks.ru/prajs-list",
       "region": "Москва",
-      "sources": ["garantstroikompleks.ru", "remont-uroven.ru"]
+      "sources": ["garantstroikompleks.ru", "remont-uroven.ru"],
+      "min_source": null,
+      "min_source_url": null,
+      "max_source": "remont-uroven.ru",
+      "max_source_url": "https://remont-uroven.ru/price.html"
     }
   ],
   "hidden_works": {
@@ -366,6 +374,13 @@
   итоговой), а `sources` — полный список. Для seed-цены — `null`. В `labor[]` — сайты
   региональных прайсов (#166); в `materials[]` (#333) — источники материалов (Мегастрой,
   Леман, ...): когда цену дал только один источник, `sources` — список из одного элемента.
+- `min_source`/`min_source_url` и `max_source`/`max_source_url` (в `labor[]` и `materials[]`,
+  #348) — источник, чья цена реально стала границей вилки `price_min`/`price_max` при
+  объединении нескольких источников, если он ОТЛИЧАЕТСЯ от представителя (`source`/
+  `source_url`). Позволяют фронту сослаться на карточку/страницу конкретного
+  эконом-/премиум-источника, а не только на средний. `null`, когда источник один
+  (`sources` из одного элемента) или строка-граница совпадает с представителем —
+  дублировать `source_url` незачем.
 - `hidden_works` (#239) — блок «может всплыть доплатой»: типовые скрытые работы сценария
   (непредвиденный демонтаж, замена стяжки, штробы в бетоне, доп. выравнивание, гидроизоляция),
   которые заранее не оценить. Отдаётся **всегда**; `items` пуст, если для сценария нет типовых

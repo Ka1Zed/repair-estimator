@@ -7,6 +7,9 @@ export interface LedgerRowVariant {
   name: string;
   price: string;
   url?: string | null;
+  // Приписка под названием варианта (напр. «среднее по источникам» для «Стандарт»,
+  // когда цена — блендинг нескольких источников и не живёт на одной карточке).
+  note?: string | null;
   // Закрепить этот вариант для строки поверх глобального уровня цены;
   // повторный клик по уже закреплённому варианту снимает закрепление.
   onClick?: () => void;
@@ -112,6 +115,7 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
                           ) : (
                             v.name
                           )}
+                          {v.note && <span className={styles.variantNote}> · {v.note}</span>}
                         </div>
                       </div>
                     );

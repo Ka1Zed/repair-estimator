@@ -32,6 +32,14 @@ export interface MaterialItem {
   // одного источника; null — seed-цена. source/source_url указывают на представителя.
   sources?: string[] | null;
 
+  // Источник, чья цена реально стала границей вилки price_min/price_max при
+  // объединении нескольких источников (#348) — null, если источник один или
+  // граница совпадает с представителем (source/source_url).
+  min_source?: string | null;
+  min_source_url?: string | null;
+  max_source?: string | null;
+  max_source_url?: string | null;
+
   // Материал по каждому tier (#291): для 6 finish_key-позиций (ламинат, покраска
   // стен/потолка, плитка, обои, розетка) это разные товары (name/source_url),
   // для остальных — тот же товар с ценой своего tier. Заполняется на фронте
@@ -63,9 +71,14 @@ export interface LaborItem {
   total_max?: number;
 
   // Все компании/прайс-листы, чьи цены объединены в вилку строки (#166/#333).
-  // Бэкенд не сообщает, ЧЬЯ именно цена дала price_min/price_max — только
-  // список участников и один "представительный" source/source_url.
   sources?: string[] | null;
+
+  // Компания, чья цена реально стала границей вилки price_min/price_max (#348) —
+  // null, если источник один или граница совпадает с представителем (source/source_url).
+  min_source?: string | null;
+  min_source_url?: string | null;
+  max_source?: string | null;
+  max_source_url?: string | null;
 }
 
 export interface HiddenWorkItem {

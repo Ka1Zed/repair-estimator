@@ -122,6 +122,13 @@ class MaterialItem(BaseModel):
     # Для одного источника — один элемент; для seed-цены — null. source/source_url —
     # представительный источник (его средняя ближе к итоговой).
     sources: Optional[List[str]] = None
+    # Источник границы вилки (#348), если он отличается от представителя (source/source_url):
+    # чья строка реально дала price_min/price_max при объединении нескольких источников.
+    # null, если источник один или граница совпадает с представителем (не дублируем ссылку).
+    min_source: Optional[str] = None
+    min_source_url: Optional[str] = None
+    max_source: Optional[str] = None
+    max_source_url: Optional[str] = None
 
 class LaborItem(BaseModel):
     service: str
@@ -154,6 +161,13 @@ class LaborItem(BaseModel):
     # один элемент; для seed-цены — null. В строке сметы source — представительный
     # сайт (его средняя ближе к итоговой), а sources — полный список через запятую.
     sources: Optional[List[str]] = None
+    # Источник границы вилки (#348), если он отличается от представителя (source/source_url):
+    # чей сайт реально дал price_min/price_max при объединении нескольких сайтов.
+    # null, если источник один или граница совпадает с представителем.
+    min_source: Optional[str] = None
+    min_source_url: Optional[str] = None
+    max_source: Optional[str] = None
+    max_source_url: Optional[str] = None
 
 class HiddenWorkItem(BaseModel):
     """Строка блока «может всплыть доплатой» (#239).

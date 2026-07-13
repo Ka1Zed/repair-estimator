@@ -149,5 +149,5 @@
 
 .demoHint {
   font-size: 11px;
-  color: #9a9a9a;
+  color: var(--text);
 }

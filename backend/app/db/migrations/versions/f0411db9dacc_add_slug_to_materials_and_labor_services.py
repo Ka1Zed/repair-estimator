@@ -22,6 +22,10 @@ depends_on: Union[str, Sequence[str], None] = None
 # name/slug — 1:1, значения совпадают с seed_data/*.json и константами в
 # material_calc_service.py / labor_calc_service.py / hidden_works_service.py.
 MATERIAL_SLUGS = {
+    # Легаси-строка с прод-БД: до разделения на стартовую/финишную (id=3
+    # на проде) шпаклёвка была одной позицией — в текущем materials.json
+    # её уже нет, но без записи в словаре бэкфилл валится на NOT NULL.
+    "Шпаклевка": "putty_legacy",
     "Краска для стен": "paint_walls",
     "Краска для стен эконом": "paint_walls_economy",
     "Краска для стен премиум": "paint_walls_premium",

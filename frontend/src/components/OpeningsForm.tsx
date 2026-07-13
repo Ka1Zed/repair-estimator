@@ -22,7 +22,7 @@ export default function OpeningsForm() {
 
   return (
     <div className={styles.section}>
-      <h3 className={styles.title}>Проемы (Окна и Двери)</h3>
+      <h3 className={styles.title}>Проёмы (Окна и Двери)</h3>
 
       {openings.length > 0 && (
         <table className={styles.table}>
@@ -98,7 +98,7 @@ export default function OpeningsForm() {
       )}
 
       <button className={styles.addBtn} onClick={addOpening}>
-        + Добавить проем
+        + Добавить проём
       </button>
     </div>
   );

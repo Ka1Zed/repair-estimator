@@ -205,3 +205,16 @@ def test_moscow_estimate_consistent_source_across_finish_key_materials(regional_
     assert {m["name"] for m in finish_items} == finish_names
     assert all(m["sources"] == ["Леман"] for m in finish_items)
     assert all(m["region"] == "Москва" for m in finish_items)
+
+
+def test_kazan_estimate_consistent_source_across_finish_key_materials(regional_material_parsers):
+    """Симметрия #347 для города без выделенного источника: те же finish_key-позиции
+    в Казани консистентно берут оба безрегиональных источника (Мегастрой + базовый
+    Леман), региональный Леман-Москва не подмешивается ни к одной, region == null."""
+    body = client.post("/api/estimates/calculate", json=_payload("Казань")).json()
+    finish_names = {"Ламинат", "Краска для стен", "Краска потолочная"}
+    finish_items = [m for m in body["materials"] if m["name"] in finish_names]
+
+    assert {m["name"] for m in finish_items} == finish_names
+    assert all(set(m["sources"]) == {"Мегастрой", "Леман"} for m in finish_items)
+    assert all(m["region"] is None for m in finish_items)

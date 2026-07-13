@@ -1,0 +1,100 @@
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 24px 80px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #b0b0b0;
+  margin-bottom: 14px;
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: 30px;
+  line-height: 1.15;
+  color: var(--text-h);
+  margin: 0 0 8px;
+}
+
+.meta {
+  font-size: 13px;
+  color: #9a9a9a;
+  margin-bottom: 32px;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 8px;
+  margin-bottom: 28px;
+}
+
+.roomsLabel {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b0b0b0;
+  margin-bottom: 12px;
+}
+
+.rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 40px;
+}
+
+.room {
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-h);
+}
+
+.roomMeta {
+  font-size: 12px;
+  color: #9a9a9a;
+  margin-top: 4px;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btnOpen {
+  padding: 11px 24px;
+  background: var(--text-h);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.btnOpen:hover {
+  opacity: 0.85;
+}
+
+.error {
+  color: #b04a4a;
+  font-size: 14px;
+}
+
+.loading {
+  color: #9a9a9a;
+  font-size: 14px;
+  padding: 32px 0;
+}

@@ -1,0 +1,131 @@
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 24px 80px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #b0b0b0;
+  margin-bottom: 14px;
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: 30px;
+  line-height: 1.15;
+  color: var(--text-h);
+  margin: 0 0 32px;
+}
+
+.backBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: #9a9a9a;
+  padding: 0;
+  margin-bottom: 24px;
+  letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.backBtn:hover {
+  color: var(--text-h);
+}
+
+.empty {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 64px 32px;
+  text-align: center;
+  color: #b0b0b0;
+  font-size: 14px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.cardInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.cardName {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-h);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardMeta {
+  font-size: 12px;
+  color: #9a9a9a;
+  margin-top: 4px;
+}
+
+.cardActions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btnOpen {
+  padding: 7px 16px;
+  background: var(--text-h);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.btnOpen:hover {
+  opacity: 0.85;
+}
+
+.btnDelete {
+  padding: 7px 14px;
+  background: #fff;
+  color: #B5524A;
+  border: 1px solid #E3C9C4;
+  border-radius: 3px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btnDelete:hover {
+  background: #fdf2f1;
+}
+
+.error {
+  color: #b04a4a;
+  font-size: 14px;
+  margin-top: 16px;
+}
+
+.loading {
+  color: #9a9a9a;
+  font-size: 14px;
+  padding: 32px 0;
+}

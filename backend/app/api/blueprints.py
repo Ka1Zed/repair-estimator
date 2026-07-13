@@ -24,8 +24,8 @@ async def upload_blueprint(file: UploadFile = File(...)):
     **Поддерживаемые форматы:** PNG, JPG, JPEG, PDF (до 10 MB)
 
     **Метод распознавания** выбирается автоматически по приоритету:
-    1. Google Gemini Vision API (бесплатно, если есть GEMINI_API_KEY)
-    2. Claude Vision API (платно, если есть ANTHROPIC_API_KEY)
+    1. Claude Vision API (основной путь, если есть ANTHROPIC_API_KEY)
+    2. Google Gemini Vision API (fallback, если есть GEMINI_API_KEY и сервис доступен)
     3. Ollama + LLaVA (локально, если запущен)
 
     Если ни один метод не настроен, ответ вернётся с `success: false` и

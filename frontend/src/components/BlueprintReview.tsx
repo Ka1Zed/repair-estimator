@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import type { BlueprintResult } from "./BlueprintUpload";
+import type { BlueprintResult, Opening } from "./BlueprintUpload";
 import styles from "./BlueprintReview.module.css";
 
 interface NormPoint {
@@ -10,7 +10,7 @@ interface NormPoint {
 interface Props {
   imageUrl: string;
   result: BlueprintResult;
-  onApply: (points: { x: number; y: number }[], height: number | null) => void;
+  onApply: (points: { x: number; y: number }[], height: number | null, openings: Opening[]) => void;
   onCancel: () => void;
 }
 
@@ -186,7 +186,8 @@ export default function BlueprintReview({ imageUrl, result, onApply, onCancel }:
         x: Math.round(((p.nx - origin.nx) * SVG_W) * mPerPx * 100) / 100,
         y: Math.round(((p.ny - origin.ny) * SVG_H) * mPerPx * 100) / 100,
       })),
-      result.height
+      result.height,
+      result.openings
     );
   };
 

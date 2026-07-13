@@ -119,6 +119,7 @@ interface ProjectState {
   setHeight: (height: number | string) => void;
   updatePoint: (index: number, x: number | string, y: number | string) => void;
   setPoints: (points: Point[]) => void;
+  setOpenings: (openings: Omit<Opening, "id">[]) => void;
   addOpening: () => void;
   updateOpening: (
     openingIndex: number,
@@ -252,6 +253,16 @@ export const useProjectStore = create<ProjectState>()(
           newRooms[state.activeRoomIndex] = {
             ...newRooms[state.activeRoomIndex],
             points,
+          };
+          return { rooms: newRooms };
+        }),
+
+      setOpenings: (openings) =>
+        set((state) => {
+          const newRooms = [...state.rooms];
+          newRooms[state.activeRoomIndex] = {
+            ...newRooms[state.activeRoomIndex],
+            openings: openings.map((o) => ({ ...o, id: uid() })),
           };
           return { rooms: newRooms };
         }),

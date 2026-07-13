@@ -186,3 +186,34 @@ def test_process_blueprint_falls_back_when_claude_call_fails(monkeypatch):
 
     assert r["method"] == "ollama"
     assert r["success"] is True
+
+
+def test_process_blueprint_degrades_gracefully_when_no_method_available(monkeypatch):
+    """Ни ключей, ни локальной Ollama — process_blueprint не должен бросать
+    исключение, а вернуть success:false с понятным предупреждением, чтобы ручной
+    ввод в редакторе оставался рабочим (issue #279: деградация, а не падение)."""
+    svc = _svc()
+    svc.anthropic_key = None
+    svc.gemini_key = None
+
+    monkeypatch.setattr(svc, "_prepare_image", lambda file_bytes, filename: Image.new("RGB", (800, 600)))
+    monkeypatch.setattr(svc, "_is_ollama_available", lambda: False)
+
+    r = svc.process_blueprint(b"", "test.png")
+
+    assert r["success"] is False
+    assert r["method"] == "none"
+    assert r["points"] == []
+    assert r["warnings"]
+
+
+def test_normalize_extract_openings_match_frontend_store_shape():
+    """openings из нормализации должны содержать ровно type/width/height —
+    это то, что фронт кладёт в projectStore.setOpenings (id генерируется на фронте)."""
+    data = {
+        "corners_px": RECT,
+        "openings": [{"type": "door", "width_m": 0.9, "height_m": 2.0}],
+    }
+    r = _svc()._normalize_extract(data, (800, 600))
+    assert r["openings"] == [{"type": "door", "width": 0.9, "height": 2.0}]
+    assert set(r["openings"][0].keys()) == {"type", "width", "height"}

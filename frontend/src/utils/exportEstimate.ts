@@ -161,8 +161,13 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
     activeName = m.avg_item.name;
     activePrice = m.avg_item.price;
     activeTotal = m.avg_item.total;
-    activeSource = m.avg_item.source || m.source;
-    activeUrl = m.avg_item.source_url || m.source_url;
+    // Тот же товар на всех tier + несколько источников → «Стандарт» это среднее по
+    // их средним, число не живёт на одной карточке: не ставим ссылку, подписываем
+    // «среднее по источникам» (зеркалит UI). finish_key (namesDiffer) — реальный
+    // товар avg-tier, ссылку сохраняем.
+    const blend = !namesDiffer && !!(m.sources && m.sources.length > 1);
+    activeSource = blend ? 'среднее по источникам' : (m.avg_item.source || m.source);
+    activeUrl = blend ? null : (m.avg_item.source_url || m.source_url);
   } else if (priceMode === 'max' && m.max_item) {
     activeName = m.max_item.name;
     activePrice = m.max_item.price;
@@ -178,7 +183,9 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
 // у работ tier не меняет исполнителя, только точку коридора price_min/avg/max одной
 // и той же строки; при отсутствии коридора масштабируем avg множителем раздела.
 // Источник/ссылка для min/max берутся из l.min_source(_url)/l.max_source(_url) (#348),
-// если граница вилки не совпадает с представителем — иначе как и раньше, представитель.
+// если граница вилки не совпадает с представителем — иначе представитель. Для avg при
+// нескольких источниках число — среднее по их средним (ничьё): подписываем «среднее по
+// источникам» без ссылки (зеркалит UI).
 const getActiveLaborData = (l: LaborItem, priceMode: PriceMode, scale: number) => {
   const hasCorridor = l.price_min != null && l.price_max != null;
   const activePrice = !hasCorridor
@@ -196,6 +203,9 @@ const getActiveLaborData = (l: LaborItem, priceMode: PriceMode, scale: number) =
   } else if (priceMode === 'max') {
     activeSource = l.max_source || l.source;
     activeUrl = l.max_source_url || l.source_url;
+  } else if (l.sources && l.sources.length > 1) {
+    activeSource = 'среднее по источникам';
+    activeUrl = null;
   }
 
   return { activePrice, activeTotal, activeSource, activeUrl };

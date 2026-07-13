@@ -187,3 +187,21 @@ def test_kazan_estimate_combines_default_sources(regional_material_parsers):
 
     assert set(paint["sources"]) == {"Мегастрой", "Леман"}
     assert paint["region"] is None
+
+
+def test_moscow_estimate_consistent_source_across_finish_key_materials(regional_material_parsers):
+    """Регресс issue #347: несколько finish_key-позиций одного расчёта (ламинат,
+    покраска стен, покраска потолка — все резолвятся через _resolve_material/tier,
+    #331) должны получать источник консистентно — все региональный Леман-Москва,
+    без разнобоя с Мегастроем на однотипных позициях одного и того же города.
+
+    Живой прогон, зафиксировавший issue, оказался против несобранного после #345
+    Docker-образа backend (см. обсуждение issue) — здесь тот же сценарий закреплён
+    тестом на актуальном коде, чтобы регрессия не могла пройти незамеченной."""
+    body = client.post("/api/estimates/calculate", json=_payload("Москва")).json()
+    finish_names = {"Ламинат", "Краска для стен", "Краска потолочная"}
+    finish_items = [m for m in body["materials"] if m["name"] in finish_names]
+
+    assert {m["name"] for m in finish_items} == finish_names
+    assert all(m["sources"] == ["Леман"] for m in finish_items)
+    assert all(m["region"] == "Москва" for m in finish_items)

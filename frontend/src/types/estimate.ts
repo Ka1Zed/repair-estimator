@@ -40,10 +40,10 @@ export interface MaterialItem {
   max_source?: string | null;
   max_source_url?: string | null;
 
-  // Материал по каждому tier (#291): для 6 finish_key-позиций (ламинат, покраска
-  // стен/потолка, плитка, обои, розетка) это разные товары (name/source_url),
-  // для остальных — тот же товар с ценой своего tier. Заполняется на фронте
-  // из трёх параллельных запросов /calculate с tier=min/avg/max (Workspace.tsx).
+  // Материал по каждому tier — бэкенд отдаёт готовыми в /calculate (#349), присылает
+  // все три всегда. Для 6 finish_key-позиций (ламинат, покраска стен/потолка, плитка,
+  // обои, розетка, #331) это разные товары (name/source_url), для остальных — тот же
+  // товар с ценой своего tier.
   min_item?: PriceVariant | null;
   avg_item?: PriceVariant | null;
   max_item?: PriceVariant | null;

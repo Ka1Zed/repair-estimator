@@ -259,7 +259,28 @@
       "min_source": null,
       "min_source_url": null,
       "max_source": "Леман",
-      "max_source_url": "https://lemanapro.ru/catalog/kraski-dlya-vnutrennih-rabot"
+      "max_source_url": "https://lemanapro.ru/catalog/kraski-dlya-vnutrennih-rabot",
+      "min_item": {
+        "name": "Краска для стен",
+        "price": 2975,
+        "total": 53550,
+        "source": "Мегастрой",
+        "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"
+      },
+      "avg_item": {
+        "name": "Краска для стен",
+        "price": 3500,
+        "total": 63000,
+        "source": "Мегастрой",
+        "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"
+      },
+      "max_item": {
+        "name": "Краска для стен",
+        "price": 4200,
+        "total": 75600,
+        "source": "Мегастрой",
+        "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"
+      }
     }
   ],
   "labor": [
@@ -381,6 +402,17 @@
   эконом-/премиум-источника, а не только на средний. `null`, когда источник один
   (`sources` из одного элемента) или строка-граница совпадает с представителем —
   дублировать `source_url` незачем.
+- `min_item`/`avg_item`/`max_item` (в `materials[]`, #349) — по одному объекту
+  (`name`, `price`, `total`, `source`, `source_url`) на каждый уровень комплектации,
+  чтобы фронт мог показать ведомость с именами и ссылками min/avg/max-товаров ОДНИМ
+  запросом `/calculate`, без 3× `tier=min/avg/max`. Для 6 finish_key-позиций (пол-ламинат,
+  покраска стен/потолка, плитка, обои, розетка — #331) это **разные товары** — так же,
+  как смена `tier` в запросе меняет `name`/`source_url` строки (см. ниже); для остальных
+  материалов (без `finish_key`) все три объекта совпадают по `name`/`source_url` и
+  отличаются только `price`/`total` — точкой вилки `price_min`/`price_avg`/`price_max`.
+  `quantity` для расчёта `total` внутри `*_item` берётся общей со строкой (тем же
+  количеством, что и `total_min`/`total_avg`/`total_max` строки) — не пересчитывается
+  по норме расхода конкретного SKU-варианта.
 - `hidden_works` (#239) — блок «может всплыть доплатой»: типовые скрытые работы сценария
   (непредвиденный демонтаж, замена стяжки, штробы в бетоне, доп. выравнивание, гидроизоляция),
   которые заранее не оценить. Отдаётся **всегда**; `items` пуст, если для сценария нет типовых

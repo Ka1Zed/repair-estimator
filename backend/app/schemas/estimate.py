@@ -84,6 +84,21 @@ class GeometrySummary(BaseModel):
     wall_area: float
     perimeter: float
 
+class MaterialTierItem(BaseModel):
+    """Товар конкретного уровня комплектации внутри MaterialItem.*_item (#349).
+
+    Для finish_key-позиций (ламинат, покраска стен/потолка, плитка, обои, розетка —
+    #331) min/avg/max — РАЗНЫЕ SKU (свои name/source_url) — эконом/стандарт/премиум.
+    Для остальных материалов (один товар на все tier) — совпадают между собой и со
+    значениями строки. quantity общая с родительской строкой (не пересчитывается по
+    норме расхода конкретного SKU) — только price/total и атрибуция источника меняются.
+    """
+    name: str
+    price: float
+    total: float
+    source: str
+    source_url: Optional[str] = None
+
 class MaterialItem(BaseModel):
     name: str
     quantity: float
@@ -129,6 +144,12 @@ class MaterialItem(BaseModel):
     min_source_url: Optional[str] = None
     max_source: Optional[str] = None
     max_source_url: Optional[str] = None
+    # SKU-варианты по уровню комплектации (#349) — избавляют фронт от 3× запроса
+    # /calculate (tier=min/avg/max) ради имён/ссылок альтернативных товаров.
+    # Для finish_key-позиций разные (эконом/стандарт/премиум), иначе совпадают.
+    min_item: MaterialTierItem
+    avg_item: MaterialTierItem
+    max_item: MaterialTierItem
 
 class LaborItem(BaseModel):
     service: str

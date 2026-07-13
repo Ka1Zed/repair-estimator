@@ -1299,6 +1299,64 @@ def test_material_tier_selects_different_sku():
     assert row_min["packs"] != row_max["packs"]
 
 
+def test_material_min_avg_max_item_single_request():
+    """#349: один /calculate (tier=avg) отдаёт min_item/avg_item/max_item — фронту не
+    нужно 3× дёргать эндпоинт (tier=min/avg/max), чтобы собрать имена/ссылки альтернативных
+    товаров (см. test_material_tier_selects_different_sku — тот же сценарий тремя запросами)."""
+    payload = {
+        "city": "Казань",
+        "rooms": [
+            {
+                "name": "Спальня",
+                "height": 2.7,
+                "points": [
+                    {"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}
+                ],
+                "room_type": "living",
+                "openings": [{"type": "door", "width": 0.8, "height": 2.0}],
+                "works": {
+                    "floor": {"enabled": True, "finish": "laminate"},
+                    "walls": {"enabled": True, "finish": "paint"},
+                    "ceiling": {"enabled": False, "finish": None},
+                    "electric": {"enabled": False},
+                    "plumbing": {"enabled": False},
+                }
+            }
+        ],
+        "tier": "avg",
+    }
+    response = client.post("/api/estimates/calculate", json=payload)
+    assert response.status_code == 200
+    materials = response.json()["materials"]
+
+    # finish_key-позиция (#331): у ламината на каждый tier свой SKU — разные name/source_url.
+    laminate = next(m for m in materials if m["unit"] == "м²")
+    assert laminate["min_item"]["name"] == "Ламинат эконом"
+    assert laminate["avg_item"]["name"] == "Ламинат"
+    assert laminate["max_item"]["name"] == "Ламинат премиум"
+    names = {laminate["min_item"]["name"], laminate["avg_item"]["name"], laminate["max_item"]["name"]}
+    assert len(names) == 3
+
+    # Арифметика тех же band'ов, что и у отдельного запроса с этим tier: min_item.price
+    # у ламината эконом (350/450/600) на "min"-точке = 350, max_item.price у премиума
+    # (2200/3200/4500) на "max"-точке = 4500 — те же числа, что вернул бы отдельный
+    # /calculate с tier="min"/"max" (см. test_material_tier_selects_different_sku).
+    assert laminate["min_item"]["price"] == pytest.approx(350)
+    assert laminate["max_item"]["price"] == pytest.approx(4500)
+    assert laminate["avg_item"]["price"] == pytest.approx(laminate["price_avg"])
+    assert laminate["avg_item"]["total"] == pytest.approx(laminate["total_avg"])
+
+    # Позиция без finish_key (напр. грунтовка) — один товар на все tier: имя и ссылка
+    # совпадают у всех трёх *_item.
+    primer = next(m for m in materials if m["name"] == "Грунтовка")
+    assert primer["min_item"]["name"] == primer["avg_item"]["name"] == primer["max_item"]["name"] == "Грунтовка"
+    assert (
+        primer["min_item"]["source_url"]
+        == primer["avg_item"]["source_url"]
+        == primer["max_item"]["source_url"]
+    )
+
+
 def test_missing_price_handled_gracefully(monkeypatch):
     """Проверка, что при отсутствии цены у материала (get_material_price возвращает None)
     ответ остаётся 200, строка присутствует со source='нет цены' и все ценовые поля = 0.

@@ -10,11 +10,11 @@ from app.db.session import get_db
 from app.db.models import PriceSource
 from app.schemas.estimate import (
     EstimateRequest, EstimateResponse, Summary, GeometrySummary,
-    MaterialItem, LaborItem, HiddenWorks, HiddenWorkItem, RoomInput,
+    MaterialItem, MaterialTierItem, LaborItem, HiddenWorks, HiddenWorkItem, RoomInput,
 )
 from app.services.geometry_service import calculate_room_geometry
 from app.services.material_calc_service import (
-    calculate_materials, calculate_engineering_materials, packs_to_buy,
+    calculate_materials, calculate_engineering_materials, packs_to_buy, resolve_material,
 )
 from app.services.labor_calc_service import (
     calculate_labor, calculate_engineering_labor, calculate_rough_labor,
@@ -135,6 +135,41 @@ def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> D
         return v_max
     return v_avg
 
+
+def _tier_item(
+    material_key: str, tier: str, quantity: Decimal, db: Session,
+    parsers: list[BaseParser], region: str, sources_by_id: Dict[int, str],
+) -> MaterialTierItem:
+    """SKU-вариант позиции для одного уровня комплектации (#349, min_item/avg_item/max_item).
+
+    Резолвит SKU так же, как сама строка материала (resolve_material — с fallback
+    на ближайший уровень, если у finish_key нет варианта именно этого tier), затем
+    берёт цену тем же путём (get_material_price) и той же арифметикой band'ов
+    (pick_by_tier), что и основной расчёт строки — числа обязаны совпасть с тем,
+    что вернул бы отдельный /calculate с этим tier. quantity — общая с родительской
+    строкой (см. MaterialTierItem), доп. обращений к БД/парсеру сверх обычных для
+    resolve_material/get_material_price нет.
+    """
+    material = resolve_material(db, material_key, tier)
+    if material is None:
+        return MaterialTierItem(name="", price=0.0, total=0.0, source="нет цены", source_url=None)
+
+    price_obj = get_material_price(material.name, db=db, parsers=parsers, region=region)
+    if not price_obj:
+        return MaterialTierItem(
+            name=material.name, price=0.0, total=0.0, source="нет цены", source_url=None,
+        )
+
+    price = pick_by_tier(tier, price_obj.price_min, price_obj.price_avg, price_obj.price_max)
+    total = quantity * price * CONTINGENCY[tier]
+    return MaterialTierItem(
+        name=material.name,
+        price=float(price),
+        total=float(total),
+        source=sources_by_id.get(price_obj.source_id, "unknown"),
+        source_url=price_obj.source_url,
+    )
+
 # tier выбирает границу вилки (min/avg/max) уже ВЫБРАННОГО SKU-варианта.
 # Выбор самого варианта (эконом/стандарт/премиум — разные Material с одним
 # finish_key) происходит раньше, в calculate_materials/_resolve_material (#331) —
@@ -243,6 +278,7 @@ def calculate_estimate(
         if mid not in mat_groups:
             mat_groups[mid] = {
                 'name': mat['name'],
+                'material_key': mat['material_key'],
                 'unit': mat['unit'],
                 'package_size': Decimal(str(mat.get('package_size', 1))),
                 'quantity': Decimal(0),
@@ -284,6 +320,9 @@ def calculate_estimate(
 
         if not price_obj:
             logger.warning(f"Цена для материала '{name}' не найдена, показываем без цены")
+            no_price_item = MaterialTierItem(
+                name=name, price=0.0, total=0.0, source="нет цены", source_url=None,
+            )
             materials_response.append(MaterialItem(
                 name=name,
                 quantity=float(final_quantity),
@@ -305,6 +344,9 @@ def calculate_estimate(
                 source_url=None,
                 updated_at="",
                 region=None,
+                min_item=no_price_item,
+                avg_item=no_price_item,
+                max_item=no_price_item,
             ))
             continue
 
@@ -323,6 +365,22 @@ def calculate_estimate(
 
         price = pick_by_tier(request.tier, price_min, price_avg, price_max)
         total = pick_by_tier(request.tier, total_min, total_avg, total_max)
+
+        # min_item/avg_item/max_item (#349): для request.tier переиспользуем уже
+        # посчитанные выше price/total/source — без лишнего resolve_material/
+        # get_material_price; для двух остальных уровней резолвим SKU-вариант
+        # тем же путём, что и основной расчёт (_tier_item).
+        current_tier_item = MaterialTierItem(
+            name=name, price=float(price), total=float(total),
+            source=source_name, source_url=price_obj.source_url,
+        )
+        tier_items = {request.tier: current_tier_item}
+        for t in ("min", "avg", "max"):
+            if t not in tier_items:
+                tier_items[t] = _tier_item(
+                    group['material_key'], t, final_quantity, db, parsers,
+                    request.city, sources_by_id,
+                )
 
         materials_response.append(MaterialItem(
             name=name,
@@ -350,6 +408,9 @@ def calculate_estimate(
             min_source_url=getattr(price_obj, "min_source_url", None),
             max_source=max_source_name,
             max_source_url=getattr(price_obj, "max_source_url", None),
+            min_item=tier_items["min"],
+            avg_item=tier_items["avg"],
+            max_item=tier_items["max"],
         ))
 
         materials_sum['min'] += final_quantity * price_obj.price_min

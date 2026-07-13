@@ -9,7 +9,7 @@ import OpeningsForm from "../../components/OpeningsForm";
 import { RoomTypeSelector } from "../../components/RoomTypeSelector";
 import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
-import type { MaterialItem, PriceVariant, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
+import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
 import { EstimateLedger, type LedgerRow, type LedgerRowVariant } from "../../components/EstimateLedger/EstimateLedger";
 import { useProjectStore, type EstimateScope } from "../../store/projectStore";
@@ -200,6 +200,7 @@ export function Workspace() {
         const payload = {
           city,
           scope,
+          tier: "avg",
           rooms: rooms.map((room) => ({
             name: room.name,
             room_type: room.room_type,
@@ -213,55 +214,27 @@ export function Workspace() {
             works: room.works,
           })),
         };
-        // Запрашиваем все три tier параллельно (#331): для 6 finish_key-позиций
-        // (ламинат, покраска стен/потолка, плитка, обои, розетка) tier меняет
-        // конкретный товар (name/source_url), не только цену. Геометрия/работы
-        // берутся из avg-ответа; материалы и «Вилка стоимости» материалов — из
-        // реальных min/max-tier сумм (иначе сводка ±15-20% коридора расходится
-        // с построчными итогами, которые теперь берут настоящие эконом/премиум SKU).
-        const [minRes, avgRes, maxRes] = (await Promise.all([
-          calculateEstimate({ ...payload, tier: "min" }),
-          calculateEstimate({ ...payload, tier: "avg" }),
-          calculateEstimate({ ...payload, tier: "max" }),
-        ])) as [EstimateResponse, EstimateResponse, EstimateResponse];
+        // Один запрос вместо трёх параллельных (#349): бэкенд теперь сам отдаёт
+        // min_item/avg_item/max_item на каждой строке материала — для 6 finish_key-позиций
+        // (ламинат, покраска стен/потолка, плитка, обои, розетка, #331) это разные товары
+        // (name/source_url), для остальных — тот же товар со своей точкой коридора.
+        // «Вилка стоимости» материалов строится из этих же *_item.total (не из
+        // summary.materials_min/max бэкенда — та вилка про источники ВНУТРИ resolved-tier
+        // товара, а не про эконом/премиум SKU, см. docs/api.md).
+        const res = (await calculateEstimate(payload)) as EstimateResponse;
 
-        // ВАЖНО: price/total — цена именно ЭТОГО tier (backend/app/schemas/estimate.py).
-        // price_avg/total_avg — статичное среднее ВНУТРИ разрешённого товара, оно
-        // одинаковое во всех трёх ответах для не-finish_key материалов (тот же товар) —
-        // подставить его сюда значило бы показать одну и ту же цену на всех уровнях.
-        const toVariant = (m?: MaterialItem): PriceVariant | null =>
-          m
-            ? { name: m.name, price: m.price, total: m.total, source: m.source, source_url: m.source_url ?? null }
-            : null;
+        const materials = res.materials;
+        const materialsMin = materials.reduce((s, m) => s + (m.min_item?.total ?? 0), 0);
+        const materialsMax = materials.reduce((s, m) => s + (m.max_item?.total ?? 0), 0);
+        const summary = {
+          ...res.summary,
+          materials_min: materialsMin,
+          materials_max: materialsMax,
+          total_min: materialsMin + res.summary.labor_min,
+          total_max: materialsMax + res.summary.labor_max,
+        };
 
-        const sameLength =
-          avgRes.materials.length === minRes.materials.length &&
-          avgRes.materials.length === maxRes.materials.length;
-
-        const materials = sameLength
-          ? avgRes.materials.map((m, i) => ({
-              ...m,
-              min_item: toVariant(minRes.materials[i]),
-              avg_item: toVariant(avgRes.materials[i]),
-              max_item: toVariant(maxRes.materials[i]),
-            }))
-          : avgRes.materials;
-
-        const summary = sameLength
-          ? (() => {
-              const materialsMin = minRes.materials.reduce((s, m) => s + (m.total ?? 0), 0);
-              const materialsMax = maxRes.materials.reduce((s, m) => s + (m.total ?? 0), 0);
-              return {
-                ...avgRes.summary,
-                materials_min: materialsMin,
-                materials_max: materialsMax,
-                total_min: materialsMin + avgRes.summary.labor_min,
-                total_max: materialsMax + avgRes.summary.labor_max,
-              };
-            })()
-          : avgRes.summary;
-
-        setData({ ...avgRes, summary, materials });
+        setData({ ...res, summary, materials });
         setPriceMode("avg");
         setMaterialOverrides({});
         setLaborOverrides({});

@@ -7,7 +7,7 @@
 #   - материал ищется по slug (машинный ключ, см. seed_data/materials.json и #278;
 #     name остаётся человекочитаемым label для API-ответов, по нему не матчим)
 #   - позиции с несколькими SKU по уровню комплектации (finish_key/variant_tier,
-#     #331) резолвятся через _resolve_material(db, key, tier) с fallback на
+#     #331) резолвятся через resolve_material(db, key, tier) с fallback на
 #     ближайший уровень; позиции без вариантов ищутся по slug, как раньше
 #   - формула зависит от unit (см. estimation-rules.md)
 #   - число слоёв (layers) и надбавка на раппорт обоев (pattern_factor) — колонки
@@ -77,7 +77,7 @@ _FALLBACK_ORDER = {
 }
 
 
-def _resolve_material(db: Session, key: str, tier: str) -> Material | None:
+def resolve_material(db: Session, key: str, tier: str) -> Material | None:
     """Материал по (finish_key, tier) с fallback на ближайший уровень, либо по slug.
 
     key — либо finish_key позиции с вариантами (FK_*, см. _FINISH_KEYS), либо
@@ -243,13 +243,20 @@ def quantity_of(
 
 
 def _material_row(
-    material: Material, quantity: Decimal, base_quantity: Decimal, waste_factor: Decimal
+    material: Material, quantity: Decimal, base_quantity: Decimal, waste_factor: Decimal,
+    material_key: str,
 ) -> Dict[str, Any]:
-    """Строка материала с готовым (уже посчитанным) количеством в базовых единицах."""
+    """Строка материала с готовым (уже посчитанным) количеством в базовых единицах.
+
+    material_key — ключ, которым материал резолвился (finish_key или slug, см.
+    resolve_material) — нужен на агрегации (estimates.py, #349), чтобы отдельно
+    резолвить SKU-варианты min/avg/max для min_item/avg_item/max_item.
+    """
     package_size = D(material.package_size)
     pack_quantity = (quantity / package_size) if package_size > 0 else None
     return {
         "material_id": material.id,
+        "material_key": material_key,
         "name": material.name,
         "quantity": quantity,
         "base_quantity": base_quantity,
@@ -281,7 +288,7 @@ def calculate_engineering_materials(
         stage="rough"), убирает приборы (розетка/светильник, stage="finish"): их монтаж
         (socket_mount/light_mount) в rough_only тоже не считается.
     tier: уровень комплектации (#331) — розетка (FK_SOCKET) выбирается вариантом по
-        tier с fallback (см. _resolve_material); светильник/кабель/труба вариантов
+        tier с fallback (см. resolve_material); светильник/кабель/труба вариантов
         не имеют, tier на них не влияет.
     """
     result: List[Dict[str, Any]] = []
@@ -298,7 +305,7 @@ def calculate_engineering_materials(
         qty = D(count)
         if qty <= 0:
             continue
-        material = _resolve_material(db, key, tier)
+        material = resolve_material(db, key, tier)
         if material is None:
             continue
         base_qty = qty
@@ -306,7 +313,7 @@ def calculate_engineering_materials(
         if with_waste:
             waste_factor = D(material.waste_factor) or Decimal(1)
             qty = qty * waste_factor
-        result.append(_material_row(material, qty, base_qty, waste_factor))
+        result.append(_material_row(material, qty, base_qty, waste_factor, key))
     return result
 
 
@@ -330,7 +337,7 @@ def calculate_materials(
         ближайший уровень, если у позиции нет варианта запрошенного tier.
 
     Возвращает позиции с ДРОБНЫМ pack_quantity (округление — в B1-5):
-        material_id, name, quantity (Decimal), base_quantity, waste_factor,
+        material_id, material_key, name, quantity (Decimal), base_quantity, waste_factor,
         unit, package_size, pack_quantity
     """
     result: List[Dict[str, Any]] = []
@@ -338,7 +345,7 @@ def calculate_materials(
     for material_key, area in _selections(repair_options, geometry):
         if not include_finish and material_stage_of(material_key) == "finish":
             continue
-        material = _resolve_material(db, material_key, tier)
+        material = resolve_material(db, material_key, tier)
         if material is None:
             # материала нет в БД (например, не засидован) — пропускаем
             continue
@@ -357,6 +364,7 @@ def calculate_materials(
 
         result.append({
             "material_id": material.id,        # ключ группировки в B1-5
+            "material_key": material_key,      # для min_item/avg_item/max_item (#349)
             "name": material.name,
             "quantity": quantity,              # дробное, Decimal
             "base_quantity": base_quantity,    # до запаса, дробное

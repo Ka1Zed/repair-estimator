@@ -100,11 +100,17 @@ class ApiClient {
     });
   }
 
+  // 204 No Content — через общий request<T> нельзя, он всегда парсит JSON-тело.
   async deleteProject(id: number): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/api/projects/${id}`, {
-      method: "DELETE",
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    try {
+      const response = await fetch(`${this.baseUrl}/api/projects/${id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error(`Ошибка HTTP: ${response.status} ${response.statusText}`);
+    } catch (error) {
+      console.error(`[API Error] Сбой при запросе к /api/projects/${id}:`, error);
+      throw error;
+    }
   }
 
   async getSharedProject(token: string): Promise<SharedProject> {

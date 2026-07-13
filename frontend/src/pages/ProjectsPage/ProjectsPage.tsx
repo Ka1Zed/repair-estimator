@@ -37,13 +37,14 @@ export function ProjectsPage({ onNavigate }: Props) {
     try {
       const project: Project = await apiClient.getProject(id);
       loadProject(project);
-      onNavigate({ type: "workspace", projectId: id });
+      onNavigate({ type: "workspace", projectId: id, shareToken: project.share_token });
     } catch {
       setError("Не удалось открыть проект.");
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: number, name: string) => {
+    if (!window.confirm(`Удалить проект «${name}»? Это действие необратимо.`)) return;
     setDeletingId(id);
     try {
       await apiClient.deleteProject(id);
@@ -90,7 +91,7 @@ export function ProjectsPage({ onNavigate }: Props) {
                 </button>
                 <button
                   className={styles.btnDelete}
-                  onClick={() => handleDelete(p.id)}
+                  onClick={() => handleDelete(p.id, p.name)}
                   disabled={deletingId === p.id}
                 >
                   Удалить

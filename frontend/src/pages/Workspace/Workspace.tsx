@@ -84,9 +84,10 @@ export type PriceMode = "min" | "avg" | "max";
 
 interface WorkspaceProps {
   onNavigate: Navigate;
+  projectId?: number;
 }
 
-export function Workspace({ onNavigate }: WorkspaceProps) {
+export function Workspace({ onNavigate, projectId }: WorkspaceProps) {
   const rooms = useProjectStore((s) => s.rooms);
   const city = useProjectStore((s) => s.city);
   const setCity = useProjectStore((s) => s.setCity);
@@ -103,7 +104,7 @@ export function Workspace({ onNavigate }: WorkspaceProps) {
   const [regions, setRegions] = useState<string[]>([]);
 
   // project save / share state
-  const [savedProjectId, setSavedProjectId] = useState<number | null>(null);
+  const [savedProjectId, setSavedProjectId] = useState<number | null>(projectId ?? null);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
   const [saveOpen, setSaveOpen] = useState(false);

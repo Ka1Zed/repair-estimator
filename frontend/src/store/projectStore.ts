@@ -130,6 +130,18 @@ interface ProjectState {
   clearActiveRoom: () => void;
   loadDemoRoom: () => void;
   resetProject: () => void;
+  loadProject: (project: {
+    city: string;
+    scope: EstimateScope;
+    rooms: Array<{
+      name: string;
+      room_type: string;
+      height: number;
+      points: { x: number; y: number }[];
+      openings: { type: "door" | "window"; width: number; height: number }[];
+      works: Record<string, unknown>;
+    }>;
+  }) => void;
 }
 
 const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
@@ -334,6 +346,22 @@ export const useProjectStore = create<ProjectState>()(
         }),
 
       resetProject: () => set(initialState),
+
+      loadProject: (project) =>
+        set({
+          city: project.city,
+          scope: project.scope,
+          activeRoomIndex: 0,
+          rooms: project.rooms.map((r) => ({
+            id: uid(),
+            name: r.name,
+            room_type: (r.room_type as RoomTypeKey) ?? "living",
+            height: r.height,
+            points: r.points,
+            openings: r.openings.map((op) => ({ ...op, id: uid() })),
+            works: r.works as unknown as RoomWorks,
+          })),
+        }),
     }),
     {
       name: "repair-estimator-draft",

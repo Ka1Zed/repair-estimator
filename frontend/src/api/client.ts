@@ -1,3 +1,5 @@
+import type { Project, ProjectSummary, ProjectPayload, SharedProject } from "../types/project";
+
 // VITE_API_URL задаётся только для cross-origin деплоев (см. README).
 // По умолчанию — пустая строка: запросы уходят на тот же origin, а Vite-прокси
 // (dev) и nginx (prod) маршрутизируют /api/* и /health на бэкенд.
@@ -75,7 +77,47 @@ class ApiClient {
     return this.request<{ default: string; regions: string[] }>("/api/regions");
   }
 
-  // 6. Загрузка чертежа (POST /api/blueprints/upload) — FormData, без Content-Type header
+  // 6. Проекты
+  async listProjects(): Promise<ProjectSummary[]> {
+    return this.request<ProjectSummary[]>("/api/projects");
+  }
+
+  async createProject(data: ProjectPayload): Promise<Project> {
+    return this.request<Project>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getProject(id: number): Promise<Project> {
+    return this.request<Project>(`/api/projects/${id}`);
+  }
+
+  async updateProject(id: number, data: ProjectPayload): Promise<Project> {
+    return this.request<Project>(`/api/projects/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // 204 No Content — через общий request<T> нельзя, он всегда парсит JSON-тело.
+  async deleteProject(id: number): Promise<void> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/projects/${id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error(`Ошибка HTTP: ${response.status} ${response.statusText}`);
+    } catch (error) {
+      console.error(`[API Error] Сбой при запросе к /api/projects/${id}:`, error);
+      throw error;
+    }
+  }
+
+  async getSharedProject(token: string): Promise<SharedProject> {
+    return this.request<SharedProject>(`/api/projects/share/${token}`);
+  }
+
+  // 7. Загрузка чертежа (POST /api/blueprints/upload) — FormData, без Content-Type header
   async uploadBlueprint(formData: FormData): Promise<unknown> {
     const response = await fetch(`${this.baseUrl}/api/blueprints/upload`, {
       method: "POST",

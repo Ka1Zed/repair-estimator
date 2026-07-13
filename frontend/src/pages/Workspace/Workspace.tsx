@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./Workspace.module.css";
+import type { Navigate } from "../../App";
+import type { ProjectPayload } from "../../types/project";
 
 import RoomsList from "../../components/RoomsList";
 import RoomPolygonEditor from "../../components/RoomPolygonEditor";
@@ -80,7 +82,13 @@ const CONTINGENCY_PCT: Record<PriceMode, number> = { min: 10, avg: 12, max: 15 }
 
 export type PriceMode = "min" | "avg" | "max";
 
-export function Workspace() {
+interface WorkspaceProps {
+  onNavigate: Navigate;
+  projectId?: number;
+  shareToken?: string;
+}
+
+export function Workspace({ onNavigate, projectId, shareToken: initialShareToken }: WorkspaceProps) {
   const rooms = useProjectStore((s) => s.rooms);
   const city = useProjectStore((s) => s.city);
   const setCity = useProjectStore((s) => s.setCity);
@@ -95,6 +103,62 @@ export function Workspace() {
   const [data, setData] = useState<EstimateResponse | null>(null);
   const [tab, setTab] = useState<"materials" | "labor">("materials");
   const [regions, setRegions] = useState<string[]>([]);
+
+  // project save / share state
+  const [savedProjectId, setSavedProjectId] = useState<number | null>(projectId ?? null);
+  const [shareToken, setShareToken] = useState<string | null>(initialShareToken ?? null);
+  const [projectName, setProjectName] = useState("");
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [copiedShare, setCopiedShare] = useState(false);
+
+  const roomsToPayload = useCallback((): ProjectPayload => ({
+    name: projectName.trim() || "Проект без названия",
+    city,
+    scope,
+    rooms: rooms.map((r) => ({
+      name: r.name,
+      room_type: r.room_type,
+      height: Number(r.height),
+      points: r.points.map((p) => ({ x: Number(p.x), y: Number(p.y) })),
+      openings: r.openings.map((op) => ({
+        type: op.type,
+        width: Number(op.width),
+        height: Number(op.height),
+      })),
+      works: r.works as unknown as Record<string, unknown>,
+    })),
+  }), [projectName, city, scope, rooms]);
+
+  const handleSave = useCallback(async () => {
+    setSaveLoading(true);
+    setSaveError(null);
+    try {
+      const payload = roomsToPayload();
+      if (savedProjectId !== null) {
+        const updated = await apiClient.updateProject(savedProjectId, payload);
+        setShareToken(updated.share_token);
+      } else {
+        const created = await apiClient.createProject(payload);
+        setSavedProjectId(created.id);
+        setShareToken(created.share_token);
+      }
+      setSaveOpen(false);
+    } catch {
+      setSaveError("Не удалось сохранить. Проверьте, что бэкенд запущен.");
+    } finally {
+      setSaveLoading(false);
+    }
+  }, [roomsToPayload, savedProjectId]);
+
+  const handleCopyShare = useCallback(() => {
+    if (!shareToken) return;
+    navigator.clipboard.writeText(`${location.origin}/share/${shareToken}`).then(() => {
+      setCopiedShare(true);
+      setTimeout(() => setCopiedShare(false), 2000);
+    });
+  }, [shareToken]);
 
   // resizable split
   const containerRef = useRef<HTMLDivElement>(null);
@@ -557,7 +621,12 @@ export function Workspace() {
     <div className={styles.page} ref={containerRef}>
       {/* ===== ЛЕВО: редактор ===== */}
       <section className={styles.left} style={{ width: `${splitPct}%` }}>
-        <div className={styles.eyebrow}>Проект · план помещения</div>
+        <div className={styles.projectNav}>
+          <div className={styles.eyebrow}>Проект · план помещения</div>
+          <button className={styles.myProjectsBtn} onClick={() => onNavigate({ type: "projects" })}>
+            Мои проекты
+          </button>
+        </div>
         <h1 className={styles.title}>
           Постройте комнату
           <br />и выберите параметры
@@ -684,6 +753,40 @@ export function Workspace() {
           </div>
         )}
         {error && <div className={styles.error}>{error}</div>}
+
+        <div className={styles.saveArea}>
+          {saveOpen ? (
+            <div className={styles.saveForm}>
+              <input
+                className={styles.saveInput}
+                placeholder="Название проекта"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSave()}
+              />
+              <button
+                className={styles.saveConfirmBtn}
+                onClick={handleSave}
+                disabled={saveLoading}
+              >
+                {saveLoading ? "Сохраняем…" : savedProjectId ? "Обновить" : "Сохранить"}
+              </button>
+              <button className={styles.saveCancelBtn} onClick={() => setSaveOpen(false)}>
+                Отмена
+              </button>
+            </div>
+          ) : (
+            <button className={styles.saveBtn} onClick={() => setSaveOpen(true)}>
+              {savedProjectId ? "Обновить проект" : "Сохранить проект"}
+            </button>
+          )}
+          {saveError && <div className={styles.saveError}>{saveError}</div>}
+          {shareToken && !saveOpen && (
+            <button className={styles.shareBtn} onClick={handleCopyShare}>
+              {copiedShare ? "Скопировано!" : "Поделиться ссылкой"}
+            </button>
+          )}
+        </div>
       </section>
 
       {/* ===== РАЗДЕЛИТЕЛЬ (перетаскивается) ===== */}

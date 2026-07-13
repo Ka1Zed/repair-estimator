@@ -313,6 +313,10 @@ def calculate_estimate(
         price_max = price_obj.price_max
         source_name = sources_by_id.get(price_obj.source_id, "unknown")
         updated_at = price_obj.updated_at.strftime("%Y-%m-%d") if price_obj.updated_at else ""
+        min_source_id = getattr(price_obj, "min_source_id", None)
+        max_source_id = getattr(price_obj, "max_source_id", None)
+        min_source_name = sources_by_id.get(min_source_id) if min_source_id else None
+        max_source_name = sources_by_id.get(max_source_id) if max_source_id else None
         total_min = final_quantity * price_min * CONTINGENCY['min']
         total_avg = final_quantity * price_avg * CONTINGENCY['avg']
         total_max = final_quantity * price_max * CONTINGENCY['max']
@@ -342,6 +346,10 @@ def calculate_estimate(
             updated_at=updated_at,
             region=price_obj.region,
             sources=getattr(price_obj, "contributing_sources", None),
+            min_source=min_source_name,
+            min_source_url=getattr(price_obj, "min_source_url", None),
+            max_source=max_source_name,
+            max_source_url=getattr(price_obj, "max_source_url", None),
         ))
 
         materials_sum['min'] += final_quantity * price_obj.price_min
@@ -383,6 +391,10 @@ def calculate_estimate(
 
         labor_source_name = sources_by_id.get(labor_price.source_id, "seed")
         updated_at = labor_price.updated_at.strftime("%Y-%m-%d") if labor_price.updated_at else ""
+        labor_min_source_id = getattr(labor_price, "min_source_id", None)
+        labor_max_source_id = getattr(labor_price, "max_source_id", None)
+        labor_min_source_name = sources_by_id.get(labor_min_source_id) if labor_min_source_id else None
+        labor_max_source_name = sources_by_id.get(labor_max_source_id) if labor_max_source_id else None
 
         labor_response.append(LaborItem(
             service=service,
@@ -404,6 +416,10 @@ def calculate_estimate(
             source_url=labor_price.source_url,
             region=labor_price.region,
             sources=getattr(labor_price, "contributing_sources", None),
+            min_source=labor_min_source_name,
+            min_source_url=getattr(labor_price, "min_source_url", None),
+            max_source=labor_max_source_name,
+            max_source_url=getattr(labor_price, "max_source_url", None),
         ))
 
         labor_sum['min'] += volume * p_min

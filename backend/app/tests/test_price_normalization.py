@@ -198,6 +198,46 @@ class TestMaterialPriceCombination:
             # parser-цены нерегиональны (region IS NULL) → объединённая тоже null,
             # хотя в запросе был регион (контракт docs/api.md: парсерная → region=null).
             assert price.region is None
+            # #348: представитель — Мегастрой (его avg 120 не хуже Лемана-160 по
+            # близости к 140, выигрывает тай-брейк первым в rows) и он же дал price_min
+            # → min_source не дублируем (null). price_max дал Леман → его источник/ссылка
+            # видны отдельно от source/source_url представителя.
+            assert price.min_source_id is None
+            assert price.min_source_url is None
+            assert price.max_source_url == "http://example-леман.ru"
+        finally:
+            self._clear_parser_prices(db_session)
+
+    def test_combine_attributes_min_and_max_to_different_sources_than_representative(self, db_session):
+        """Когда ни минимум, ни максимум вилки не пришёлся на представителя —
+        обе границы должны сослаться на СВОИ источники, а не молчать/дублировать
+        source_url представителя (#348, основной сценарий issue: разные карточки
+        товара для эконом-/премиум-границы)."""
+        self._clear_parser_prices(db_session)
+        try:
+            self._insert_price(db_session, "Мегастрой", 100, 150, 155)   # представитель (avg ближе к 167)
+            self._insert_price(db_session, "Леман", 90, 200, 210)        # даёт price_min
+            self._seed_source(db_session, "Третий")
+            self._insert_price(db_session, "Третий", 95, 150, 300)       # даёт price_max
+
+            price = get_material_price(
+                self.MATERIAL, db=db_session,
+                parsers=[
+                    self._no_network_parser("Мегастрой"),
+                    self._no_network_parser("Леман"),
+                    self._no_network_parser("Третий"),
+                ],
+                region="Москва",
+            )
+
+            assert price is not None
+            assert price.price_min == Decimal("90")
+            assert price.price_max == Decimal("300")
+            # Представитель — Мегастрой (avg 150 и avg Третьего=150 равноудалены от 167,
+            # тай-брейк выигрывает первый по rows — Мегастрой).
+            assert price.source_url == "http://example-мегастрой.ru"
+            assert price.min_source_url == "http://example-леман.ru"
+            assert price.max_source_url == "http://example-третий.ru"
         finally:
             self._clear_parser_prices(db_session)
 

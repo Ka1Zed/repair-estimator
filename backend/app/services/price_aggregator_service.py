@@ -231,9 +231,16 @@ def _combine_material_prices(session, material_id: int,
 
     Работает и для одного элемента rows (тогда вилка/представитель — этот же элемент),
     чтобы contributing_sources был заполнен и для единственного источника (как у labor).
+
+    min_row/max_row (#348) — строки, чьи price_min/price_max реально стали границами
+    вилки (а не просто число из min()/max() по значениям). Если такая строка совпадает
+    с представителем (тот же source_id), отдельную ссылку на границу не кладём (null) —
+    она и так есть в source/source_url, дублировать нечего.
     '''
-    price_min = min(r.price_min for r in rows)
-    price_max = max(r.price_max for r in rows)
+    min_row = min(rows, key=lambda r: r.price_min)
+    max_row = max(rows, key=lambda r: r.price_max)
+    price_min = min_row.price_min
+    price_max = max_row.price_max
     price_avg = Decimal(round(statistics.mean([r.price_avg for r in rows])))
     representative = min(rows, key=lambda r: abs(r.price_avg - price_avg))
 
@@ -255,6 +262,10 @@ def _combine_material_prices(session, material_id: int,
         updated_at=representative.updated_at,
     )
     combined.contributing_sources = sorted(source_names)
+    combined.min_source_id = min_row.source_id if min_row.source_id != representative.source_id else None
+    combined.min_source_url = min_row.source_url if min_row.source_id != representative.source_id else None
+    combined.max_source_id = max_row.source_id if max_row.source_id != representative.source_id else None
+    combined.max_source_url = max_row.source_url if max_row.source_id != representative.source_id else None
     return combined
 
 
@@ -342,9 +353,15 @@ def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
     Представительный сайт — чья средняя ближе всего к объединённой средней: его
     показываем в строке сметы (source/source_url). Полный список сайтов кладём в
     транзитивный атрибут .contributing_sources (его читает estimates → поле sources).
+
+    min_row/max_row (#348) — сайты, чьи price_min/price_max реально стали границами
+    вилки. Если такой сайт совпадает с представителем (тот же source_id), отдельную
+    ссылку на границу не кладём (null) — дублировать source/source_url нечего.
     '''
-    price_min = min(r.price_min for r in rows)
-    price_max = max(r.price_max for r in rows)
+    min_row = min(rows, key=lambda r: r.price_min)
+    max_row = max(rows, key=lambda r: r.price_max)
+    price_min = min_row.price_min
+    price_max = max_row.price_max
     price_avg = Decimal(round(statistics.mean([r.price_avg for r in rows])))
     representative = min(rows, key=lambda r: abs(r.price_avg - price_avg))
 
@@ -364,6 +381,10 @@ def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
         source_url=representative.source_url,
     )
     combined.contributing_sources = sorted(source_names)
+    combined.min_source_id = min_row.source_id if min_row.source_id != representative.source_id else None
+    combined.min_source_url = min_row.source_url if min_row.source_id != representative.source_id else None
+    combined.max_source_id = max_row.source_id if max_row.source_id != representative.source_id else None
+    combined.max_source_url = max_row.source_url if max_row.source_id != representative.source_id else None
     return combined
 
 

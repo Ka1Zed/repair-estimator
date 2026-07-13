@@ -421,11 +421,12 @@ export function Workspace() {
 
       // Тот же случай, что у работ: когда товар один на все tier (не finish_key) и
       // источников несколько, «Стандарт» — среднее по их средним, число не на одной
-      // карточке. Тогда ссылку убираем, подписываем «среднее по источникам».
+      // карточке. Ссылку оставляем на представителя (ближайший к средней оффер) и
+      // подписываем «ближайшее предложение», а не прячем.
       const materialBlend = !namesDiffer && !!(m.sources && m.sources.length > 1);
       const variants: LedgerRowVariant[] = [];
       if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: namesDiffer ? m.min_item.source_url : (m.min_source_url ?? m.source_url), onClick: () => toggleMaterialOverride(i, "min") });
-      if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: materialBlend ? undefined : m.avg_item.source_url, note: materialBlend ? "среднее по источникам" : undefined, onClick: () => toggleMaterialOverride(i, "avg") });
+      if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: m.avg_item.source_url, note: materialBlend ? "≈ ближайшее предложение" : undefined, onClick: () => toggleMaterialOverride(i, "avg") });
       if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: namesDiffer ? m.max_item.source_url : (m.max_source_url ?? m.source_url), onClick: () => toggleMaterialOverride(i, "max") });
 
       const activeVariant = effectiveMode === "min" ? m.min_item : effectiveMode === "max" ? m.max_item : m.avg_item;
@@ -506,15 +507,16 @@ export function Workspace() {
       // совпала с представителем, бэкенд отдаёт null — тогда ведём на представителя
       // (l.source_url), а не прячем ссылку: цена границы реальна и у неё есть источник.
       // Список всех участников — одной строкой в "Источник(и) цены" ниже.
-      // «Стандарт» при нескольких источниках — это среднее по их средним (mean на
-      // бэкенде), число не живёт ни на одной карточке. Тогда ссылку не ставим, а
-      // подписываем «среднее по источникам» (полный список — в "Источники цены" ниже).
-      // При одном источнике avg = его же цена → ведём на него, как min/max.
+      // «Стандарт» при нескольких источниках — среднее по их средним (mean на бэкенде),
+      // число не живёт ни на одной карточке. Ссылку всё равно даём — на представителя
+      // (source_url), это оффер, чья средняя ближе всего к общей, т.е. буквально
+      // ближайшее к середине предложение. Подписываем «ближайшее предложение», чтобы
+      // не читалось как «ровно эта цена». При одном источнике avg = его цена → без подписи.
       const laborBlend = !!(l.sources && l.sources.length > 1);
       const variants: LedgerRowVariant[] = hasCorridor
         ? [
             { mode: "min", title: "Эконом", name: l.service, price: rub(Math.round(l.price_min!)), url: l.min_source_url ?? l.source_url, onClick: () => toggleLaborOverride(i, "min") },
-            { mode: "avg", title: "Стандарт", name: l.service, price: rub(Math.round(l.price_avg)), url: laborBlend ? undefined : l.source_url, note: laborBlend ? "среднее по источникам" : undefined, onClick: () => toggleLaborOverride(i, "avg") },
+            { mode: "avg", title: "Стандарт", name: l.service, price: rub(Math.round(l.price_avg)), url: l.source_url, note: laborBlend ? "≈ ближайшее предложение" : undefined, onClick: () => toggleLaborOverride(i, "avg") },
             { mode: "max", title: "Премиум", name: l.service, price: rub(Math.round(l.price_max!)), url: l.max_source_url ?? l.source_url, onClick: () => toggleLaborOverride(i, "max") },
           ]
         : [];

@@ -162,12 +162,12 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
     activePrice = m.avg_item.price;
     activeTotal = m.avg_item.total;
     // Тот же товар на всех tier + несколько источников → «Стандарт» это среднее по
-    // их средним, число не живёт на одной карточке: не ставим ссылку, подписываем
-    // «среднее по источникам» (зеркалит UI). finish_key (namesDiffer) — реальный
-    // товар avg-tier, ссылку сохраняем.
+    // их средним, число не живёт на одной карточке. Ссылку оставляем на представителя
+    // (ближайший к средней оффер) и помечаем «(ближайшее)», а не прячем (зеркалит UI).
     const blend = !namesDiffer && !!(m.sources && m.sources.length > 1);
-    activeSource = blend ? 'среднее по источникам' : (m.avg_item.source || m.source);
-    activeUrl = blend ? null : (m.avg_item.source_url || m.source_url);
+    const avgSource = m.avg_item.source || m.source;
+    activeSource = blend ? `${avgSource} (ближайшее)` : avgSource;
+    activeUrl = m.avg_item.source_url || m.source_url;
   } else if (priceMode === 'max' && m.max_item) {
     activeName = m.max_item.name;
     activePrice = m.max_item.price;
@@ -184,8 +184,8 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
 // и той же строки; при отсутствии коридора масштабируем avg множителем раздела.
 // Источник/ссылка для min/max берутся из l.min_source(_url)/l.max_source(_url) (#348),
 // если граница вилки не совпадает с представителем — иначе представитель. Для avg при
-// нескольких источниках число — среднее по их средним (ничьё): подписываем «среднее по
-// источникам» без ссылки (зеркалит UI).
+// нескольких источниках число — среднее по их средним (ничьё), но ссылку оставляем на
+// представителя (ближайший к средней оффер) и помечаем «(ближайшее)» (зеркалит UI).
 const getActiveLaborData = (l: LaborItem, priceMode: PriceMode, scale: number) => {
   const hasCorridor = l.price_min != null && l.price_max != null;
   const activePrice = !hasCorridor
@@ -204,8 +204,7 @@ const getActiveLaborData = (l: LaborItem, priceMode: PriceMode, scale: number) =
     activeSource = l.max_source || l.source;
     activeUrl = l.max_source_url || l.source_url;
   } else if (l.sources && l.sources.length > 1) {
-    activeSource = 'среднее по источникам';
-    activeUrl = null;
+    activeSource = `${l.source} (ближайшее)`;
   }
 
   return { activePrice, activeTotal, activeSource, activeUrl };

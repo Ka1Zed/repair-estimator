@@ -37,7 +37,12 @@ export function ProjectsPage({ onNavigate }: Props) {
     try {
       const project: Project = await apiClient.getProject(id);
       loadProject(project);
-      onNavigate({ type: "workspace", projectId: id, shareToken: project.share_token });
+      onNavigate({
+        type: "workspace",
+        projectId: id,
+        shareToken: project.share_token,
+        projectName: project.name,
+      });
     } catch {
       setError("Не удалось открыть проект.");
     }

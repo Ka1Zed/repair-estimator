@@ -8,7 +8,7 @@ import { apiClient } from './api/client';
 import { useBackendStatus } from './store/backendStatus';
 
 export type Page =
-  | { type: 'workspace'; projectId?: number; shareToken?: string }
+  | { type: 'workspace'; projectId?: number; shareToken?: string; projectName?: string }
   | { type: 'projects' }
   | { type: 'share'; token: string };
 
@@ -53,7 +53,12 @@ function App() {
     <Layout>
       <BackendBanner />
       {page.type === 'workspace' && (
-        <Workspace onNavigate={navigate} projectId={page.projectId} shareToken={page.shareToken} />
+        <Workspace
+          onNavigate={navigate}
+          projectId={page.projectId}
+          shareToken={page.shareToken}
+          projectName={page.projectName}
+        />
       )}
       {page.type === 'projects' && <ProjectsPage onNavigate={navigate} />}
       {page.type === 'share' && <SharedProjectPage token={page.token} onNavigate={navigate} />}

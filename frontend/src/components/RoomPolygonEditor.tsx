@@ -109,7 +109,7 @@ export default function RoomPolygonEditor() {
   const handleDeletePoint = (index: number, e: React.PointerEvent) => {
     if (e.shiftKey) {
       if (points.length <= 3) {
-        alert("У помещения должно быть минимум 3 точки!");
+        alert("У комнаты должно быть минимум 3 точки!");
         return;
       }
       setPoints(points.filter((_, i) => i !== index));

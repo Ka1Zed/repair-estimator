@@ -7,17 +7,17 @@
 
 ```ts
 ProjectState {
-  city:            string                // город для расчёта цен
-  repair_type:     "cosmetic" | "base" | "extended"  // для PDF-экспорта
-  repair_options:  RepairOptions         // устаревшее поле, не отправляется в API
+  city:            string          // город для расчёта цен
+  scope:           EstimateScope   // "finish_only" | "rough_and_finish" | "rough_only"
   rooms:           Room[]
   activeRoomIndex: number
 }
 ```
 
-> **Примечание:** `repair_type` и `repair_options` сохраняются в сторе для совместимости,
-> но в новый API (`POST /api/estimates/calculate`) **не отправляются**. Вместо них каждая
-> комната содержит поле `works` (см. ниже).
+`scope` определяет объём сметы (только чистовая / черновая+чистовая / только черновая) и
+уходит в `POST /api/estimates/calculate` как есть. Старые поля `repair_type`/`repair_options`
+из ранних версий стора удалены — их заменил `scope` на уровне проекта плюс `works` на уровне
+каждой комнаты (см. ниже).
 
 ## Тип Room
 
@@ -45,20 +45,24 @@ ProjectState {
 ## Тип RoomWorks
 
 `works` — объект на каждую комнату. Управляется компонентом `WorksPanel`.
-Допустимые `finish`-значения для каждого типа комнаты — `allowedWorks(room_type)` из `roomTypes.ts`.
+`allowedWorks(room_type)` из `roomTypes.ts` даёт список finish-вариантов из `finishOptions` для
+подстановки в UI — это **не жёсткое ограничение** (бэкенд не отвергает нетипичные комбинации),
+а только пресет дефолтов под тип комнаты.
 
 ### Отделочные группы
 
 | Ключ       | Поле `enabled` | Поле `finish`                                       | Модификаторы                                      |
-|------------|----------------|-----------------------------------------------------|---------------------------------------------------|
+|------------|----------------|-------------------------------------------------------|---------------------------------------------------|
 | `floor`    | `boolean`      | `"laminate" \| "linoleum" \| "parquet" \| "tile" \| null` | —                                          |
-| `walls`    | `boolean`      | `"paint" \| "wallpaper" \| "tile" \| "moisture_paint" \| null` | `wallpaper_pattern: boolean`, `primer_two_coats: boolean` |
+| `walls`    | `boolean`      | `"paint" \| "wallpaper" \| "tile" \| "moisture_paint" \| null` | `wall_condition: "even" \| "normal" \| "uneven"`, `wallpaper_pattern: boolean`, `primer_two_coats: boolean` |
 | `ceiling`  | `boolean`      | `"paint" \| "moisture_paint" \| "stretch" \| null`  | `primer_two_coats: boolean`                       |
+
+`wall_condition` масштабирует расход стартовой шпаклёвки (кривизна стен) — добавлено в версии 4 стора.
 
 ### Инженерные группы
 
 | Ключ        | Поле `enabled` | Числовые поля                                        |
-|-------------|----------------|------------------------------------------------------|
+|-------------|----------------|--------------------------------------------------------|
 | `electric`  | `boolean`      | `sockets: number \| null`, `lights: number \| null`, `cable_m: number \| null` |
 | `plumbing`  | `boolean`      | `points: number \| null`, `pipe_m: number \| null`   |
 
@@ -71,6 +75,8 @@ ProjectState {
 ```ts
 {
   city,                    // из стора
+  scope,                   // из стора
+  tier: "avg",              // фиксированный запрос; ответ содержит min/avg/max по каждой позиции
   rooms: rooms.map(room => ({
     name: room.name,
     room_type: room.room_type,
@@ -88,10 +94,26 @@ ProjectState {
 
 Поля `id` из `Room` и `Opening` в запрос не включаются — они только локальные.
 
+## Действия стора (кратко)
+
+Помимо сеттеров полей комнаты/проёмов (`setCity`, `setScope`, `setHeight`, `updatePoint`,
+`setPoints`, `addOpening`/`updateOpening`/`deleteOpening`, `updateRoomWorks` и т.д.) стор даёт:
+
+- `loadProject(project)` — заполняет стор данными сохранённого проекта (`city`, `scope`, `rooms`);
+  используется страницей «Мои проекты» при открытии. Имя проекта (`name`) в стор **не попадает** —
+  оно прокидывается отдельно через `Page`-роутинг (`App.tsx` → `Workspace` проп `projectName`).
+- `resetProject()` — сброс к дефолтному состоянию (одна пустая комната).
+- `clearActiveRoom()` — очищает точки и проёмы активной комнаты, не трогая остальные поля.
+- `loadDemoRoom()` — подставляет демо-геометрию в активную комнату (используется кнопкой
+  «Загрузить пример» и демо-распознаванием чертежа).
+
 ## Инварианты (не нарушать)
 
 - `height`, `x`, `y`, `width`, `height` в проёмах хранятся как `number | string` (пользователь может ввести строку в input). Перед отправкой в API всегда конвертировать через `Number()`.
 - `works` — один объект на комнату. Разные комнаты могут иметь разные наборы работ.
 - `works.floor.finish` (и аналогично walls/ceiling) валидируется на фронте по `allowedWorks(room_type)`, но бэкенд не отвергает нетипичные комбинации.
 - `activeRoomIndex` — только UI-состояние, в API не отправляется.
-- Версия стора: **3**. Миграция v1→v2 переносит `repair_options` с уровня комнат на уровень проекта; v2→v3 добавляет `works` в каждую комнату по умолчанию из `defaultWorksForRoomType(room_type)`.
+- Имя проекта (`ProjectSummary.name`/`Project.name`) не хранится в сторе — это отдельное локальное
+  состояние `Workspace` (`projectName`), синхронизируемое через проп при открытии сохранённого
+  проекта. Не путать со стором при доработке контракта.
+- Версия стора: **4**. Миграция v1→v2 переносит `repair_options` с уровня комнат на уровень проекта; v2→v3 добавляет `works` в каждую комнату по умолчанию из `defaultWorksForRoomType(room_type)`; v3→v4 добавляет `walls.wall_condition` (дефолт `"normal"` для старых записей).

@@ -20,7 +20,7 @@ class Opening(BaseModel):
 class BlueprintUploadResponse(BaseModel):
     """Результат распознавания чертежа"""
     success: bool
-    method: Literal["gemini", "claude", "ollama", "ocr", "none"]  # используемый метод
+    method: Literal["gemini", "claude", "ollama", "ocr", "fixture", "none"]  # используемый метод
     confidence: float = Field(..., ge=0, le=1, description="Уверенность в результате (0-1)")
 
     # Извлеченные данные

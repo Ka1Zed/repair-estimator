@@ -21,7 +21,7 @@ import { hasSelfIntersection, validateHeight } from "../../utils/polygonValidati
 import { calculateEstimate } from "../../api/estimates";
 import { apiClient } from "../../api/client";
 import { Select } from "../../components/ui/Select";
-import { roomsToPayload } from "../../utils/roomsToPayload";
+import { roomsToCalcPayload } from "../../utils/roomsToPayload";
 
 interface GeometryData {
   floor_area: number;
@@ -272,7 +272,7 @@ export function Workspace({
           city,
           scope,
           tier: "avg",
-          rooms: roomsToPayload(rooms),
+          rooms: roomsToCalcPayload(rooms),
         };
         // Один запрос вместо трёх параллельных (#349): бэкенд теперь сам отдаёт
         // min_item/avg_item/max_item на каждой строке материала — для 6 finish_key-позиций

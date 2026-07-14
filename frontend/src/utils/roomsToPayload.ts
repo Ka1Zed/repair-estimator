@@ -1,6 +1,6 @@
 import type { Room } from "../store/projectStore";
 
-export function roomsToPayload(rooms: Room[]) {
+export function roomsToCalcPayload(rooms: Room[]) {
   return rooms.map((room) => ({
     name: room.name,
     room_type: room.room_type,

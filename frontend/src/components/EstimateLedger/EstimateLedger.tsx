@@ -54,7 +54,7 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
       <div className={styles.head}>
         <span>Наименование</span>
         <span className={styles.colVol}>Объём</span>
-        <span className={styles.colPrice}>Цена</span>
+        <span className={styles.colPrice}>Итог</span>
         <span className={styles.colArrow} />
       </div>
 

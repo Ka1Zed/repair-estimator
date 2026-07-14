@@ -62,6 +62,39 @@
 .nameMain {
   font-size: 16px;
   color: var(--text-h);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.overrideBadge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.overrideBadge_min {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+}
+
+.overrideBadge_avg {
+  background: var(--accent-bg, #fdf5f0);
+  color: var(--accent, #b07b5e);
+  border: 1px solid var(--accent-border, #e8cfc0);
+}
+
+.overrideBadge_max {
+  background: #fce4ec;
+  color: #c62828;
+  border: 1px solid #ef9a9a;
 }
 
 .subtitle {

@@ -23,6 +23,8 @@ export interface LedgerRow {
   details: { label: string; value: string; url?: string | null }[];
   variants?: LedgerRowVariant[];
   activeMode?: "min" | "avg" | "max";
+  /** Строка закреплена на уровне, отличном от глобального */
+  isOverridden?: boolean;
 }
 
 interface EstimateLedgerProps {
@@ -59,7 +61,17 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
           <div key={i} className={styles.rowWrap}>
             <button className={styles.row} onClick={() => toggle(i)} aria-expanded={isOpen}>
               <span className={styles.name}>
-                <span className={styles.nameMain}>{row.name}</span>
+                <span className={styles.nameMain}>
+                  {row.name}
+                  {row.isOverridden && row.activeMode && (
+                    <span
+                      className={`${styles.overrideBadge} ${styles[`overrideBadge_${row.activeMode}`]}`}
+                      title="Уровень закреплён для этой позиции"
+                    >
+                      {row.activeMode === "min" ? "эконом" : row.activeMode === "max" ? "премиум" : "стандарт"}
+                    </span>
+                  )}
+                </span>
                 {row.subtitle && <span className={styles.subtitle}>{row.subtitle}</span>}
               </span>
               <span className={`${styles.colVol} ${styles.vol}`}>{row.volume}</span>

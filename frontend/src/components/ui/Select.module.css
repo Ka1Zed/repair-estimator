@@ -93,6 +93,15 @@
   color: var(--accent);
 }
 
+.optionDisabled {
+  color: #b0b0b0;
+  cursor: not-allowed;
+}
+
+.optionDisabled:hover {
+  background: none;
+}
+
 .check {
   display: inline-block;
   width: 14px;

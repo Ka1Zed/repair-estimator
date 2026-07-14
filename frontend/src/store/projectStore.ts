@@ -115,11 +115,14 @@ export function getDefaultRoomName(room_type: RoomTypeKey, rooms: Room[]): strin
 interface ProjectState {
   city: string;
   scope: EstimateScope;
+  // Явный выбор магазина материалов (#365); null — «Любой» (автоподбор бэкендом).
+  store: string | null;
   rooms: Room[];
   activeRoomIndex: number;
 
   setCity: (city: string) => void;
   setScope: (scope: EstimateScope) => void;
+  setStore: (store: string | null) => void;
   addRoom: () => void;
   deleteRoom: (index: number) => void;
   setActiveRoom: (index: number) => void;
@@ -230,6 +233,7 @@ const DEFAULT_CITY = "Казань";
 const initialState = {
   city: DEFAULT_CITY,
   scope: "finish_only" as EstimateScope,
+  store: null as string | null,
   rooms: [createDefaultRoom()],
   activeRoomIndex: 0,
 };
@@ -242,6 +246,8 @@ export const useProjectStore = create<ProjectState>()(
       setCity: (city) => set({ city }),
 
       setScope: (scope) => set({ scope }),
+
+      setStore: (store) => set({ store }),
 
       addRoom: () =>
         set((state) => {

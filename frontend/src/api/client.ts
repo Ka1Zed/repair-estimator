@@ -77,6 +77,13 @@ class ApiClient {
     return this.request<{ default: string; regions: string[] }>("/api/regions");
   }
 
+  // 5b. Доступность магазинов материалов по городу (GET /api/regions/stores, #363/#365)
+  async fetchStores(city: string): Promise<{ city: string; stores: { name: string; available: boolean }[] }> {
+    return this.request<{ city: string; stores: { name: string; available: boolean }[] }>(
+      `/api/regions/stores?city=${encodeURIComponent(city)}`,
+    );
+  }
+
   // 6. Проекты
   async listProjects(): Promise<ProjectSummary[]> {
     return this.request<ProjectSummary[]>("/api/projects");

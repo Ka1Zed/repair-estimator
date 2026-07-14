@@ -4,6 +4,9 @@ import styles from "./Select.module.css";
 export interface SelectOption {
   value: string;
   label: string;
+  disabled?: boolean;
+  /** Подсказка при наведении — актуально для disabled-опций (причина недоступности). */
+  title?: string;
 }
 
 interface SelectProps {
@@ -88,8 +91,10 @@ export function Select({
               key={o.value}
               role="option"
               aria-selected={o.value === value}
-              className={`${styles.option} ${o.value === value ? styles.optionSelected : ""}`}
-              onClick={() => handleSelect(o.value)}
+              aria-disabled={o.disabled}
+              title={o.title}
+              className={`${styles.option} ${o.value === value ? styles.optionSelected : ""} ${o.disabled ? styles.optionDisabled : ""}`}
+              onClick={() => !o.disabled && handleSelect(o.value)}
             >
               <span className={styles.check} aria-hidden="true">
                 {o.value === value ? "✓" : ""}

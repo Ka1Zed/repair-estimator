@@ -188,6 +188,24 @@ def calculate_estimate(
     # точечного запроса на каждую строку материала/работы (устраняет N+1, #278).
     sources_by_id = {s.id: s.name for s in db.query(PriceSource).all()}
 
+    # Валидация request.stores (#363): опечатка/несуществующий магазин не должна
+    # молча откатываться на автоподбор — get_material_price не различает "магазин
+    # не покрывает город" (штатный откат) и "такого магазина вообще нет"
+    # (ошибка клиента). Проверяем по ПОЛНОМУ списку зарегистрированных парсеров
+    # (без учёта города), а не по _select_regional_parsers — иначе валидный, но
+    # непокрывающий город магазин ложно считался бы неизвестным.
+    if request.stores:
+        known_stores = {p.source_name for p in parsers}
+        unknown_stores = sorted(set(request.stores) - known_stores)
+        if unknown_stores:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    f"Неизвестный магазин(ы) в stores: {', '.join(unknown_stores)}. "
+                    f"Доступные магазины: {', '.join(sorted(known_stores))}."
+                ),
+            )
+
     all_materials: List[Dict[str, Any]] = []
     all_labor: List[Dict[str, Any]] = []
     total_geometry = {

@@ -274,3 +274,13 @@ def test_moscow_estimate_falls_back_when_selected_store_unavailable(regional_mat
 
     assert paint_with["sources"] == ["Леман"]
     assert paint_with["price_avg"] == paint_without["price_avg"] == 250.0
+
+
+def test_estimate_rejects_unknown_store_name(regional_material_parsers):
+    """Опечатка в имени магазина — не то же самое, что «магазин не покрывает
+    город»: должна вернуться явная 422, а не тихий откат на автоподбор."""
+    response = client.post(
+        "/api/estimates/calculate", json=_payload("Казань", stores=["Ленман"])
+    )
+    assert response.status_code == 422
+    assert "Ленман" in response.json()["detail"]

@@ -67,6 +67,24 @@ export interface RoomWorks {
   plumbing: PlumbingWorks;
 }
 
+// Форма потолка (#357): влияет на ceiling_area на бэкенде (geometry_service),
+// а не на works.ceiling (отделку). "flat" — прежнее поведение, ceiling_area = floor_area.
+export type CeilingShapeType = "flat" | "multilevel" | "attic_slope";
+
+export interface CeilingShape {
+  type: CeilingShapeType;
+  levels: number | null; // multilevel: число уровней короба, 1–5
+  step_height_m: number | null; // multilevel: высота грани короба на уровень, м
+  slope_deg: number | null; // attic_slope: угол ската от горизонтали, °
+}
+
+export const DEFAULT_CEILING_SHAPE: CeilingShape = {
+  type: "flat",
+  levels: null,
+  step_height_m: null,
+  slope_deg: null,
+};
+
 export function defaultWorksForRoomType(rt: RoomTypeKey): RoomWorks {
   const rule = roomTypes[rt];
   return {
@@ -86,6 +104,7 @@ export interface Room {
   points: Point[];
   openings: Opening[];
   works: RoomWorks;
+  ceilingShape: CeilingShape;
 }
 
 export type EstimateScope = "finish_only" | "rough_and_finish" | "rough_only";
@@ -129,6 +148,7 @@ interface ProjectState {
   updateRoomName: (index: number, name: string) => void;
   updateActiveRoomType: (index: number, room_type: RoomTypeKey) => void;
   setHeight: (height: number | string) => void;
+  setCeilingShape: (patch: Partial<CeilingShape>) => void;
   updatePoint: (index: number, x: number | string, y: number | string) => void;
   setPoints: (points: Point[]) => void;
   setOpenings: (openings: Omit<Opening, "id">[]) => void;
@@ -153,6 +173,7 @@ interface ProjectState {
       points: { x: number; y: number }[];
       openings: { type: "door" | "window"; width: number; height: number }[];
       works: Record<string, unknown>;
+      ceiling_shape?: CeilingShape | null;
     }>;
   }) => void;
 }
@@ -208,6 +229,17 @@ export function migrateProjectState(persisted: unknown, version: number): Record
     };
   }
 
+  if (version < 5) {
+    const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
+    s = {
+      ...s,
+      rooms: rooms.map((room) => {
+        if (room.ceilingShape) return room;
+        return { ...room, ceilingShape: { ...DEFAULT_CEILING_SHAPE } };
+      }),
+    };
+  }
+
   return s;
 }
 
@@ -224,6 +256,7 @@ const createDefaultRoom = (name?: string): Room => ({
   ],
   openings: [],
   works: defaultWorksForRoomType("living"),
+  ceilingShape: { ...DEFAULT_CEILING_SHAPE },
 });
 
 // Город по умолчанию совпадает с DEFAULT_REGION на бэкенде (app/api/regions.py):
@@ -306,6 +339,17 @@ export const useProjectStore = create<ProjectState>()(
           newRooms[state.activeRoomIndex] = {
             ...newRooms[state.activeRoomIndex],
             height,
+          };
+          return { rooms: newRooms };
+        }),
+
+      setCeilingShape: (patch) =>
+        set((state) => {
+          const newRooms = [...state.rooms];
+          const activeRoom = newRooms[state.activeRoomIndex];
+          newRooms[state.activeRoomIndex] = {
+            ...activeRoom,
+            ceilingShape: { ...activeRoom.ceilingShape, ...patch },
           };
           return { rooms: newRooms };
         }),
@@ -432,12 +476,13 @@ export const useProjectStore = create<ProjectState>()(
             points: r.points,
             openings: r.openings.map((op) => ({ ...op, id: uid() })),
             works: r.works as unknown as RoomWorks,
+            ceilingShape: r.ceiling_shape ? { ...r.ceiling_shape } : { ...DEFAULT_CEILING_SHAPE },
           })),
         }),
     }),
     {
       name: "repair-estimator-draft",
-      version: 4,
+      version: 5,
       migrate: migrateProjectState,
     },
   ),

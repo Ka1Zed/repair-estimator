@@ -70,6 +70,45 @@ def test_single_room():
 
 
 
+def test_multilevel_ceiling_shape_increases_area_and_material():
+    """ceiling_shape=multilevel (#357): ceiling_area > floor_area, и расход краски
+    потолка растёт пропорционально новой площади, а не площади пола."""
+
+    def build_payload(ceiling_shape=None):
+        room = {
+            "name": "Спальня",
+            "height": 2.7,
+            "points": [
+                {"x": 0, "y": 0},
+                {"x": 4, "y": 0},
+                {"x": 4, "y": 3},
+                {"x": 0, "y": 3}
+            ],
+            "room_type": "living",
+            "openings": [],
+            "works": W(),
+        }
+        if ceiling_shape is not None:
+            room["ceiling_shape"] = ceiling_shape
+        return {"city": "Казань", "rooms": [room]}
+
+    flat = client.post("/api/estimates/calculate", json=build_payload()).json()
+    multilevel = client.post(
+        "/api/estimates/calculate",
+        json=build_payload({"type": "multilevel", "levels": 2, "step_height_m": 0.1}),
+    ).json()
+
+    assert flat["geometry"]["ceiling_area"] == 12.0
+    assert multilevel["geometry"]["ceiling_area"] == pytest.approx(14.8, 0.001)
+
+    flat_paint = next(m for m in flat["materials"] if m["name"] == "Краска потолочная")
+    multilevel_paint = next(m for m in multilevel["materials"] if m["name"] == "Краска потолочная")
+
+    # base_quantity растёт ровно в той же пропорции, что и ceiling_area (14.8 / 12.0).
+    ratio = multilevel_paint["base_quantity"] / flat_paint["base_quantity"]
+    assert ratio == pytest.approx(14.8 / 12.0, 0.001)
+
+
 def test_response_schema():
     """Проверка, что ответ соответствует схеме (нет лишних/недостающих полей)."""
     payload = {

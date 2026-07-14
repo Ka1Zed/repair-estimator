@@ -58,6 +58,19 @@ class Works(BaseModel):
     electric: ElectricWork = Field(default_factory=ElectricWork)
     plumbing: PlumbingWork = Field(default_factory=PlumbingWork)
 
+class CeilingShape(BaseModel):
+    """Форма потолка (#357): по умолчанию плоский, ceiling_area = floor_area.
+
+    multilevel — многоуровневый ГКЛ-потолок: добавляет площадь вертикальных
+    граней коробов по периметру помещения на каждый уровень (levels ×
+    step_height_m). attic_slope — мансардный скат: единая наклонная
+    плоскость над проекцией пола (floor_area / cos(slope_deg)).
+    """
+    type: Literal["flat", "multilevel", "attic_slope"] = "flat"
+    levels: Optional[int] = Field(None, ge=1, le=5)
+    step_height_m: Optional[float] = Field(None, gt=0, le=1.0)
+    slope_deg: Optional[float] = Field(None, ge=0, lt=85)
+
 class RoomInput(BaseModel):
     name: str
     height: float = Field(gt=0)
@@ -66,6 +79,8 @@ class RoomInput(BaseModel):
     room_type: str
     openings: List[Opening] = []
     works: Works = Field(default_factory=Works)
+    # Форма потолка (#357), null — плоский (прежнее поведение, ceiling_area = floor_area).
+    ceiling_shape: Optional[CeilingShape] = None
 
 class EstimateRequest(BaseModel):
     city: str

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getDefaultRoomName, defaultWorksForRoomType } from "../store/projectStore";
+import { DEFAULT_CEILING_SHAPE, getDefaultRoomName, defaultWorksForRoomType } from "../store/projectStore";
 import type { Room } from "../store/projectStore";
 
 const makeRoom = (name: string): Room => ({
@@ -10,6 +10,7 @@ const makeRoom = (name: string): Room => ({
   points: [],
   openings: [],
   works: defaultWorksForRoomType("living"),
+  ceilingShape: { ...DEFAULT_CEILING_SHAPE },
 });
 
 describe("getDefaultRoomName", () => {

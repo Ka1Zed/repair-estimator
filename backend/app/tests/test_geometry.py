@@ -1,4 +1,5 @@
 from decimal import Decimal
+import pytest
 from app.services.geometry_service import (
     floor_area, perimeter, wall_area, calculate_room_geometry,
 )
@@ -114,3 +115,62 @@ class TestOtkosArea:
         """Без проёмов площадь откосов = 0."""
         geom = calculate_room_geometry(self.POINTS, self.HEIGHT, [])
         assert geom['otkos_area'] == Decimal('0')
+
+
+class TestCeilingShape:
+    """Форма потолка (#357): ceiling_area больше не всегда равна floor_area."""
+
+    POINTS = [(0, 0), (4, 0), (4, 3), (0, 3)]
+    HEIGHT = Decimal('2.7')
+
+    def test_no_shape_is_flat(self):
+        """ceiling_shape не передан -> регресс не сломан, ceiling_area == floor_area."""
+        geom = calculate_room_geometry(self.POINTS, self.HEIGHT)
+        assert geom['ceiling_area'] == geom['floor_area'] == Decimal('12.0')
+
+    def test_explicit_flat(self):
+        """type="flat" явно -> то же самое, что и без поля."""
+        geom = calculate_room_geometry(self.POINTS, self.HEIGHT, ceiling_shape={'type': 'flat'})
+        assert geom['ceiling_area'] == Decimal('12.0')
+
+    def test_multilevel_adds_perimeter_band(self):
+        """2 уровня короба по 0.1 м: 12 + 14×0.1×2 = 14.8."""
+        geom = calculate_room_geometry(
+            self.POINTS, self.HEIGHT,
+            ceiling_shape={'type': 'multilevel', 'levels': 2, 'step_height_m': 0.1},
+        )
+        assert geom['ceiling_area'] == Decimal('14.8')
+
+    def test_multilevel_default_levels_and_step(self):
+        """Без levels/step_height_m -> levels=1, step_height_m из нормы (0.12): 12 + 14×0.12 = 13.68."""
+        geom = calculate_room_geometry(
+            self.POINTS, self.HEIGHT, ceiling_shape={'type': 'multilevel'},
+        )
+        assert geom['ceiling_area'] == Decimal('13.68')
+
+    def test_attic_slope(self):
+        """Скат 60° над проекцией 12 м²: 12 / cos(60°) = 24.0."""
+        geom = calculate_room_geometry(
+            self.POINTS, self.HEIGHT, ceiling_shape={'type': 'attic_slope', 'slope_deg': 60},
+        )
+        assert geom['ceiling_area'] == pytest.approx(Decimal('24.0'))
+
+    def test_attic_slope_default_zero_is_flat(self):
+        """Без slope_deg -> 0° -> ceiling_area как у плоского потолка."""
+        geom = calculate_room_geometry(
+            self.POINTS, self.HEIGHT, ceiling_shape={'type': 'attic_slope'},
+        )
+        assert geom['ceiling_area'] == Decimal('12.0')
+
+    def test_multilevel_levels_out_of_range_rejected(self):
+        with pytest.raises(ValueError):
+            calculate_room_geometry(
+                self.POINTS, self.HEIGHT,
+                ceiling_shape={'type': 'multilevel', 'levels': 0},
+            )
+
+    def test_attic_slope_out_of_range_rejected(self):
+        with pytest.raises(ValueError):
+            calculate_room_geometry(
+                self.POINTS, self.HEIGHT, ceiling_shape={'type': 'attic_slope', 'slope_deg': 90},
+            )

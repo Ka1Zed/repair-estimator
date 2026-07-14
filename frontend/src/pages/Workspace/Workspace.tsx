@@ -13,7 +13,7 @@ import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
 import { EstimateLedger, type LedgerRow, type LedgerRowVariant } from "../../components/EstimateLedger/EstimateLedger";
-import { useProjectStore, type EstimateScope } from "../../store/projectStore";
+import { useProjectStore, type EstimateScope, type CeilingShapeType } from "../../store/projectStore";
 import { useBackendStatus } from "../../store/backendStatus";
 import { roomHasInvalidOpenings } from "../../utils/openingValidation";
 import { hasSelfIntersection, validateHeight } from "../../utils/polygonValidation";
@@ -80,6 +80,12 @@ const laborSourceName = (source: string) => LABOR_SOURCE_NAMES[source] ?? source
 // уже включён в "Итог по позиции" — поэтому итог не равен цене за единицу × кол-во.
 const CONTINGENCY_PCT: Record<PriceMode, number> = { min: 10, avg: 12, max: 15 };
 
+const CEILING_SHAPE_OPTIONS = [
+  { value: "flat", label: "Плоский" },
+  { value: "multilevel", label: "Многоуровневый" },
+  { value: "attic_slope", label: "Мансардный скат" },
+];
+
 export type PriceMode = "min" | "avg" | "max";
 
 interface WorkspaceProps {
@@ -105,6 +111,7 @@ export function Workspace({
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
+  const setCeilingShape = useProjectStore((s) => s.setCeilingShape);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,6 +145,12 @@ export function Workspace({
         height: Number(op.height),
       })),
       works: r.works as unknown as Record<string, unknown>,
+      ceiling_shape: {
+        type: r.ceilingShape.type,
+        levels: r.ceilingShape.levels != null ? Number(r.ceilingShape.levels) : null,
+        step_height_m: r.ceilingShape.step_height_m != null ? Number(r.ceilingShape.step_height_m) : null,
+        slope_deg: r.ceilingShape.slope_deg != null ? Number(r.ceilingShape.slope_deg) : null,
+      },
     })),
   }), [projectName, city, scope, rooms]);
 
@@ -735,6 +748,67 @@ export function Workspace({
             {heightError && (
               <div className={styles.error} style={{ marginTop: 4, fontSize: 12 }}>
                 {heightError}
+              </div>
+            )}
+          </div>
+          <div className={styles.cityField}>
+            <div className={styles.blockLabel}>Форма потолка</div>
+            <Select
+              variant="underline"
+              ariaLabel="Форма потолка"
+              value={activeRoom?.ceilingShape.type ?? "flat"}
+              options={CEILING_SHAPE_OPTIONS}
+              onChange={(v) => setCeilingShape({ type: v as CeilingShapeType })}
+            />
+            {activeRoom?.ceilingShape.type === "multilevel" && (
+              <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
+                <div className={styles.heightField}>
+                  <span className={styles.heightUnit}>Уровней короба</span>
+                  <input
+                    className={styles.heightInput}
+                    type="number"
+                    step="1"
+                    min="1"
+                    max="5"
+                    placeholder="1"
+                    value={activeRoom.ceilingShape.levels ?? ""}
+                    onChange={(e) =>
+                      setCeilingShape({ levels: e.target.value === "" ? null : Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className={styles.heightField}>
+                  <span className={styles.heightUnit}>Высота грани, м</span>
+                  <input
+                    className={styles.heightInput}
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max="1"
+                    placeholder="0.12"
+                    value={activeRoom.ceilingShape.step_height_m ?? ""}
+                    onChange={(e) =>
+                      setCeilingShape({ step_height_m: e.target.value === "" ? null : Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+            )}
+            {activeRoom?.ceilingShape.type === "attic_slope" && (
+              <div className={styles.heightField} style={{ marginTop: 4 }}>
+                <span className={styles.heightUnit}>Угол ската, °</span>
+                <input
+                  className={styles.heightInput}
+                  type="number"
+                  step="1"
+                  min="0"
+                  max="84"
+                  placeholder="0"
+                  value={activeRoom.ceilingShape.slope_deg ?? ""}
+                  onChange={(e) =>
+                    setCeilingShape({ slope_deg: e.target.value === "" ? null : Number(e.target.value) })
+                  }
+                />
               </div>
             )}
           </div>

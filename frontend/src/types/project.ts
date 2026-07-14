@@ -1,4 +1,4 @@
-import type { EstimateScope } from "../store/projectStore";
+import type { CeilingShape, EstimateScope } from "../store/projectStore";
 
 export interface ProjectRoom {
   name: string;
@@ -7,6 +7,7 @@ export interface ProjectRoom {
   points: { x: number; y: number }[];
   openings: { type: "door" | "window"; width: number; height: number }[];
   works: Record<string, unknown>;
+  ceiling_shape?: CeilingShape | null;
 }
 
 export interface ProjectSummary {

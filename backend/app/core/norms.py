@@ -27,3 +27,9 @@ WALL_CONDITION_FACTOR: dict[str, Decimal] = {
 OTKOS_DEPTH_DEFAULT: dict[str, Decimal] = {
     key: Decimal(str(value)) for key, value in _raw["otkos_depth_default"].items()
 }
+
+# Высота вертикальной грани короба многоуровневого потолка на один уровень, м —
+# дефолт для ceiling_shape.step_height_m, если не задан явно (#357).
+CEILING_MULTILEVEL_STEP_HEIGHT_DEFAULT: Decimal = Decimal(
+    str(_raw["ceiling_multilevel_step_height_default_m"])
+)

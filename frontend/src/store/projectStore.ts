@@ -90,8 +90,17 @@ export interface Room {
 
 export type EstimateScope = "finish_only" | "rough_and_finish" | "rough_only";
 
+// Метки типов в roomTypes.ts остались каноничным описанием типа (docs/room-types.json),
+// но пользователь больше не выбирает тип явно (#366) — для имени комнаты по умолчанию
+// берём нейтральное «Комната» / «Влажное помещение», созвучное с чекбоксом в WorksPanel.
+function defaultRoomLabel(rt: RoomTypeKey): string {
+  if (rt === "living") return "Комната";
+  if (rt === "bathroom") return "Влажное помещение";
+  return roomTypes[rt].label;
+}
+
 export function getDefaultRoomName(room_type: RoomTypeKey, rooms: Room[]): string {
-  const label = roomTypes[room_type].label;
+  const label = defaultRoomLabel(room_type);
   // Первое свободное имя: «label», затем «label 2», «label 3», ...
   // Считаем по занятым именам, а не по количеству — иначе удаление первой
   // из пронумерованной пары даёт дубликат, плюс учитываем ручные имена.
@@ -153,9 +162,55 @@ const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
   plumbing: false,
 };
 
+export function migrateProjectState(persisted: unknown, version: number): Record<string, unknown> {
+  let s = persisted as Record<string, unknown>;
+
+  if (version < 2) {
+    const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
+    const fromRoom = rooms[0]?.repair_options as RepairOptions | undefined;
+    s = {
+      ...s,
+      repair_options: fromRoom ?? { ...DEFAULT_REPAIR_OPTIONS },
+      rooms: rooms.map((room) => {
+        const r = { ...room };
+        delete r['repair_options'];
+        return r;
+      }),
+    };
+  }
+
+  if (version < 3) {
+    const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
+    s = {
+      ...s,
+      rooms: rooms.map((room) => {
+        if (room.works) return room;
+        const rt = (room.room_type as RoomTypeKey) ?? "living";
+        return { ...room, works: defaultWorksForRoomType(rt) };
+      }),
+    };
+  }
+
+  if (version < 4) {
+    const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
+    s = {
+      ...s,
+      rooms: rooms.map((room) => {
+        const works = room.works as Record<string, unknown> | undefined;
+        if (!works) return room;
+        const walls = works.walls as Record<string, unknown> | undefined;
+        if (!walls || walls.wall_condition) return room;
+        return { ...room, works: { ...works, walls: { ...walls, wall_condition: "normal" } } };
+      }),
+    };
+  }
+
+  return s;
+}
+
 const createDefaultRoom = (name?: string): Room => ({
   id: uid(),
-  name: name ?? roomTypes["living"].label,
+  name: name ?? defaultRoomLabel("living"),
   height: 2.7,
   room_type: "living",
   points: [
@@ -227,7 +282,7 @@ export const useProjectStore = create<ProjectState>()(
         set((state) => {
           const newRooms = [...state.rooms];
           const room = newRooms[index];
-          const oldLabel = roomTypes[room.room_type].label;
+          const oldLabel = defaultRoomLabel(room.room_type);
           const wasAutoNamed =
             room.name === oldLabel ||
             new RegExp(`^${oldLabel}\\s\\d+$`).test(room.name);
@@ -377,54 +432,7 @@ export const useProjectStore = create<ProjectState>()(
     {
       name: "repair-estimator-draft",
       version: 4,
-      migrate: (persisted: unknown, version: number) => {
-        let s = persisted as Record<string, unknown>;
-
-        if (version < 2) {
-          // v1 → v2: repair_options переехал из rooms[i] на уровень проекта
-          const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
-          const fromRoom = rooms[0]?.repair_options as RepairOptions | undefined;
-          s = {
-            ...s,
-            repair_options: fromRoom ?? { ...DEFAULT_REPAIR_OPTIONS },
-            rooms: rooms.map((room) => {
-              const r = { ...room };
-              delete r['repair_options'];
-              return r;
-            }),
-          };
-        }
-
-        if (version < 3) {
-          // v2 → v3: works переехал на уровень каждой комнаты
-          const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
-          s = {
-            ...s,
-            rooms: rooms.map((room) => {
-              if (room.works) return room;
-              const rt = (room.room_type as RoomTypeKey) ?? "living";
-              return { ...room, works: defaultWorksForRoomType(rt) };
-            }),
-          };
-        }
-
-        if (version < 4) {
-          // v3 → v4: walls.wall_condition добавлен; подставляем "normal" для старых записей
-          const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
-          s = {
-            ...s,
-            rooms: rooms.map((room) => {
-              const works = room.works as Record<string, unknown> | undefined;
-              if (!works) return room;
-              const walls = works.walls as Record<string, unknown> | undefined;
-              if (!walls || walls.wall_condition) return room;
-              return { ...room, works: { ...works, walls: { ...walls, wall_condition: "normal" } } };
-            }),
-          };
-        }
-
-        return s;
-      },
+      migrate: migrateProjectState,
     },
   ),
 );

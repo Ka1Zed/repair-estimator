@@ -8,7 +8,6 @@ import RoomPolygonEditor from "../../components/RoomPolygonEditor";
 import RoomPointsTable from "../../components/RoomPointsTable";
 import BlueprintUpload from "../../components/BlueprintUpload";
 import OpeningsForm from "../../components/OpeningsForm";
-import { RoomTypeSelector } from "../../components/RoomTypeSelector";
 import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
 import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
@@ -21,6 +20,7 @@ import { hasSelfIntersection, validateHeight } from "../../utils/polygonValidati
 import { calculateEstimate } from "../../api/estimates";
 import { apiClient } from "../../api/client";
 import { Select } from "../../components/ui/Select";
+import { roomsToCalcPayload } from "../../utils/roomsToPayload";
 
 interface GeometryData {
   floor_area: number;
@@ -271,18 +271,7 @@ export function Workspace({
           city,
           scope,
           tier: "avg",
-          rooms: rooms.map((room) => ({
-            name: room.name,
-            room_type: room.room_type,
-            height: Number(room.height),
-            openings: room.openings.map((op) => ({
-              ...op,
-              width: Number(op.width),
-              height: Number(op.height),
-            })),
-            points: room.points.map((p) => ({ x: Number(p.x), y: Number(p.y) })),
-            works: room.works,
-          })),
+          rooms: roomsToCalcPayload(rooms),
         };
         // Один запрос вместо трёх параллельных (#349): бэкенд теперь сам отдаёт
         // min_item/avg_item/max_item на каждой строке материала — для 6 finish_key-позиций
@@ -493,6 +482,7 @@ export function Workspace({
         name: activeName,
         volume: `${formatQty(m.quantity)} ${m.unit}`,
         price: rub(Math.round(activePrice)),
+        total: rub(Math.round(activeTotal)),
         activeMode: effectiveMode,
         isOverridden: materialOverrides[i] !== undefined && materialOverrides[i] !== priceMode,
         variants: variants.length > 0 ? variants : undefined,
@@ -581,6 +571,7 @@ export function Workspace({
       subtitle: l.specialist,
       volume: `${formatQty(l.volume)} ${l.unit}`,
       price: rub(Math.round(activePrice)),
+      total: rub(Math.round(activeTotal)),
       activeMode: effectiveMode,
       variants: variants.length > 0 ? variants : undefined,
       details: [
@@ -717,11 +708,6 @@ export function Workspace({
               </button>
             </div>
           </div>
-        </div>
-
-        <div className={styles.block}>
-          <div className={styles.blockLabel}>Тип комнаты</div>
-          <RoomTypeSelector />
         </div>
 
         <div className={styles.block}>

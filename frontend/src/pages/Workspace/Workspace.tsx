@@ -100,6 +100,8 @@ export function Workspace({
   const setCity = useProjectStore((s) => s.setCity);
   const scope = useProjectStore((s) => s.scope);
   const setScope = useProjectStore((s) => s.setScope);
+  const store = useProjectStore((s) => s.store);
+  const setStore = useProjectStore((s) => s.setStore);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
@@ -109,6 +111,8 @@ export function Workspace({
   const [data, setData] = useState<EstimateResponse | null>(null);
   const [tab, setTab] = useState<"materials" | "labor">("materials");
   const [regions, setRegions] = useState<string[]>([]);
+  const [stores, setStores] = useState<{ name: string; available: boolean }[]>([]);
+  const [storeResetNotice, setStoreResetNotice] = useState<string | null>(null);
 
   // project save / share state
   const [savedProjectId, setSavedProjectId] = useState<number | null>(projectId ?? null);
@@ -225,6 +229,42 @@ export function Workspace({
     [regions, city],
   );
 
+  // Доступность магазинов материалов (Мегастрой/Леман) в выбранном городе (#365):
+  // Мегастрой и Леман покрывают разные города по-разному (см. docs/price-sources.md).
+  useEffect(() => {
+    apiClient
+      .fetchStores(city)
+      .then((res) => setStores(res.stores))
+      .catch((err) => console.error("Не удалось загрузить список магазинов:", err));
+  }, [city]);
+
+  // Если выбранный магазин стал недоступен после смены города — сбрасываем на
+  // «Любой» (автоподбор бэкендом) и явно показываем пользователю, что изменилось,
+  // а не тихо игнорируем выбор.
+  useEffect(() => {
+    if (!store) return;
+    const found = stores.find((s) => s.name === store);
+    if (found && !found.available) {
+      setStore(null);
+      setStoreResetNotice(`«${store}» недоступен в городе «${city}» — выбор сброшен на «Любой».`);
+      const timer = setTimeout(() => setStoreResetNotice(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [stores, store, city, setStore]);
+
+  const storeOptions = useMemo(
+    () => [
+      { value: "", label: "Любой" },
+      ...stores.map((s) => ({
+        value: s.name,
+        label: s.name,
+        disabled: !s.available,
+        title: s.available ? undefined : `${s.name} сейчас недоступен в городе «${city}»`,
+      })),
+    ],
+    [stores, city],
+  );
+
   // silent=true — авто-пересчёт по дебаунсу: молча пропускаем невалидное состояние,
   // не пугаем пользователя ошибкой, пока он редактирует.
   const runCalculate = useCallback(
@@ -271,6 +311,7 @@ export function Workspace({
           city,
           scope,
           tier: "avg",
+          stores: store ? [store] : null,
           rooms: roomsToCalcPayload(rooms),
         };
         // Один запрос вместо трёх параллельных (#349): бэкенд теперь сам отдаёт
@@ -306,7 +347,7 @@ export function Workspace({
         setIsLoading(false);
       }
     },
-    [rooms, city, scope],
+    [rooms, city, scope, store],
   );
 
   // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
@@ -665,6 +706,21 @@ export function Workspace({
               options={cityOptions.map((c) => ({ value: c, label: c }))}
               onChange={setCity}
             />
+          </div>
+          <div className={styles.cityField}>
+            <div className={styles.blockLabel}>Магазин</div>
+            <Select
+              variant="underline"
+              ariaLabel="Магазин материалов"
+              value={store ?? ""}
+              options={storeOptions}
+              onChange={(v) => setStore(v || null)}
+            />
+            {storeResetNotice && (
+              <div className={styles.error} style={{ marginTop: 4, fontSize: 12 }}>
+                {storeResetNotice}
+              </div>
+            )}
           </div>
           <div className={styles.heightField}>
             <div className={styles.blockLabel}>Высота потолка</div>

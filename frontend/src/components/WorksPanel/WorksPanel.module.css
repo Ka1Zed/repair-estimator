@@ -100,8 +100,9 @@
   padding: 12px 14px;
 }
 
-.wetRoomHint {
-  font-weight: 400;
+.wetRoomDescription {
+  margin: 6px 0 0;
   font-size: 12px;
+  line-height: 1.4;
   color: #9a9a9a;
 }

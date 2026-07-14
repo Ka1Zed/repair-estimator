@@ -75,20 +75,6 @@ export const WorksPanel: React.FC = () => {
 
   return (
     <div className={styles.panel}>
-      {/* Влажное помещение */}
-      <label className={`${styles.checkRow} ${styles.wetRoomRow}`}>
-        <input
-          type="checkbox"
-          className={styles.check}
-          checked={isWetRoom}
-          onChange={(e) => handleWetRoomChange(e.target.checked)}
-        />
-        <span className={styles.groupName}>
-          Влажное помещение
-          <span className={styles.wetRoomHint}>&nbsp;(ванна / санузел, гидроизоляция)</span>
-        </span>
-      </label>
-
       {/* Пол */}
       <div className={styles.group}>
         <label className={styles.checkRow}>
@@ -257,6 +243,24 @@ export const WorksPanel: React.FC = () => {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Влажное помещение */}
+      <div className={styles.wetRoomRow}>
+        <label className={styles.checkRow}>
+          <input
+            type="checkbox"
+            className={styles.check}
+            checked={isWetRoom}
+            onChange={(e) => handleWetRoomChange(e.target.checked)}
+          />
+          <span className={styles.groupName}>Влажное помещение</span>
+        </label>
+        <p className={styles.wetRoomDescription}>
+          Добавляет в смету гидроизоляцию для мокрой зоны (ванна, санузел). На состав
+          сантехнических работ не влияет — розетки/точки подключения и трубы задаются
+          отдельно чекбоксом «Сантехника» выше.
+        </p>
       </div>
     </div>
   );

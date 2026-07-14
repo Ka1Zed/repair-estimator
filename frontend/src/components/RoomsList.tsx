@@ -24,6 +24,7 @@ export default function RoomsList() {
               type="text"
               value={room.name}
               placeholder="Например: Спальня, Сарай, Мастерская"
+              title="Нажмите, чтобы переименовать"
               onChange={(e) => updateRoomName(index, e.target.value)}
               onClick={(e) => {
                 e.stopPropagation();

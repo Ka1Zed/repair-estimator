@@ -13,18 +13,18 @@ const makeRoom = (name: string): Room => ({
 });
 
 describe("getDefaultRoomName", () => {
-  it("возвращает метку типа, если список пуст", () => {
-    expect(getDefaultRoomName("living", [])).toBe("Жилая комната");
+  it("для living возвращает нейтральное «Комната», если список пуст", () => {
+    expect(getDefaultRoomName("living", [])).toBe("Комната");
   });
 
   it("возвращает метку с суффиксом 2, если первое имя занято", () => {
-    const rooms = [makeRoom("Жилая комната")];
-    expect(getDefaultRoomName("living", rooms)).toBe("Жилая комната 2");
+    const rooms = [makeRoom("Комната")];
+    expect(getDefaultRoomName("living", rooms)).toBe("Комната 2");
   });
 
   it("пропускает уже занятые номера", () => {
-    const rooms = [makeRoom("Санузел"), makeRoom("Санузел 2")];
-    expect(getDefaultRoomName("bathroom", rooms)).toBe("Санузел 3");
+    const rooms = [makeRoom("Влажное помещение"), makeRoom("Влажное помещение 2")];
+    expect(getDefaultRoomName("bathroom", rooms)).toBe("Влажное помещение 3");
   });
 
   it("не зависит от ручных имён без совпадения", () => {

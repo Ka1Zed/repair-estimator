@@ -90,8 +90,17 @@ export interface Room {
 
 export type EstimateScope = "finish_only" | "rough_and_finish" | "rough_only";
 
+// Метки типов в roomTypes.ts остались каноничным описанием типа (docs/room-types.json),
+// но пользователь больше не выбирает тип явно (#366) — для имени комнаты по умолчанию
+// берём нейтральное «Комната» / «Влажное помещение», созвучное с чекбоксом в WorksPanel.
+function defaultRoomLabel(rt: RoomTypeKey): string {
+  if (rt === "living") return "Комната";
+  if (rt === "bathroom") return "Влажное помещение";
+  return roomTypes[rt].label;
+}
+
 export function getDefaultRoomName(room_type: RoomTypeKey, rooms: Room[]): string {
-  const label = roomTypes[room_type].label;
+  const label = defaultRoomLabel(room_type);
   // Первое свободное имя: «label», затем «label 2», «label 3», ...
   // Считаем по занятым именам, а не по количеству — иначе удаление первой
   // из пронумерованной пары даёт дубликат, плюс учитываем ручные имена.
@@ -201,7 +210,7 @@ export function migrateProjectState(persisted: unknown, version: number): Record
 
 const createDefaultRoom = (name?: string): Room => ({
   id: uid(),
-  name: name ?? roomTypes["living"].label,
+  name: name ?? defaultRoomLabel("living"),
   height: 2.7,
   room_type: "living",
   points: [
@@ -273,7 +282,7 @@ export const useProjectStore = create<ProjectState>()(
         set((state) => {
           const newRooms = [...state.rooms];
           const room = newRooms[index];
-          const oldLabel = roomTypes[room.room_type].label;
+          const oldLabel = defaultRoomLabel(room.room_type);
           const wasAutoNamed =
             room.name === oldLabel ||
             new RegExp(`^${oldLabel}\\s\\d+$`).test(room.name);

@@ -8,7 +8,6 @@ import RoomPolygonEditor from "../../components/RoomPolygonEditor";
 import RoomPointsTable from "../../components/RoomPointsTable";
 import BlueprintUpload from "../../components/BlueprintUpload";
 import OpeningsForm from "../../components/OpeningsForm";
-import { RoomTypeSelector } from "../../components/RoomTypeSelector";
 import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
 import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
@@ -692,11 +691,6 @@ export function Workspace({
               </button>
             </div>
           </div>
-        </div>
-
-        <div className={styles.block}>
-          <div className={styles.blockLabel}>Тип комнаты</div>
-          <RoomTypeSelector />
         </div>
 
         <div className={styles.block}>

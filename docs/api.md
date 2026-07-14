@@ -158,7 +158,8 @@
         "ceiling":  {"enabled": true, "finish": "paint", "primer_two_coats": false},
         "electric": {"enabled": true, "sockets": 6, "lights": 2, "cable_m": null},
         "plumbing": {"enabled": false, "points": 0, "pipe_m": 0}
-      }
+      },
+      "ceiling_shape": null
     }
   ]
 }
@@ -214,6 +215,24 @@
   светильников типа комнаты. Не связано с `electric.lights` (закладная ≠ монтаж светильника).
 - `ceiling.curtain_niche_m` — натяжной потолок: погонаж ниши под карниз/штору (строка
   `Ниша под карниз`). `null`/`0` → ниши нет. См. estimation-rules.md, «Откосы и натяжной потолок».
+
+### Поле `ceiling_shape` (на каждую комнату, опционально, #357)
+
+Форма потолка — влияет на `geometry.ceiling_area` в ответе (и, следовательно, на расход
+краски потолка, которая считается от `ceiling_area`). `null` или отсутствие поля — плоский
+потолок, `ceiling_area = floor_area` (прежнее поведение).
+
+| Поле            | Тип             | Описание                                                                 |
+| --------------- | --------------- | -------------------------------------------------------------------------- |
+| `type`          | string          | `"flat"` (дефолт) \| `"multilevel"` \| `"attic_slope"`.                    |
+| `levels`        | number \| null  | `multilevel`: число уровней/ступеней короба, 1–5. `null` → 1.              |
+| `step_height_m` | number \| null  | `multilevel`: высота вертикальной грани короба на один уровень, м, 0–1. `null` → дефолт нормы (0.12 м). |
+| `slope_deg`     | number \| null  | `attic_slope`: угол ската от горизонтали, °, 0–85. `null` → 0 (эквивалент плоского). |
+
+Формулы (см. estimation-rules.md, «Форма потолка»):
+`multilevel` → `ceiling_area = floor_area + perimeter × step_height_m × levels`;
+`attic_slope` → `ceiling_area = floor_area / cos(slope_deg)`.
+Значение вне диапазона — `422` с описанием ошибки (та же валидация, что у проёмов).
 
 ### `room_type` — пресет дефолтов, не констрейнт
 

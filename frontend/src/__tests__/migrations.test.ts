@@ -103,4 +103,47 @@ describe("migrateProjectState", () => {
 
     expect(walls.wall_condition).toBe("uneven");
   });
+
+  it("v4 → v5: добавляет ceilingShape: flat к комнатам, у которых его нет", () => {
+    const v4State = {
+      city: "Казань",
+      scope: "finish_only",
+      rooms: [
+        {
+          id: "r1",
+          name: "Жилая комната",
+          height: 2.7,
+          room_type: "living",
+          points: [],
+          openings: [],
+          works: {},
+        },
+      ],
+    };
+
+    const result = migrateProjectState(v4State, 4);
+    const rooms = result.rooms as Array<Record<string, unknown>>;
+    const ceilingShape = rooms[0].ceilingShape as Record<string, unknown>;
+
+    expect(ceilingShape.type).toBe("flat");
+  });
+
+  it("v4 → v5: не перетирает уже существующий ceilingShape", () => {
+    const v4State = {
+      rooms: [
+        {
+          id: "r1",
+          room_type: "living",
+          ceilingShape: { type: "multilevel", levels: 2, step_height_m: 0.1, slope_deg: null },
+        },
+      ],
+    };
+
+    const result = migrateProjectState(v4State, 4);
+    const rooms = result.rooms as Array<Record<string, unknown>>;
+    const ceilingShape = rooms[0].ceilingShape as Record<string, unknown>;
+
+    expect(ceilingShape.type).toBe("multilevel");
+    expect(ceilingShape.levels).toBe(2);
+  });
 });

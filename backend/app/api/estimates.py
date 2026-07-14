@@ -224,7 +224,8 @@ def calculate_estimate(
             geometry = calculate_room_geometry(
                 points=[(p.x, p.y) for p in room.points],
                 height=room.height,
-                openings=[(o.type, o.width, o.height, o.depth) for o in room.openings]
+                openings=[(o.type, o.width, o.height, o.depth) for o in room.openings],
+                ceiling_shape=room.ceiling_shape.model_dump() if room.ceiling_shape else None,
             )
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))

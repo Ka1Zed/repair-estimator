@@ -1,8 +1,9 @@
 
 from typing import List, Union, Dict, Any, Optional
 from decimal import Decimal, getcontext
+import math
 
-from app.core.norms import OTKOS_DEPTH_DEFAULT
+from app.core.norms import OTKOS_DEPTH_DEFAULT, CEILING_MULTILEVEL_STEP_HEIGHT_DEFAULT
 
 getcontext().prec = 28
 
@@ -92,10 +93,57 @@ def _validate_openings(
             f"Суммарная площадь проёмов ({total_opening_area:.2f} м²) не может быть больше или равна площади стен ({wall_area_before:.2f} м²)."
         )
 
+def _ceiling_area(
+    floor: Decimal,
+    perim: Decimal,
+    ceiling_shape: Optional[Dict[str, Any]],
+) -> Decimal:
+    """
+    Площадь потолка по форме (#357). ceiling_shape=None или type="flat" —
+    плоский потолок, площадь равна проекции пола (прежнее поведение).
+
+    - multilevel: ceiling_area = floor + perimeter × step_height_m × levels
+      (верхние грани коробов ≈ проекция пола, добавляем только вертикальные
+      грани коробов по периметру помещения на каждый уровень).
+    - attic_slope: ceiling_area = floor / cos(slope_deg) (единая наклонная
+      плоскость над всей проекцией пола).
+    """
+    if not ceiling_shape:
+        return floor
+
+    shape_type = ceiling_shape.get('type', 'flat')
+    if shape_type == 'flat' or shape_type is None:
+        return floor
+
+    if shape_type == 'multilevel':
+        levels = ceiling_shape.get('levels')
+        levels = int(levels) if levels is not None else 1
+        if levels < 1 or levels > 5:
+            raise ValueError("Число уровней потолка должно быть от 1 до 5.")
+
+        step_height = ceiling_shape.get('step_height_m')
+        step_height = to_decimal(step_height) if step_height is not None else CEILING_MULTILEVEL_STEP_HEIGHT_DEFAULT
+        if step_height <= 0 or step_height > 1:
+            raise ValueError("Высота грани короба должна быть больше 0 и не более 1 м.")
+
+        return floor + perim * step_height * Decimal(levels)
+
+    if shape_type == 'attic_slope':
+        slope_deg = ceiling_shape.get('slope_deg')
+        slope_deg = to_decimal(slope_deg) if slope_deg is not None else Decimal('0')
+        if slope_deg < 0 or slope_deg >= 85:
+            raise ValueError("Угол ската потолка должен быть от 0 до 85°.")
+
+        cos_slope = Decimal(str(math.cos(math.radians(float(slope_deg)))))
+        return floor / cos_slope
+
+    raise ValueError(f'Неизвестная форма потолка: "{shape_type}".')
+
 def calculate_room_geometry(
     points: List[Union[tuple, list, dict]],
     height: Union[int, float, str, Decimal],
-    openings: Optional[List[Union[dict, tuple]]] = None
+    openings: Optional[List[Union[dict, tuple]]] = None,
+    ceiling_shape: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Decimal]:
     """
     Рассчитывает геометрию комнаты с валидацией проёмов.
@@ -171,7 +219,7 @@ def calculate_room_geometry(
 
     return {
         'floor_area': floor,
-        'ceiling_area': floor,
+        'ceiling_area': _ceiling_area(floor, perim, ceiling_shape),
         'wall_area': wall,
         'perimeter': perim,
         'door_width_sum': door_width_sum,

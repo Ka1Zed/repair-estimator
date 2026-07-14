@@ -14,6 +14,12 @@ import type { FloorFinish, WallFinish, CeilingFinish } from "../../types/roomTyp
 import { Select } from "../ui/Select";
 import styles from "./WorksPanel.module.css";
 
+// Тип комнаты используется как внутренний признак:
+// bathroom = влажное помещение (гидроизоляция, сантехника required).
+// Пользователь выбирает только флаг «Влажное помещение», тип задаётся автоматически.
+const WET_ROOM_TYPE = "bathroom" as const;
+const DRY_ROOM_TYPE = "living" as const;
+
 const WALL_CONDITION_OPTIONS: { value: WallCondition; label: string }[] = [
   { value: "even", label: "Ровные (−40% шпаклёвки)" },
   { value: "normal", label: "Нормальные" },
@@ -24,12 +30,18 @@ export const WorksPanel: React.FC = () => {
   const rooms = useProjectStore((s) => s.rooms);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const updateRoomWorks = useProjectStore((s) => s.updateRoomWorks);
+  const updateActiveRoomType = useProjectStore((s) => s.updateActiveRoomType);
 
   const room = rooms[activeRoomIndex];
   if (!room) return null;
 
+  const isWetRoom = room.room_type === WET_ROOM_TYPE;
   const works = room.works ?? defaultWorksForRoomType(room.room_type);
   const allowed = allowedWorks(room.room_type);
+
+  const handleWetRoomChange = (checked: boolean) => {
+    updateActiveRoomType(activeRoomIndex, checked ? WET_ROOM_TYPE : DRY_ROOM_TYPE);
+  };
 
   const setFloor = (patch: Partial<FloorWorks>) =>
     updateRoomWorks(activeRoomIndex, { floor: { ...works.floor, ...patch } });
@@ -63,6 +75,20 @@ export const WorksPanel: React.FC = () => {
 
   return (
     <div className={styles.panel}>
+      {/* Влажное помещение */}
+      <label className={`${styles.checkRow} ${styles.wetRoomRow}`}>
+        <input
+          type="checkbox"
+          className={styles.check}
+          checked={isWetRoom}
+          onChange={(e) => handleWetRoomChange(e.target.checked)}
+        />
+        <span className={styles.groupName}>
+          Влажное помещение
+          <span className={styles.wetRoomHint}>&nbsp;(ванна / санузел, гидроизоляция)</span>
+        </span>
+      </label>
+
       {/* Пол */}
       <div className={styles.group}>
         <label className={styles.checkRow}>

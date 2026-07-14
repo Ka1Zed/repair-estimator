@@ -23,6 +23,7 @@ export default function RoomsList() {
             <input
               type="text"
               value={room.name}
+              placeholder="Например: Спальня, Сарай, Мастерская"
               onChange={(e) => updateRoomName(index, e.target.value)}
               onClick={(e) => {
                 e.stopPropagation();

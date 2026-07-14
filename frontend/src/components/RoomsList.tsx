@@ -1,4 +1,4 @@
-import { useProjectStore } from "../store/projectStore";
+import { useProjectStore, getDefaultRoomName } from "../store/projectStore";
 import styles from "./RoomsList.module.css";
 
 export default function RoomsList() {
@@ -9,6 +9,14 @@ export default function RoomsList() {
   const addRoom = useProjectStore((state) => state.addRoom);
   const deleteRoom = useProjectStore((state) => state.deleteRoom);
   const updateRoomName = useProjectStore((state) => state.updateRoomName);
+
+  const handleNameBlur = (index: number) => {
+    const room = rooms[index];
+    if (room.name.trim() === "") {
+      const otherRooms = rooms.filter((_, i) => i !== index);
+      updateRoomName(index, getDefaultRoomName(room.room_type, otherRooms));
+    }
+  };
 
   return (
     <div className={styles.list}>
@@ -23,9 +31,9 @@ export default function RoomsList() {
             <input
               type="text"
               value={room.name}
-              placeholder="Например: Спальня, Сарай, Мастерская"
               title="Нажмите, чтобы переименовать"
               onChange={(e) => updateRoomName(index, e.target.value)}
+              onBlur={() => handleNameBlur(index)}
               onClick={(e) => {
                 e.stopPropagation();
                 setActiveRoom(index);

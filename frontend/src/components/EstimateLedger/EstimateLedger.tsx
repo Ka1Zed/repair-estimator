@@ -26,8 +26,6 @@ export interface LedgerRow {
   details: { label: string; value: string; url?: string | null }[];
   variants?: LedgerRowVariant[];
   activeMode?: "min" | "avg" | "max";
-  /** Строка закреплена на уровне, отличном от глобального */
-  isOverridden?: boolean;
 }
 
 interface EstimateLedgerProps {

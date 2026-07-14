@@ -478,12 +478,13 @@ export function Workspace({
 
   const materialRows: LedgerRow[] = useMemo(
     () =>
-      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, sourceLabel, sourceCount, variants }) => ({
+      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, sourceLabel, sourceCount, variants }, i) => ({
         name: activeName,
         volume: `${formatQty(m.quantity)} ${m.unit}`,
         price: rub(Math.round(activePrice)),
         total: rub(Math.round(activeTotal)),
         activeMode: effectiveMode,
+        isOverridden: materialOverrides[i] !== undefined && materialOverrides[i] !== priceMode,
         variants: variants.length > 0 ? variants : undefined,
         details: [
           { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
@@ -506,7 +507,7 @@ export function Workspace({
             : []),
         ],
       })),
-    [materialsActive, city],
+    [materialsActive, materialOverrides, city, priceMode],
   );
 
   // Работы с учётом эффективного уровня по каждой строке. В отличие от материалов,
@@ -592,9 +593,23 @@ export function Workspace({
   );
 
   const laborRows: LedgerRow[] = useMemo(
-    () => laborActive.map(laborItemToRow),
-    [laborActive, laborItemToRow],
+    () => laborActive.map((item, i) => ({
+      ...laborItemToRow(item),
+      isOverridden: laborOverrides[i] !== undefined && laborOverrides[i] !== priceMode,
+    })),
+    [laborActive, laborItemToRow, laborOverrides, priceMode],
   );
+
+  const hasMixedOverrides = useMemo(() => {
+    const matMixed = Object.entries(materialOverrides).some(([, mode]) => mode !== priceMode);
+    const labMixed = Object.entries(laborOverrides).some(([, mode]) => mode !== priceMode);
+    return matMixed || labMixed;
+  }, [materialOverrides, laborOverrides, priceMode]);
+
+  const clearAllOverrides = useCallback(() => {
+    setMaterialOverrides({});
+    setLaborOverrides({});
+  }, []);
 
   // Работы, сгруппированные по стадиям (черновая/предчистовая/чистовая) — для
   // сметы «Черновая + чистовая». В режиме «только чистовая» группировки нет.
@@ -951,8 +966,18 @@ export function Workspace({
                       style={{ right: 0 }}
                     />
                   </div>
+
+                  {hasMixedOverrides && (
+                    <div className={styles.mixedOverrideHint}>
+                      <span className={styles.mixedOverrideIcon}>⚠</span>
+                      <span>Часть позиций закреплена на отдельном уровне</span>
+                      <button className={styles.resetOverridesBtn} onClick={clearAllOverrides}>
+                        Сбросить
+                      </button>
+                    </div>
+                  )}
                 </div>
-                
+
                 <div className={`${styles.exportRow} ${styles.exportRowPadded}`}>
                   <button
                     className={styles.exportBtn}

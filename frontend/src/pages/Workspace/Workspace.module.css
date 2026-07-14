@@ -841,3 +841,33 @@
   color: #b04a4a;
   margin-top: 2px;
 }
+
+.mixedOverrideHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #b07b5e;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.mixedOverrideIcon {
+  font-size: 13px;
+}
+
+.resetOverridesBtn {
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: inherit;
+  cursor: pointer;
+  margin-left: 4px;
+  opacity: 0.8;
+}
+
+.resetOverridesBtn:hover {
+  opacity: 1;
+}

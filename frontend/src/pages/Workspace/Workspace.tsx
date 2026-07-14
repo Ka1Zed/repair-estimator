@@ -758,7 +758,14 @@ export function Workspace({
               ariaLabel="Форма потолка"
               value={activeRoom?.ceilingShape.type ?? "flat"}
               options={CEILING_SHAPE_OPTIONS}
-              onChange={(v) => setCeilingShape({ type: v as CeilingShapeType })}
+              onChange={(v) =>
+                setCeilingShape({
+                  type: v as CeilingShapeType,
+                  levels: null,
+                  step_height_m: null,
+                  slope_deg: null,
+                })
+              }
             />
             {activeRoom?.ceilingShape.type === "multilevel" && (
               <div style={{ display: "flex", gap: 16, marginTop: 4 }}>

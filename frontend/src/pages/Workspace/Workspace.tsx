@@ -494,7 +494,7 @@ export function Workspace({
         volume: `${formatQty(m.quantity)} ${m.unit}`,
         price: rub(Math.round(activePrice)),
         activeMode: effectiveMode,
-        isOverridden: i in materialOverrides,
+        isOverridden: materialOverrides[i] !== undefined && materialOverrides[i] !== priceMode,
         variants: variants.length > 0 ? variants : undefined,
         details: [
           { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
@@ -517,7 +517,7 @@ export function Workspace({
             : []),
         ],
       })),
-    [materialsActive, materialOverrides, city],
+    [materialsActive, materialOverrides, city, priceMode],
   );
 
   // Работы с учётом эффективного уровня по каждой строке. В отличие от материалов,
@@ -604,9 +604,9 @@ export function Workspace({
   const laborRows: LedgerRow[] = useMemo(
     () => laborActive.map((item, i) => ({
       ...laborItemToRow(item),
-      isOverridden: i in laborOverrides,
+      isOverridden: laborOverrides[i] !== undefined && laborOverrides[i] !== priceMode,
     })),
-    [laborActive, laborItemToRow, laborOverrides],
+    [laborActive, laborItemToRow, laborOverrides, priceMode],
   );
 
   const hasMixedOverrides = useMemo(() => {

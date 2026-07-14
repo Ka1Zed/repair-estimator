@@ -77,24 +77,9 @@
   padding: 1px 6px;
   border-radius: 3px;
   vertical-align: middle;
-}
-
-.overrideBadge_min {
-  background: #e8f5e9;
-  color: #2e7d32;
-  border: 1px solid #a5d6a7;
-}
-
-.overrideBadge_avg {
-  background: var(--accent-bg, #fdf5f0);
-  color: var(--accent, #b07b5e);
-  border: 1px solid var(--accent-border, #e8cfc0);
-}
-
-.overrideBadge_max {
-  background: #fce4ec;
-  color: #c62828;
-  border: 1px solid #ef9a9a;
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
 }
 
 .subtitle {

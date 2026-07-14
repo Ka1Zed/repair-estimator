@@ -67,10 +67,7 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
                 <span className={styles.nameMain}>
                   {row.name}
                   {row.isOverridden && row.activeMode && (
-                    <span
-                      className={`${styles.overrideBadge} ${styles[`overrideBadge_${row.activeMode}`]}`}
-                      title="Уровень закреплён для этой позиции"
-                    >
+                    <span className={styles.overrideBadge} title="Уровень закреплён для этой позиции">
                       {row.activeMode === "min" ? "эконом" : row.activeMode === "max" ? "премиум" : "стандарт"}
                     </span>
                   )}

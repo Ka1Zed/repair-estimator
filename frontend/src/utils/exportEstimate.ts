@@ -53,6 +53,11 @@ const totalStyle = {
   fill: { patternType: 'solid', fgColor: { rgb: XLS.accent } },
   border: allBorders,
 };
+const bannerStyle = {
+  font: { bold: true, sz: 11, color: { rgb: XLS.white } },
+  fill: { patternType: 'solid', fgColor: { rgb: XLS.accent } },
+  alignment: { horizontal: 'left', vertical: 'center', wrapText: true },
+};
 
 const cellAt = (ws: XLSX.WorkSheet, r: number, c: number) => {
   const ref = XLSX.utils.encode_cell({ r, c });
@@ -115,6 +120,31 @@ const MODE_LABELS: Record<PriceMode, string> = {
   min: 'Минимальный',
   avg: 'Средний',
   max: 'Максимальный'
+};
+
+// Человекочитаемое пояснение уровня вилки для баннера в начале документа (#369) —
+// клиенты не замечали мелкую строку «Уровень цен: ...», нужен явный смысл фразой.
+const TIER_SENTENCES: Record<PriceMode, string> = {
+  min: 'Смета рассчитана по минимальным ценам на материалы и работы',
+  avg: 'Смета рассчитана по средним ценам на материалы и работы',
+  max: 'Смета рассчитана по максимальным ценам на материалы и работы',
+};
+
+// Смешанный расчёт: часть позиций закреплена (#331/#364) на своём уровне вилки,
+// отличном от глобального priceMode — текст должен предупреждать об этом отдельно.
+const hasMixedTiers = (
+  priceMode: PriceMode,
+  materialOverrides?: Record<number, PriceMode>,
+  laborOverrides?: Record<number, PriceMode>,
+) => {
+  const matMixed = materialOverrides ? Object.values(materialOverrides).some((mode) => mode !== priceMode) : false;
+  const labMixed = laborOverrides ? Object.values(laborOverrides).some((mode) => mode !== priceMode) : false;
+  return matMixed || labMixed;
+};
+
+const buildTierBanner = (priceMode: PriceMode, mixed: boolean) => {
+  const sentence = `${TIER_SENTENCES[priceMode]}.`;
+  return mixed ? `${sentence} Часть позиций закреплена на отдельном уровне вилки.` : sentence;
 };
 
 // Множитель уровня цен, СВОЙ для каждого раздела: у позиций без своей вилки (нет
@@ -229,10 +259,13 @@ export const exportXlsx = (
   const scaleLab = scaleFor(s, priceMode, 'labor');
 
   const metaLine = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${today}`;
+  const mixed = hasMixedTiers(priceMode, materialOverrides, laborOverrides);
+  const banner = buildTierBanner(priceMode, mixed);
 
   // ---------- Сводка: город/дата, геометрия, итоги min/avg/max ----------
   const summaryAoa: (string | number)[][] = [
     ['Смета на ремонт'],
+    [banner],
     [metaLine],
     [],
   ];
@@ -256,13 +289,16 @@ export const exportXlsx = (
 
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryAoa);
   summarySheet['!cols'] = [{ wch: 26 }, { wch: 18 }, { wch: 18 }, { wch: 18 }];
+  summarySheet['!rows'] = [{ hpt: 20 }, { hpt: 24 }];
   summarySheet['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
     { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 3 } },
   ];
   cellAt(summarySheet, 0, 0).s = titleStyle;
-  cellAt(summarySheet, 1, 0).s = metaStyle;
-  if (geomEntries.length) cellAt(summarySheet, 3, 0).s = sectionStyle;
+  cellAt(summarySheet, 1, 0).s = bannerStyle;
+  cellAt(summarySheet, 2, 0).s = metaStyle;
+  if (geomEntries.length) cellAt(summarySheet, 4, 0).s = sectionStyle;
   cellAt(summarySheet, costFirst - 2, 0).s = sectionStyle;
   styleTable(summarySheet, {
     headerRow: costFirst - 1,
@@ -535,20 +571,32 @@ export const exportPdf = async (
     },
   });
 
-  // Обложка: титул + акцентная линейка + мета
+  // Обложка: титул + акцентная линейка + баннер уровня вилки + мета
   doc.setFontSize(22);
   doc.setTextColor(...PDF_HEADING);
   doc.text('Смета на ремонт', marginX, 22);
   doc.setDrawColor(...PDF_ACCENT);
   doc.setLineWidth(0.8);
   doc.line(marginX, 26, pageW - marginX, 26);
+
+  // Цветной баннер вместо мелкой строки «Уровень цен: ...» — клиенты её не замечали (#369).
+  const mixed = hasMixedTiers(priceMode, materialOverrides, laborOverrides);
+  const bannerLines = doc.splitTextToSize(buildTierBanner(priceMode, mixed), pageW - marginX * 2 - 8);
+  const bannerY = 30;
+  const bannerHeight = bannerLines.length * 5 + 5;
+  doc.setFillColor(...PDF_ACCENT);
+  doc.roundedRect(marginX, bannerY, pageW - marginX * 2, bannerHeight, 2, 2, 'F');
+  doc.setFontSize(10.5);
+  doc.setTextColor(...PDF_WHITE);
+  doc.text(bannerLines, marginX + 4, bannerY + 6);
+
   doc.setFontSize(10);
   doc.setTextColor(...PDF_MUTED);
-  
   const meta = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${new Date().toLocaleDateString('ru-RU')}`;
-  doc.text(meta, marginX, 33);
+  const metaY = bannerY + bannerHeight + 6;
+  doc.text(meta, marginX, metaY);
 
-  let currentY = 44;
+  let currentY = metaY + 11;
 
   if (data.geometry && Object.keys(data.geometry).length > 0) {
     doc.setFontSize(11);

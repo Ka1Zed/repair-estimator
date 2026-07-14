@@ -231,26 +231,23 @@ export function Workspace({
 
   // Доступность магазинов материалов (Мегастрой/Леман) в выбранном городе (#365):
   // Мегастрой и Леман покрывают разные города по-разному (см. docs/price-sources.md).
+  // Сброс невалидного выбора магазина (если он стал недоступен после смены города)
+  // делаем прямо в колбэке ответа, а не отдельным эффектом-синхронизацией — иначе
+  // setState вызывается синхронно в теле эффекта (react-hooks/set-state-in-effect).
   useEffect(() => {
     apiClient
       .fetchStores(city)
-      .then((res) => setStores(res.stores))
+      .then((res) => {
+        setStores(res.stores);
+        const found = store && res.stores.find((s) => s.name === store);
+        if (found && !found.available) {
+          setStore(null);
+          setStoreResetNotice(`«${store}» недоступен в городе «${city}» — выбор сброшен на «Любой».`);
+          setTimeout(() => setStoreResetNotice(null), 5000);
+        }
+      })
       .catch((err) => console.error("Не удалось загрузить список магазинов:", err));
-  }, [city]);
-
-  // Если выбранный магазин стал недоступен после смены города — сбрасываем на
-  // «Любой» (автоподбор бэкендом) и явно показываем пользователю, что изменилось,
-  // а не тихо игнорируем выбор.
-  useEffect(() => {
-    if (!store) return;
-    const found = stores.find((s) => s.name === store);
-    if (found && !found.available) {
-      setStore(null);
-      setStoreResetNotice(`«${store}» недоступен в городе «${city}» — выбор сброшен на «Любой».`);
-      const timer = setTimeout(() => setStoreResetNotice(null), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [stores, store, city, setStore]);
+  }, [city, store, setStore]);
 
   const storeOptions = useMemo(
     () => [

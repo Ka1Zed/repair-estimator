@@ -33,12 +33,16 @@ services:
       POSTGRES_PORT: 5432
       # CORS: на сервере выставить адрес сайта (см. .env.example).
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      # Ходить ли в живой парсер материалов при расчёте сметы (см. .env.example).
+      # На проде обязательно false — иначе расчёт синхронно дёргает
+      # headless-браузер прямо в request-path.
+      PARSER_LIVE_FETCH: ${PARSER_LIVE_FETCH:-true}
       # Ключи beta-распознавания чертежа (опциональны).
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       GEMINI_ENABLED: ${GEMINI_ENABLED:-true}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
     ports:
       - "8000:8000"

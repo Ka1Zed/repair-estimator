@@ -16,7 +16,7 @@ export default function RoomPointsTable() {
 
   const handleRemovePoint = (indexToRemove: number) => {
     if (points.length <= 3) {
-      alert("У помещения должно быть минимум 3 точки!");
+      alert("У комнаты должно быть минимум 3 точки!");
       return;
     }
     setPoints(points.filter((_, index) => index !== indexToRemove));
@@ -42,7 +42,7 @@ export default function RoomPointsTable() {
 
   return (
     <div className={styles.wrapper}>
-      <h3>Координаты углов (точки помещения)</h3>
+      <h3>Координаты углов (точки комнаты)</h3>
 
       <table className={styles.table}>
         <thead>

@@ -116,3 +116,38 @@
   color: var(--text);
   font-style: italic;
 }
+
+.demoRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.demoBtn {
+  padding: 5px 12px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--text-h);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.demoBtn:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.demoBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.demoHint {
+  font-size: 11px;
+  color: var(--text);
+}

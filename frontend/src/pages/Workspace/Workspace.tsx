@@ -482,6 +482,7 @@ export function Workspace({
         name: activeName,
         volume: `${formatQty(m.quantity)} ${m.unit}`,
         price: rub(Math.round(activePrice)),
+        total: rub(Math.round(activeTotal)),
         activeMode: effectiveMode,
         variants: variants.length > 0 ? variants : undefined,
         details: [
@@ -569,6 +570,7 @@ export function Workspace({
       subtitle: l.specialist,
       volume: `${formatQty(l.volume)} ${l.unit}`,
       price: rub(Math.round(activePrice)),
+      total: rub(Math.round(activeTotal)),
       activeMode: effectiveMode,
       variants: variants.length > 0 ? variants : undefined,
       details: [

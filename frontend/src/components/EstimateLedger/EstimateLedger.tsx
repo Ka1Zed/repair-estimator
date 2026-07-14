@@ -19,7 +19,10 @@ export interface LedgerRow {
   name: string;
   subtitle?: string;
   volume: string;
+  /** Цена за единицу — показывается мелко под итогом */
   price: string;
+  /** Итог по позиции (с резервом) — главное число в свёрнутой строке */
+  total?: string;
   details: { label: string; value: string; url?: string | null }[];
   variants?: LedgerRowVariant[];
   activeMode?: "min" | "avg" | "max";
@@ -49,7 +52,7 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
       <div className={styles.head}>
         <span>Наименование</span>
         <span className={styles.colVol}>Объём</span>
-        <span className={styles.colPrice}>Цена</span>
+        <span className={styles.colPrice}>Итог</span>
         <span className={styles.colArrow} />
       </div>
 
@@ -63,7 +66,12 @@ export function EstimateLedger({ rows }: EstimateLedgerProps) {
                 {row.subtitle && <span className={styles.subtitle}>{row.subtitle}</span>}
               </span>
               <span className={`${styles.colVol} ${styles.vol}`}>{row.volume}</span>
-              <span className={`${styles.colPrice} ${styles.price}`}>{row.price}</span>
+              <span className={`${styles.colPrice} ${styles.priceCell}`}>
+                <span className={styles.totalMain}>{row.total ?? row.price}</span>
+                {row.total && (
+                  <span className={styles.unitPriceSub}>{row.price} / ед.</span>
+                )}
+              </span>
               <span
                 className={`${styles.colArrow} ${styles.arrow} ${isOpen ? styles.arrowOpen : ""}`}
               >

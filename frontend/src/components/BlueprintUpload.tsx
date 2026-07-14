@@ -11,7 +11,7 @@ interface Point {
   ny?: number;
 }
 
-interface Opening {
+export interface Opening {
   type: "door" | "window";
   width: number;
   height: number;
@@ -33,6 +33,7 @@ const METHOD_LABEL: Record<string, string> = {
   claude: "Claude Vision",
   ollama: "Ollama LLaVA",
   ocr: "EasyOCR",
+  fixture: "Демо-фикстура",
   none: "—",
 };
 
@@ -49,6 +50,7 @@ export default function BlueprintUpload() {
 
   const setPoints = useProjectStore((s) => s.setPoints);
   const setHeight = useProjectStore((s) => s.setHeight);
+  const setOpenings = useProjectStore((s) => s.setOpenings);
 
   const handleFile = async (file: File) => {
     setError(null);
@@ -74,10 +76,32 @@ export default function BlueprintUpload() {
     }
   };
 
-  const handleApply = (points: Point[], height: number | null) => {
+  const handleApply = (points: Point[], height: number | null, openings: Opening[]) => {
     setPoints(points);
     if (height !== null) setHeight(String(height));
+    if (openings.length > 0) setOpenings(openings);
     setReviewing(false);
+  };
+
+  const handleLoadDemo = async () => {
+    setError(null);
+    setResult(null);
+    setReviewing(false);
+    setUploading(true);
+    if (imageUrl) URL.revokeObjectURL(imageUrl);
+    try {
+      const blob = await apiClient.getDemoBlueprint();
+      setImageUrl(URL.createObjectURL(blob));
+      const formData = new FormData();
+      formData.append("file", new File([blob], "demo_room.png", { type: "image/png" }));
+      const data = (await apiClient.uploadBlueprint(formData)) as BlueprintResult;
+      setResult(data);
+      if (data.points.length >= 3) setReviewing(true);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Неизвестная ошибка");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -126,6 +150,18 @@ export default function BlueprintUpload() {
             </span>
           </>
         )}
+      </div>
+
+      <div className={styles.demoRow}>
+        <button
+          className={styles.demoBtn}
+          onClick={handleLoadDemo}
+          disabled={uploading}
+          title="Загрузить эталонный чертёж гостиной 4×3м — результат предзаписан, LLM не вызывается"
+        >
+          Попробовать демо-чертёж
+        </button>
+        <span className={styles.demoHint}>гарантированно работает без API-ключей</span>
       </div>
 
       {error && (

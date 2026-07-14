@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import Response
 from app.services.blueprint_service import BlueprintService
 from app.schemas.blueprint import BlueprintUploadResponse
 
@@ -24,8 +25,8 @@ async def upload_blueprint(file: UploadFile = File(...)):
     **Поддерживаемые форматы:** PNG, JPG, JPEG, PDF (до 10 MB)
 
     **Метод распознавания** выбирается автоматически по приоритету:
-    1. Google Gemini Vision API (бесплатно, если есть GEMINI_API_KEY)
-    2. Claude Vision API (платно, если есть ANTHROPIC_API_KEY)
+    1. Claude Vision API (основной путь, если есть ANTHROPIC_API_KEY)
+    2. Google Gemini Vision API (fallback, если есть GEMINI_API_KEY и сервис доступен)
     3. Ollama + LLaVA (локально, если запущен)
 
     Если ни один метод не настроен, ответ вернётся с `success: false` и
@@ -71,6 +72,23 @@ async def upload_blueprint(file: UploadFile = File(...)):
             status_code=500,
             detail=f"Ошибка обработки чертежа: {str(e)}"
         )
+
+
+@router.get("/demo-image", summary="Эталонный демо-чертёж для beta-сценария (#297)")
+async def get_demo_image():
+    """
+    Отдаёт PNG-файл эталонного чертежа гостиной (4×3 м, h=2.7 м).
+
+    Загрузив этот файл через /upload, пользователь получает предзаписанный результат
+    распознавания — без вызова LLM, детерминированно, без API-ключей.
+    Это и есть гарантированный демо-сценарий: контур → просмотр → применение → смета.
+    """
+    try:
+        data = BlueprintService.demo_image_bytes()
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return Response(content=data, media_type="image/png",
+                    headers={"Content-Disposition": 'attachment; filename="demo_room.png"'})
 
 
 @router.get("/health")

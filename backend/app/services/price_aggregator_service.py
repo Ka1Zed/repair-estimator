@@ -290,12 +290,29 @@ def _select_regional_parsers(parsers: list[BaseParser], city: str | None) -> lis
     return [p for p in parsers if not p.covered_cities]
 
 
+def get_available_stores(parsers: list[BaseParser], city: str | None) -> list[dict]:
+    '''
+    Справочник магазинов материалов с признаком доступности для города (#363) —
+    для явного выбора магазина пользователем (см. store_names в get_material_price),
+    вместо скрытого автоподбора по covered_cities.
+
+    Использует ту же _select_regional_parsers, что и get_material_price: магазин
+    (уникальный source_name среди parsers) доступен, если хотя бы один его инстанс
+    попадает в выборку для этого города. Так гарантируется согласованность со
+    списком источников, который реально участвует в расчёте.
+    '''
+    selected_names = {p.source_name for p in _select_regional_parsers(parsers, city)}
+    all_names = sorted({p.source_name for p in parsers})
+    return [{"name": name, "available": name in selected_names} for name in all_names]
+
+
 def get_material_price(
     material_name: str,
     db: Session,
     parsers: list[BaseParser],
     region: str | None = None,
     ttl_hours: int | None = None,
+    store_names: list[str] | None = None,
 ) -> MaterialPrice | None:
     '''
     Возвращает цену материала, объединённую по всем зарегистрированным источникам
@@ -304,6 +321,13 @@ def get_material_price(
     region здесь — это и запрошенный город (для выбора источников через
     _select_regional_parsers, #345), и seed-fallback регион, пробрасываемый в
     get_price как раньше.
+
+    store_names (#363) — явный выбор пользователя (напр. только "Леман"): сужает
+    уже отобранные для города источники до перечисленных по source_name. Если
+    после сужения источников не осталось (выбранный магазин не покрывает этот
+    город) — откатываемся на полный набор для города, как будто store_names не
+    задан: расчёт не должен падать или оставаться без цены из-за недоступного
+    в городе магазина.
 
     Для каждого выбранного парсера вызывает get_price (там уже реализованы
     кэш/TTL, живой fetch при PARSER_LIVE_FETCH и seed-fallback для ОДНОГО
@@ -321,9 +345,15 @@ def get_material_price(
         logger.warning(f"Материал '{material_name}' не найден в БД")
         return None
 
+    selected_parsers = _select_regional_parsers(parsers, region)
+    if store_names:
+        narrowed = [p for p in selected_parsers if p.source_name in store_names]
+        if narrowed:
+            selected_parsers = narrowed
+
     parser_results: list[MaterialPrice] = []
     seed_result: MaterialPrice | None = None
-    for parser in _select_regional_parsers(parsers, region):
+    for parser in selected_parsers:
         result = get_price(material_name, db=db, parser=parser, region=region, ttl_hours=ttl_hours)
         if result is None:
             continue

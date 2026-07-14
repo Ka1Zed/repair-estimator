@@ -119,6 +119,7 @@ interface ProjectState {
   setHeight: (height: number | string) => void;
   updatePoint: (index: number, x: number | string, y: number | string) => void;
   setPoints: (points: Point[]) => void;
+  setOpenings: (openings: Omit<Opening, "id">[]) => void;
   addOpening: () => void;
   updateOpening: (
     openingIndex: number,
@@ -130,6 +131,18 @@ interface ProjectState {
   clearActiveRoom: () => void;
   loadDemoRoom: () => void;
   resetProject: () => void;
+  loadProject: (project: {
+    city: string;
+    scope: EstimateScope;
+    rooms: Array<{
+      name: string;
+      room_type: string;
+      height: number;
+      points: { x: number; y: number }[];
+      openings: { type: "door" | "window"; width: number; height: number }[];
+      works: Record<string, unknown>;
+    }>;
+  }) => void;
 }
 
 const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
@@ -139,6 +152,52 @@ const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
   electric: null,
   plumbing: false,
 };
+
+export function migrateProjectState(persisted: unknown, version: number): Record<string, unknown> {
+  let s = persisted as Record<string, unknown>;
+
+  if (version < 2) {
+    const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
+    const fromRoom = rooms[0]?.repair_options as RepairOptions | undefined;
+    s = {
+      ...s,
+      repair_options: fromRoom ?? { ...DEFAULT_REPAIR_OPTIONS },
+      rooms: rooms.map((room) => {
+        const r = { ...room };
+        delete r['repair_options'];
+        return r;
+      }),
+    };
+  }
+
+  if (version < 3) {
+    const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
+    s = {
+      ...s,
+      rooms: rooms.map((room) => {
+        if (room.works) return room;
+        const rt = (room.room_type as RoomTypeKey) ?? "living";
+        return { ...room, works: defaultWorksForRoomType(rt) };
+      }),
+    };
+  }
+
+  if (version < 4) {
+    const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
+    s = {
+      ...s,
+      rooms: rooms.map((room) => {
+        const works = room.works as Record<string, unknown> | undefined;
+        if (!works) return room;
+        const walls = works.walls as Record<string, unknown> | undefined;
+        if (!walls || walls.wall_condition) return room;
+        return { ...room, works: { ...works, walls: { ...walls, wall_condition: "normal" } } };
+      }),
+    };
+  }
+
+  return s;
+}
 
 const createDefaultRoom = (name?: string): Room => ({
   id: uid(),
@@ -256,6 +315,16 @@ export const useProjectStore = create<ProjectState>()(
           return { rooms: newRooms };
         }),
 
+      setOpenings: (openings) =>
+        set((state) => {
+          const newRooms = [...state.rooms];
+          newRooms[state.activeRoomIndex] = {
+            ...newRooms[state.activeRoomIndex],
+            openings: openings.map((o) => ({ ...o, id: uid() })),
+          };
+          return { rooms: newRooms };
+        }),
+
       addOpening: () =>
         set((state) => {
           const newRooms = [...state.rooms];
@@ -334,58 +403,27 @@ export const useProjectStore = create<ProjectState>()(
         }),
 
       resetProject: () => set(initialState),
+
+      loadProject: (project) =>
+        set({
+          city: project.city,
+          scope: project.scope,
+          activeRoomIndex: 0,
+          rooms: project.rooms.map((r) => ({
+            id: uid(),
+            name: r.name,
+            room_type: (r.room_type as RoomTypeKey) ?? "living",
+            height: r.height,
+            points: r.points,
+            openings: r.openings.map((op) => ({ ...op, id: uid() })),
+            works: r.works as unknown as RoomWorks,
+          })),
+        }),
     }),
     {
       name: "repair-estimator-draft",
       version: 4,
-      migrate: (persisted: unknown, version: number) => {
-        let s = persisted as Record<string, unknown>;
-
-        if (version < 2) {
-          // v1 → v2: repair_options переехал из rooms[i] на уровень проекта
-          const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
-          const fromRoom = rooms[0]?.repair_options as RepairOptions | undefined;
-          s = {
-            ...s,
-            repair_options: fromRoom ?? { ...DEFAULT_REPAIR_OPTIONS },
-            rooms: rooms.map((room) => {
-              const r = { ...room };
-              delete r['repair_options'];
-              return r;
-            }),
-          };
-        }
-
-        if (version < 3) {
-          // v2 → v3: works переехал на уровень каждой комнаты
-          const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
-          s = {
-            ...s,
-            rooms: rooms.map((room) => {
-              if (room.works) return room;
-              const rt = (room.room_type as RoomTypeKey) ?? "living";
-              return { ...room, works: defaultWorksForRoomType(rt) };
-            }),
-          };
-        }
-
-        if (version < 4) {
-          // v3 → v4: walls.wall_condition добавлен; подставляем "normal" для старых записей
-          const rooms = (s.rooms as Array<Record<string, unknown>>) ?? [];
-          s = {
-            ...s,
-            rooms: rooms.map((room) => {
-              const works = room.works as Record<string, unknown> | undefined;
-              if (!works) return room;
-              const walls = works.walls as Record<string, unknown> | undefined;
-              if (!walls || walls.wall_condition) return room;
-              return { ...room, works: { ...works, walls: { ...walls, wall_condition: "normal" } } };
-            }),
-          };
-        }
-
-        return s;
-      },
+      migrate: migrateProjectState,
     },
   ),
 );

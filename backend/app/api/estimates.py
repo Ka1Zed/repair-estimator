@@ -139,6 +139,7 @@ def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> D
 def _tier_item(
     material_key: str, tier: str, quantity: Decimal, db: Session,
     parsers: list[BaseParser], region: str, sources_by_id: Dict[int, str],
+    store_names: List[str] | None = None,
 ) -> MaterialTierItem:
     """SKU-вариант позиции для одного уровня комплектации (#349, min_item/avg_item/max_item).
 
@@ -154,7 +155,9 @@ def _tier_item(
     if material is None:
         return MaterialTierItem(name="", price=0.0, total=0.0, source="нет цены", source_url=None)
 
-    price_obj = get_material_price(material.name, db=db, parsers=parsers, region=region)
+    price_obj = get_material_price(
+        material.name, db=db, parsers=parsers, region=region, store_names=store_names,
+    )
     if not price_obj:
         return MaterialTierItem(
             name=material.name, price=0.0, total=0.0, source="нет цены", source_url=None,
@@ -300,7 +303,9 @@ def calculate_estimate(
         # с накрученным по факту коэффициентом даже после суммирования нескольких комнат.
         waste_factor = (group['quantity'] / base_quantity) if base_quantity > 0 else Decimal(1)
 
-        price_obj = get_material_price(name, db=db, parsers=parsers, region=request.city)
+        price_obj = get_material_price(
+            name, db=db, parsers=parsers, region=request.city, store_names=request.stores,
+        )
 
         # package_size (#306): если цена пришла от парсера и он отдал фасовку
         # КОНКРЕТНОГО товара за source_url — считаем упаковки по ней, а не по
@@ -379,7 +384,7 @@ def calculate_estimate(
             if t not in tier_items:
                 tier_items[t] = _tier_item(
                     group['material_key'], t, final_quantity, db, parsers,
-                    request.city, sources_by_id,
+                    request.city, sources_by_id, store_names=request.stores,
                 )
 
         materials_response.append(MaterialItem(

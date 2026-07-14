@@ -63,11 +63,14 @@ def get_price(
     Логика (TTL-кэш, чтобы расчёт сметы не ходил в интернет на каждый запрос):
     1. Если есть свежая (моложе ttl_hours) цена парсера в БД — возвращаем её, не трогая сайт.
     2. Иначе, если передан парсер — пробуем спарсить и сохранить свежую цену.
-    3. Если парсер упал/не передан/нет источника — берём seed-цену из БД.
-       При заданном region сначала ищем seed-цену этого региона, при отсутствии —
-       базовую seed-цену с region IS NULL.
-    4. force_refresh=True заставляет дёрнуть парсер даже при свежем кэше (для CLI update_prices).
-    5. Наверх исключение не пробрасываем никогда.
+    3. Если рефетч не удался (или PARSER_LIVE_FETCH=false), но старая цена этого
+       парсера младше PRICE_STALE_TTL_HOURS — возвращаем её как есть: реальная
+       цена недельной давности точнее общего seed.
+    4. Если парсер упал/не передан/нет источника/цена старше PRICE_STALE_TTL_HOURS —
+       берём seed-цену из БД. При заданном region сначала ищем seed-цену этого
+       региона, при отсутствии — базовую seed-цену с region IS NULL.
+    5. force_refresh=True заставляет дёрнуть парсер даже при свежем кэше (для CLI update_prices).
+    6. Наверх исключение не пробрасываем никогда.
 
     Аргумент region используется ТОЛЬКО в seed-fallback (п.3). Ветка парсера (п.1-2)
     региону-аргументу не подчиняется — она адресует кэш по region САМОГО инстанса
@@ -182,6 +185,17 @@ def get_price(
             except Exception as e:
                 # Парсер упал - логируем и идем в fallback
                 logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{material_name}': {e}")
+
+        # Живой рефетч не удался (или выключен), но старая цена ЭТОГО парсера
+        # ещё не совсем протухла (< PRICE_STALE_TTL_HOURS) — она точнее общего
+        # seed, отдаём её вместо seed-fallback ниже.
+        if price_entry and _is_fresh(price_entry.updated_at, settings.PRICE_STALE_TTL_HOURS):
+            logger.warning(
+                f"Цена для '{material_name}': источник=parser устаревшая "
+                f"({parser.source_name}, updated_at={price_entry.updated_at}) — "
+                "живой рефетч не удался, но кэш ещё не старше PRICE_STALE_TTL_HOURS"
+            )
+            return price_entry
 
     # Fallback: берем seed-цену из БД
     seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()

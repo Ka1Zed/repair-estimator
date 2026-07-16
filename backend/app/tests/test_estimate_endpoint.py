@@ -1376,12 +1376,14 @@ def test_material_min_avg_max_item_single_request():
     names = {laminate["min_item"]["name"], laminate["avg_item"]["name"], laminate["max_item"]["name"]}
     assert len(names) == 3
 
-    # Арифметика тех же band'ов, что и у отдельного запроса с этим tier: min_item.price
-    # у ламината эконом (350/450/600) на "min"-точке = 350, max_item.price у премиума
-    # (2200/3200/4500) на "max"-точке = 4500 — те же числа, что вернул бы отдельный
-    # /calculate с tier="min"/"max" (см. test_material_tier_selects_different_sku).
-    assert laminate["min_item"]["price"] == pytest.approx(350)
-    assert laminate["max_item"]["price"] == pytest.approx(4500)
+    # Арифметика тех же band'ов, что и у отдельного запроса с этим tier, включая
+    # кламп коридора −15%/+20% (PRICE_CORRIDOR): min_item.price у ламината эконом
+    # (350/450/600) на "min"-точке = max(350, 450×0.85) = 382.5, max_item.price у
+    # премиума (2200/3200/4500) на "max"-точке = min(4500, 3200×1.2) = 3840 — те же
+    # числа, что вернул бы отдельный /calculate с tier="min"/"max"
+    # (см. test_material_tier_selects_different_sku).
+    assert laminate["min_item"]["price"] == pytest.approx(450 * 0.85)
+    assert laminate["max_item"]["price"] == pytest.approx(3200 * 1.20)
     assert laminate["avg_item"]["price"] == pytest.approx(laminate["price_avg"])
     assert laminate["avg_item"]["total"] == pytest.approx(laminate["total_avg"])
 
@@ -1439,3 +1441,82 @@ def test_missing_price_handled_gracefully(monkeypatch):
         assert item["total_max"] == 0.0
         assert item["tier"] == "avg"
 
+
+
+def test_degenerate_polygon_rejected():
+    """Самопересекающийся и вырожденный контуры отклоняются 422, а не считаются
+    молча с floor_area=0."""
+    def payload_with(points):
+        return {
+            "city": "Казань",
+            "rooms": [{
+                "name": "Комната",
+                "height": 2.7,
+                "points": points,
+                "room_type": "living",
+                "openings": [],
+                "works": W(),
+            }],
+        }
+
+    bowtie = [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 0, "y": 3}, {"x": 4, "y": 3}]
+    response = client.post("/api/estimates/calculate", json=payload_with(bowtie))
+    assert response.status_code == 422
+
+    collinear = [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 2, "y": 0}]
+    response = client.post("/api/estimates/calculate", json=payload_with(collinear))
+    assert response.status_code == 422
+
+
+def test_price_corridor_clamped():
+    """Вилка каждой строки прижата к коридору уровня −15%/+20% от средней
+    (PRICE_CORRIDOR): категорийный разброс источника не должен раздувать
+    summary.total_min/max."""
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    data = response.json()
+
+    eps = 1e-6
+    for item in data["materials"] + data["labor"]:
+        if item["price_avg"] <= 0:
+            continue
+        assert item["price_min"] >= item["price_avg"] * 0.85 * (1 - eps)
+        assert item["price_max"] <= item["price_avg"] * 1.20 * (1 + eps)
+        assert item["price_min"] <= item["price_avg"] <= item["price_max"]
+
+    # Суммы по уровням согласованы с построчными total_min/max (клампится и то, и то).
+    materials_min = sum(m["total_min"] for m in data["materials"])
+    materials_max = sum(m["total_max"] for m in data["materials"])
+    assert materials_min == pytest.approx(data["summary"]["materials_min"], rel=1e-6)
+    assert materials_max == pytest.approx(data["summary"]["materials_max"], rel=1e-6)
+
+
+def test_price_corridor_clamps_wide_parser_band(stub_material_parser):
+    """Категорийно-широкая вилка парсера (price-band) режется до коридора,
+    средняя не меняется."""
+    from decimal import Decimal
+    from app.parsers.base import ParsedPrice
+
+    def fetch(_name):
+        # Разброс как у реальной категории (например, затирка 76→2097 при avg 836).
+        return ParsedPrice(
+            price_min=Decimal("76"), price_avg=Decimal("836"), price_max=Decimal("2097"),
+            source_url="https://example.com/product", package_size=None,
+        )
+
+    stub_material_parser(fetch)
+    try:
+        response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+        assert response.status_code == 200
+        data = response.json()
+
+        parsed = [m for m in data["materials"] if m["source"] != "seed" and m["price_avg"] > 0]
+        assert parsed, "ожидались строки с ценой от парсера"
+        for item in parsed:
+            assert item["price_avg"] == pytest.approx(836.0)
+            assert item["price_min"] == pytest.approx(836.0 * 0.85)
+            assert item["price_max"] == pytest.approx(836.0 * 1.20)
+    finally:
+        # Повторная установка дефолтной заглушки чистит осевшие в общей тест-БД
+        # parser-цены — иначе TTL-кэш утёк бы в тесты других файлов.
+        stub_material_parser()

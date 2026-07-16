@@ -80,6 +80,40 @@ class TestGeometry:
         assert walls == expected
 
 
+class TestPolygonValidation:
+    """Вырожденные и самопересекающиеся контуры должны отклоняться (аудит 2026-07-16):
+    раньше «бабочка» давала смету с floor_area=0 при ненулевых стенах."""
+
+    def test_self_intersecting_bowtie_rejected(self):
+        """«Бабочка» (0,0)-(4,0)-(0,3)-(4,3): стороны пересекаются, площадь по шнуровке 0."""
+        points = [(0, 0), (4, 0), (0, 3), (4, 3)]
+        with pytest.raises(ValueError, match="самопересека|вырожден"):
+            calculate_room_geometry(points, Decimal('2.7'))
+
+    def test_self_intersecting_nonzero_area_rejected(self):
+        """Самопересечение с ненулевой площадью по шнуровке — тоже отклоняется."""
+        points = [(0, 0), (4, 0), (4, 3), (2, 3), (2, -1), (0, 3)]
+        with pytest.raises(ValueError, match="самопересека"):
+            calculate_room_geometry(points, Decimal('2.7'))
+
+    def test_collinear_points_rejected(self):
+        """Три точки на одной прямой — нулевая площадь."""
+        points = [(0, 0), (4, 0), (2, 0)]
+        with pytest.raises(ValueError, match="вырожден"):
+            calculate_room_geometry(points, Decimal('2.7'))
+
+    def test_two_points_rejected(self):
+        points = [(0, 0), (4, 0)]
+        with pytest.raises(ValueError, match="минимум 3 точки"):
+            calculate_room_geometry(points, Decimal('2.7'))
+
+    def test_l_shape_still_accepted(self):
+        """Невыпуклый (Г-образный) контур — валиден, не путать с самопересечением."""
+        points = [(0, 0), (5, 0), (5, 2), (3, 2), (3, 5), (0, 5)]
+        result = calculate_room_geometry(points, Decimal('3.0'))
+        assert result['floor_area'] == Decimal('19.0')
+
+
 class TestOtkosArea:
     """Площадь откосов проёмов (#191). Откос = (ширина + 2×высота) × глубина."""
 

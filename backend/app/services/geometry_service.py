@@ -63,6 +63,66 @@ def perimeter(points: List[Union[tuple, list, dict]]) -> Decimal:
     """
     return sum(side_lengths(points), Decimal('0.0'))
 
+def _segments_cross(a1: tuple, a2: tuple, b1: tuple, b2: tuple) -> bool:
+    """Пересекаются ли отрезки a1a2 и b1b2 (включая касание точкой)."""
+    def orient(p: tuple, q: tuple, r: tuple) -> Decimal:
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+
+    def on_segment(p: tuple, q: tuple, r: tuple) -> bool:
+        return (
+            min(p[0], q[0]) <= r[0] <= max(p[0], q[0])
+            and min(p[1], q[1]) <= r[1] <= max(p[1], q[1])
+        )
+
+    d1 = orient(b1, b2, a1)
+    d2 = orient(b1, b2, a2)
+    d3 = orient(a1, a2, b1)
+    d4 = orient(a1, a2, b2)
+
+    if ((d1 > 0 > d2) or (d1 < 0 < d2)) and ((d3 > 0 > d4) or (d3 < 0 < d4)):
+        return True
+    if d1 == 0 and on_segment(b1, b2, a1):
+        return True
+    if d2 == 0 and on_segment(b1, b2, a2):
+        return True
+    if d3 == 0 and on_segment(a1, a2, b1):
+        return True
+    if d4 == 0 and on_segment(a1, a2, b2):
+        return True
+    return False
+
+def _validate_polygon(points: List[Union[tuple, list, dict]]) -> None:
+    """
+    Валидация контура комнаты. Кидает ValueError с описанием ошибки.
+
+    Отвергает вырожденные контуры (меньше 3 точек, нулевая площадь — точки на
+    одной прямой) и самопересечения («бабочка»): по такой геометрии смета
+    считалась бы молча с floor_area = 0 при ненулевых стенах.
+    """
+    if len(points) < 3:
+        raise ValueError("Контур комнаты должен содержать минимум 3 точки.")
+
+    if floor_area(points) == 0:
+        raise ValueError(
+            "Контур комнаты вырожден: площадь равна нулю. "
+            "Проверьте, что точки не лежат на одной прямой и стены не накладываются друг на друга."
+        )
+
+    coords = [_get_xy(p) for p in points]
+    n = len(coords)
+    for i in range(n):
+        a1, a2 = coords[i], coords[(i + 1) % n]
+        for j in range(i + 1, n):
+            # Смежные стены общую вершину имеют законно — их не проверяем.
+            if j == i + 1 or (i == 0 and j == n - 1):
+                continue
+            b1, b2 = coords[j], coords[(j + 1) % n]
+            if _segments_cross(a1, a2, b1, b2):
+                raise ValueError(
+                    "Контур комнаты самопересекается: стены не должны пересекать друг друга. "
+                    "Проверьте порядок точек."
+                )
+
 def _validate_openings(
     height: Decimal,
     openings: List[Dict[str, Any]],
@@ -156,6 +216,10 @@ def calculate_room_geometry(
         pts = [(p['x'], p['y']) for p in points]
     else:
         pts = [(float(p[0]), float(p[1])) for p in points]
+
+    # Валидация контура (кидает ValueError): вырожденный или самопересекающийся
+    # многоугольник дал бы смету с floor_area = 0 при ненулевых стенах.
+    _validate_polygon(pts)
 
     # Длины сторон считаем один раз: нужны и для периметра, и для проверки ширины проёмов.
     sides = side_lengths(pts)

@@ -25,6 +25,7 @@ export default function OpeningsForm() {
       <h3 className={styles.title}>Проёмы (Окна и Двери)</h3>
 
       {openings.length > 0 && (
+        <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>
             <tr>
@@ -95,6 +96,7 @@ export default function OpeningsForm() {
             })}
           </tbody>
         </table>
+        </div>
       )}
 
       <button className={styles.addBtn} onClick={addOpening}>

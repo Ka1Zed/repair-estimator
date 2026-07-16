@@ -1192,6 +1192,7 @@ export function Workspace({
                 <div className={styles.hiddenSection}>
                   <div className={styles.blockLabel}>Скрытые работы · возможные доплаты</div>
                   <p className={styles.hiddenNote}>{data.hidden_works.note}</p>
+                  <div className={styles.hiddenTableWrap}>
                   <table className={styles.hiddenTable}>
                     <thead>
                       <tr>
@@ -1216,6 +1217,7 @@ export function Workspace({
                       ))}
                     </tbody>
                   </table>
+                  </div>
                   <div className={styles.hiddenTotal}>
                     <span>Итого возможных доплат</span>
                     <span>

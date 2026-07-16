@@ -615,7 +615,7 @@
 ## GET /api/room-types
 
 Справочник типов комнат и вариантов отделки — источник для `frontend/src/types/roomTypes.ts`
-(синхронизируется вручную с `docs/room-types.json`, см. `CLAUDE.md`).
+(синхронизируется вручную с `docs/room-types.json`: правишь правила — правь JSON и `roomTypes.ts` в том же PR).
 
 **Запрос:** без тела.
 

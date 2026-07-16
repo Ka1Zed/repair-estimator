@@ -21,8 +21,16 @@ export interface MaterialItem {
   // min/max-запроса — баг, если использовать её как "цену уровня" (было в #291).
   price: number;
   total: number;
+  // Запрошенный уровень комплектации строки — эхо request.tier.
+  tier: "min" | "avg" | "max";
+  // Коридор цены внутри выбранного SKU (прижат к −15%/+20% от средней на бэке,
+  // PRICE_CORRIDOR) — не межтоварный разброс уровней, тот в min_item/max_item.
+  price_min: number;
   price_avg: number;
+  price_max: number;
+  total_min: number;
   total_avg: number;
+  total_max: number;
   source: string;
   region?: string | null;
   updated_at?: string;
@@ -56,19 +64,25 @@ export interface LaborItem {
   specialist: string;
   volume: number;
   unit: string;
+  // Цена/итог для запрошенного tier (см. MaterialItem.price) и сам tier.
+  price: number;
+  total: number;
+  tier: "min" | "avg" | "max";
   price_avg: number;
   total_avg: number;
   source: string;
   region?: string | null;
+  updated_at?: string;
   source_url?: string | null;
-  stage?: LaborStage;
+  // Стадия ремонта строки: бэкенд отдаёт всегда (rough/pre_finish/finish).
+  stage: LaborStage;
 
   // Коридор цены внутри выбранного tier (не межтоварный скачок, как у материалов —
   // у работ tier только сужает границы вилки одной и той же услуги/специалиста).
-  price_min?: number;
-  price_max?: number;
-  total_min?: number;
-  total_max?: number;
+  price_min: number;
+  price_max: number;
+  total_min: number;
+  total_max: number;
 
   // Все компании/прайс-листы, чьи цены объединены в вилку строки (#166/#333).
   sources?: string[] | null;

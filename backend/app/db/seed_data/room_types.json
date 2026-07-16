@@ -13,7 +13,7 @@
       "walls": ["paint", "wallpaper"],
       "ceiling": ["paint", "stretch"],
       "electric": ["basic", "extended"],
-      "plumbing": { "available": false, "required": false }
+      "plumbing": { "available": true, "required": false }
     },
     "kitchen": {
       "label": "Кухня",
@@ -37,7 +37,7 @@
       "walls": ["paint", "wallpaper"],
       "ceiling": ["paint", "stretch"],
       "electric": ["basic", "extended"],
-      "plumbing": { "available": false, "required": false }
+      "plumbing": { "available": true, "required": false }
     }
   }
 }

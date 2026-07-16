@@ -7,7 +7,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Кэш clearance-cookie DDoS-Guard на диске: харвестим headless-браузером редко
-# (см. результаты прогона в plans/2026-06-30-beta-headless-parser.md — ключевые
+# (по замерам ручного прогона — ключевые
 # DDoS-Guard куки живут ~53ч, не минуты), а не на каждый запрос update_prices.
 CACHE_PATH = Path(__file__).resolve().parent.parent.parent / ".cache" / "megastroy_cookie.json"
 

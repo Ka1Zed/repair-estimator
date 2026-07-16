@@ -150,7 +150,7 @@ def test_unknown_material_raises():
 
 
 # _build_headers: приоритет MEGASTROY_COOKIE (ручной hand-off) над
-# MEGASTROY_HEADLESS (beta-харвестер), см. plans/2026-06-30-beta-headless-parser.md.
+# MEGASTROY_HEADLESS (beta-харвестер), см. issue #219.
 
 
 def test_build_headers_no_cookie_by_default(monkeypatch):

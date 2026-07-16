@@ -23,7 +23,7 @@ class DBSettings(BaseSettings):
     PARSER_LIVE_FETCH: bool = True
 
     # Beta: headless-харвестер clearance-cookie DDoS-Guard для Мегастроя
-    # (plans/2026-06-30-beta-headless-parser.md). По умолчанию выключен — без
+    # (см. issue #219). По умолчанию выключен — без
     # него поведение прежнее (MEGASTROY_COOKIE вручную или 403 -> seed).
     # Требует playwright + chromium (requirements-headless.txt), поэтому не
     # включается по умолчанию, чтобы не раздувать обязательные зависимости/образ.

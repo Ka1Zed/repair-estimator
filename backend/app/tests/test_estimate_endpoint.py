@@ -1445,7 +1445,7 @@ def test_missing_price_handled_gracefully(monkeypatch):
 
 def test_degenerate_polygon_rejected():
     """Самопересекающийся и вырожденный контуры отклоняются 422, а не считаются
-    молча с floor_area=0 (аудит 2026-07-16)."""
+    молча с floor_area=0."""
     def payload_with(points):
         return {
             "city": "Казань",
@@ -1471,7 +1471,7 @@ def test_degenerate_polygon_rejected():
 def test_price_corridor_clamped():
     """Вилка каждой строки прижата к коридору уровня −15%/+20% от средней
     (PRICE_CORRIDOR): категорийный разброс источника не должен раздувать
-    summary.total_min/max (аудит 2026-07-16)."""
+    summary.total_min/max."""
     response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
     assert response.status_code == 200
     data = response.json()

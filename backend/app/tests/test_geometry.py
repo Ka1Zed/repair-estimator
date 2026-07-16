@@ -81,7 +81,7 @@ class TestGeometry:
 
 
 class TestPolygonValidation:
-    """Вырожденные и самопересекающиеся контуры должны отклоняться (аудит 2026-07-16):
+    """Вырожденные и самопересекающиеся контуры должны отклоняться:
     раньше «бабочка» давала смету с floor_area=0 при ненулевых стенах."""
 
     def test_self_intersecting_bowtie_rejected(self):

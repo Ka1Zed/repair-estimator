@@ -8,7 +8,7 @@ import logging
 import statistics
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 logger = logging.getLogger(__name__)
 
@@ -154,11 +154,16 @@ class BlueprintService:
         try:
             image = self._prepare_image(file_bytes, filename)
             logger.debug(f"image ready: {image.size}")
-        except NotImplementedError as e:
+        except (NotImplementedError, ValueError) as e:
             return self._error_response(str(e))
         except Exception as e:
+            # Сырое исключение (например, PIL "cannot identify image file <_io.BytesIO...>")
+            # пользователю не показываем — только в лог.
             logger.warning(f"image error: {e}")
-            return self._error_response(f"Ошибка обработки файла: {str(e)}")
+            return self._error_response(
+                "Не удалось обработать файл. Убедитесь, что это корректное "
+                "изображение (PNG/JPG) или PDF-чертёж."
+            )
 
         methods = self._method_priority()
         logger.debug(f"methods: {methods}")
@@ -194,7 +199,12 @@ class BlueprintService:
                 raise NotImplementedError("pdf2image не установлен. Используйте PNG или JPG.")
             except Exception as e:
                 raise RuntimeError(f"Ошибка конвертации PDF: {e}")
-        return Image.open(io.BytesIO(file_bytes)).convert("RGB")
+        try:
+            return Image.open(io.BytesIO(file_bytes)).convert("RGB")
+        except UnidentifiedImageError:
+            raise ValueError(
+                "Файл не распознан как изображение — загрузите чертёж в PNG, JPG или PDF."
+            )
 
     def _choose_method(self) -> str:
         """Метод, который будет использован первым (см. _method_priority)."""

@@ -19,7 +19,8 @@ export interface EstimateExportData {
   hidden_works?: HiddenWorks;
 }
 
-const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
+// Рубли без копеек: суммы приходят с float-хвостами (77010.998…) — в документе целые.
+const formatPricePDF = (price: number) => `${Math.round(price).toLocaleString('ru-RU')} ₽`;
 
 // Палитра Excel (те же цвета, что в PDF из index.css). xlsx-js-style пишет
 // заливки/шрифты/рамки ячеек через свойство cell.s — обычный xlsx это не умеет.
@@ -320,7 +321,7 @@ export const exportXlsx = (
     ...data.materials.map((m, i) => {
       const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
-        act.activeName, m.quantity, m.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
+        act.activeName, Math.round(m.quantity * 100) / 100, m.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
         sourceLabel(act.activeSource, m.region), fmtDate(m.updated_at),
       ];
     }),
@@ -359,7 +360,7 @@ export const exportXlsx = (
     ...data.labor.map((l, i) => {
       const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
       return [
-        l.service, l.specialist, l.volume, l.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
+        l.service, l.specialist, Math.round(l.volume * 100) / 100, l.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
         sourceLabel(act.activeSource, l.region),
       ];
     }),
@@ -620,7 +621,7 @@ export const exportPdf = async (
     body: data.materials.map((m, i) => {
       const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
-        act.activeName, m.quantity, m.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, m.region)
+        act.activeName, fmtQty(m.quantity), m.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, m.region)
       ];
     }),
     columnStyles: {
@@ -643,7 +644,7 @@ export const exportPdf = async (
     body: data.labor.map((l, i) => {
       const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
       return [
-        l.service, l.specialist, l.volume, l.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, l.region)
+        l.service, l.specialist, fmtQty(l.volume), l.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, l.region)
       ];
     }),
     columnStyles: {
@@ -658,6 +659,11 @@ export const exportPdf = async (
   });
 
   currentY = getFinalY(doc) + 14;
+  // не оставлять заголовок секции «висеть» внизу страницы — перенести целиком
+  if (currentY > pageH - 45) {
+    doc.addPage();
+    currentY = 20;
+  }
   sectionHeading('Итоговая стоимость', currentY);
   autoTable(doc, {
     ...tableBase,
@@ -733,6 +739,9 @@ export const exportPdf = async (
     doc.text(noteLines, marginX, currentY + 5);
     autoTable(doc, {
       ...tableBase,
+      // Таблица маленькая — при нехватке места переносится на новую страницу
+      // целиком: иначе внизу оставался пустой огрызок «шапка + Итого» без строк.
+      pageBreak: 'avoid',
       startY: currentY + 5 + noteLines.length * 4,
       head: [['Работа', 'Специалист', 'Причина', 'Объём', 'Мин.', 'Макс.']],
       body: hw.items.map((item: HiddenWorkItem) => [

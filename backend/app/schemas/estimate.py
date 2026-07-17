@@ -58,6 +58,19 @@ class Works(BaseModel):
     electric: ElectricWork = Field(default_factory=ElectricWork)
     plumbing: PlumbingWork = Field(default_factory=PlumbingWork)
 
+class CeilingShape(BaseModel):
+    """Форма потолка (#357): по умолчанию плоский, ceiling_area = floor_area.
+
+    multilevel — многоуровневый ГКЛ-потолок: добавляет площадь вертикальных
+    граней коробов по периметру помещения на каждый уровень (levels ×
+    step_height_m). attic_slope — мансардный скат: единая наклонная
+    плоскость над проекцией пола (floor_area / cos(slope_deg)).
+    """
+    type: Literal["flat", "multilevel", "attic_slope"] = "flat"
+    levels: Optional[int] = Field(None, ge=1, le=5)
+    step_height_m: Optional[float] = Field(None, gt=0, le=1.0)
+    slope_deg: Optional[float] = Field(None, ge=0, lt=85)
+
 class RoomInput(BaseModel):
     name: str
     height: float = Field(gt=0)
@@ -66,6 +79,8 @@ class RoomInput(BaseModel):
     room_type: str
     openings: List[Opening] = []
     works: Works = Field(default_factory=Works)
+    # Форма потолка (#357), null — плоский (прежнее поведение, ceiling_area = floor_area).
+    ceiling_shape: Optional[CeilingShape] = None
 
 class EstimateRequest(BaseModel):
     city: str
@@ -76,6 +91,14 @@ class EstimateRequest(BaseModel):
     # БЕЗ чистовой отделки и её материалов (ремонт под чистовую сдачу). Класса ремонта
     # в контракте нет (#222) — объём задаётся составом works, а глубину сметы — scope.
     scope: Literal["finish_only", "rough_and_finish", "rough_only"] = "finish_only"
+    # Явный выбор магазина(ов) материалов (#363, напр. ["Леман"]) — см. GET
+    # /api/regions/stores для списка магазинов и их доступности по city. Сужает
+    # источники цен материалов до перечисленных; null/[] — прежний автоподбор по
+    # covered_cities. Если выбранный магазин известен системе, но не покрывает
+    # city — тихий откат на автоподбор (расчёт не падает и не остаётся без цены).
+    # Если имя магазина не найдено СРЕДИ ЗАРЕГИСТРИРОВАННЫХ вовсе (опечатка) —
+    # 422, а не тихий откат (проверка в calculate_estimate).
+    stores: Optional[List[str]] = None
 
 
 class GeometrySummary(BaseModel):

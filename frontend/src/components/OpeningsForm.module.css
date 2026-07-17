@@ -10,11 +10,17 @@
   font-weight: 600;
 }
 
+/* На узком вьюпорте таблица шире экрана — скроллим её внутри обёртки,
+   а не всю страницу по горизонтали. */
+.tableWrap {
+  overflow-x: auto;
+  margin-bottom: 15px;
+}
+
 .table {
   width: 100%;
   text-align: left;
   border-collapse: collapse;
-  margin-bottom: 15px;
 }
 
 .table th {

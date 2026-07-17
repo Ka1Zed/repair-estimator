@@ -8,19 +8,19 @@ import RoomPolygonEditor from "../../components/RoomPolygonEditor";
 import RoomPointsTable from "../../components/RoomPointsTable";
 import BlueprintUpload from "../../components/BlueprintUpload";
 import OpeningsForm from "../../components/OpeningsForm";
-import { RoomTypeSelector } from "../../components/RoomTypeSelector";
 import { WorksPanel } from "../../components/WorksPanel/WorksPanel";
 
 import type { MaterialItem, LaborItem, LaborStage, HiddenWorks } from "../../types/estimate";
 import type { SummaryData } from "../../components/EstimateSummary";
 import { EstimateLedger, type LedgerRow, type LedgerRowVariant } from "../../components/EstimateLedger/EstimateLedger";
-import { useProjectStore, type EstimateScope } from "../../store/projectStore";
+import { useProjectStore, type EstimateScope, type CeilingShapeType } from "../../store/projectStore";
 import { useBackendStatus } from "../../store/backendStatus";
 import { roomHasInvalidOpenings } from "../../utils/openingValidation";
 import { hasSelfIntersection, validateHeight } from "../../utils/polygonValidation";
 import { calculateEstimate } from "../../api/estimates";
 import { apiClient } from "../../api/client";
 import { Select } from "../../components/ui/Select";
+import { roomsToCalcPayload } from "../../utils/roomsToPayload";
 
 interface GeometryData {
   floor_area: number;
@@ -80,6 +80,12 @@ const laborSourceName = (source: string) => LABOR_SOURCE_NAMES[source] ?? source
 // уже включён в "Итог по позиции" — поэтому итог не равен цене за единицу × кол-во.
 const CONTINGENCY_PCT: Record<PriceMode, number> = { min: 10, avg: 12, max: 15 };
 
+const CEILING_SHAPE_OPTIONS = [
+  { value: "flat", label: "Плоский" },
+  { value: "multilevel", label: "Многоуровневый" },
+  { value: "attic_slope", label: "Мансардный скат" },
+];
+
 export type PriceMode = "min" | "avg" | "max";
 
 interface WorkspaceProps {
@@ -100,15 +106,20 @@ export function Workspace({
   const setCity = useProjectStore((s) => s.setCity);
   const scope = useProjectStore((s) => s.scope);
   const setScope = useProjectStore((s) => s.setScope);
+  const store = useProjectStore((s) => s.store);
+  const setStore = useProjectStore((s) => s.setStore);
   const activeRoomIndex = useProjectStore((s) => s.activeRoomIndex);
   const activeRoom = rooms[activeRoomIndex];
   const setHeight = useProjectStore((s) => s.setHeight);
+  const setCeilingShape = useProjectStore((s) => s.setCeilingShape);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<EstimateResponse | null>(null);
   const [tab, setTab] = useState<"materials" | "labor">("materials");
   const [regions, setRegions] = useState<string[]>([]);
+  const [stores, setStores] = useState<{ name: string; available: boolean }[]>([]);
+  const [storeResetNotice, setStoreResetNotice] = useState<string | null>(null);
 
   // project save / share state
   const [savedProjectId, setSavedProjectId] = useState<number | null>(projectId ?? null);
@@ -134,6 +145,12 @@ export function Workspace({
         height: Number(op.height),
       })),
       works: r.works as unknown as Record<string, unknown>,
+      ceiling_shape: {
+        type: r.ceilingShape.type,
+        levels: r.ceilingShape.levels != null ? Number(r.ceilingShape.levels) : null,
+        step_height_m: r.ceilingShape.step_height_m != null ? Number(r.ceilingShape.step_height_m) : null,
+        slope_deg: r.ceilingShape.slope_deg != null ? Number(r.ceilingShape.slope_deg) : null,
+      },
     })),
   }), [projectName, city, scope, rooms]);
 
@@ -225,6 +242,39 @@ export function Workspace({
     [regions, city],
   );
 
+  // Доступность магазинов материалов (Мегастрой/Леман) в выбранном городе (#365):
+  // Мегастрой и Леман покрывают разные города по-разному (см. docs/price-sources.md).
+  // Сброс невалидного выбора магазина (если он стал недоступен после смены города)
+  // делаем прямо в колбэке ответа, а не отдельным эффектом-синхронизацией — иначе
+  // setState вызывается синхронно в теле эффекта (react-hooks/set-state-in-effect).
+  useEffect(() => {
+    apiClient
+      .fetchStores(city)
+      .then((res) => {
+        setStores(res.stores);
+        const found = store && res.stores.find((s) => s.name === store);
+        if (found && !found.available) {
+          setStore(null);
+          setStoreResetNotice(`«${store}» недоступен в городе «${city}» — выбор сброшен на «Любой».`);
+          setTimeout(() => setStoreResetNotice(null), 5000);
+        }
+      })
+      .catch((err) => console.error("Не удалось загрузить список магазинов:", err));
+  }, [city, store, setStore]);
+
+  const storeOptions = useMemo(
+    () => [
+      { value: "", label: "Любой" },
+      ...stores.map((s) => ({
+        value: s.name,
+        label: s.name,
+        disabled: !s.available,
+        title: s.available ? undefined : `${s.name} сейчас недоступен в городе «${city}»`,
+      })),
+    ],
+    [stores, city],
+  );
+
   // silent=true — авто-пересчёт по дебаунсу: молча пропускаем невалидное состояние,
   // не пугаем пользователя ошибкой, пока он редактирует.
   const runCalculate = useCallback(
@@ -271,18 +321,8 @@ export function Workspace({
           city,
           scope,
           tier: "avg",
-          rooms: rooms.map((room) => ({
-            name: room.name,
-            room_type: room.room_type,
-            height: Number(room.height),
-            openings: room.openings.map((op) => ({
-              ...op,
-              width: Number(op.width),
-              height: Number(op.height),
-            })),
-            points: room.points.map((p) => ({ x: Number(p.x), y: Number(p.y) })),
-            works: room.works,
-          })),
+          stores: store ? [store] : null,
+          rooms: roomsToCalcPayload(rooms),
         };
         // Один запрос вместо трёх параллельных (#349): бэкенд теперь сам отдаёт
         // min_item/avg_item/max_item на каждой строке материала — для 6 finish_key-позиций
@@ -317,7 +357,7 @@ export function Workspace({
         setIsLoading(false);
       }
     },
-    [rooms, city, scope],
+    [rooms, city, scope, store],
   );
 
   // Авто-пересчёт через 500 мс после последнего изменения геометрии/параметров.
@@ -489,11 +529,13 @@ export function Workspace({
 
   const materialRows: LedgerRow[] = useMemo(
     () =>
-      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, sourceLabel, sourceCount, variants }) => ({
+      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, sourceLabel, sourceCount, variants }, i) => ({
         name: activeName,
         volume: `${formatQty(m.quantity)} ${m.unit}`,
         price: rub(Math.round(activePrice)),
+        total: rub(Math.round(activeTotal)),
         activeMode: effectiveMode,
+        isOverridden: materialOverrides[i] !== undefined && materialOverrides[i] !== priceMode,
         variants: variants.length > 0 ? variants : undefined,
         details: [
           { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
@@ -516,7 +558,7 @@ export function Workspace({
             : []),
         ],
       })),
-    [materialsActive, city],
+    [materialsActive, materialOverrides, city, priceMode],
   );
 
   // Работы с учётом эффективного уровня по каждой строке. В отличие от материалов,
@@ -580,6 +622,7 @@ export function Workspace({
       subtitle: l.specialist,
       volume: `${formatQty(l.volume)} ${l.unit}`,
       price: rub(Math.round(activePrice)),
+      total: rub(Math.round(activeTotal)),
       activeMode: effectiveMode,
       variants: variants.length > 0 ? variants : undefined,
       details: [
@@ -601,9 +644,23 @@ export function Workspace({
   );
 
   const laborRows: LedgerRow[] = useMemo(
-    () => laborActive.map(laborItemToRow),
-    [laborActive, laborItemToRow],
+    () => laborActive.map((item, i) => ({
+      ...laborItemToRow(item),
+      isOverridden: laborOverrides[i] !== undefined && laborOverrides[i] !== priceMode,
+    })),
+    [laborActive, laborItemToRow, laborOverrides, priceMode],
   );
+
+  const hasMixedOverrides = useMemo(() => {
+    const matMixed = Object.entries(materialOverrides).some(([, mode]) => mode !== priceMode);
+    const labMixed = Object.entries(laborOverrides).some(([, mode]) => mode !== priceMode);
+    return matMixed || labMixed;
+  }, [materialOverrides, laborOverrides, priceMode]);
+
+  const clearAllOverrides = useCallback(() => {
+    setMaterialOverrides({});
+    setLaborOverrides({});
+  }, []);
 
   // Работы, сгруппированные по стадиям (черновая/предчистовая/чистовая) — для
   // сметы «Черновая + чистовая». В режиме «только чистовая» группировки нет.
@@ -660,6 +717,21 @@ export function Workspace({
               onChange={setCity}
             />
           </div>
+          <div className={styles.cityField}>
+            <div className={styles.blockLabel}>Магазин</div>
+            <Select
+              variant="underline"
+              ariaLabel="Магазин материалов"
+              value={store ?? ""}
+              options={storeOptions}
+              onChange={(v) => setStore(v || null)}
+            />
+            {storeResetNotice && (
+              <div className={styles.error} style={{ marginTop: 4, fontSize: 12 }}>
+                {storeResetNotice}
+              </div>
+            )}
+          </div>
           <div className={styles.heightField}>
             <div className={styles.blockLabel}>Высота потолка</div>
             <div>
@@ -676,6 +748,74 @@ export function Workspace({
             {heightError && (
               <div className={styles.error} style={{ marginTop: 4, fontSize: 12 }}>
                 {heightError}
+              </div>
+            )}
+          </div>
+          <div className={styles.cityField}>
+            <div className={styles.blockLabel}>Форма потолка</div>
+            <Select
+              variant="underline"
+              ariaLabel="Форма потолка"
+              value={activeRoom?.ceilingShape.type ?? "flat"}
+              options={CEILING_SHAPE_OPTIONS}
+              onChange={(v) =>
+                setCeilingShape({
+                  type: v as CeilingShapeType,
+                  levels: null,
+                  step_height_m: null,
+                  slope_deg: null,
+                })
+              }
+            />
+            {activeRoom?.ceilingShape.type === "multilevel" && (
+              <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
+                <div className={styles.heightField}>
+                  <span className={styles.heightUnit}>Уровней короба</span>
+                  <input
+                    className={styles.heightInput}
+                    type="number"
+                    step="1"
+                    min="1"
+                    max="5"
+                    placeholder="1"
+                    value={activeRoom.ceilingShape.levels ?? ""}
+                    onChange={(e) =>
+                      setCeilingShape({ levels: e.target.value === "" ? null : Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className={styles.heightField}>
+                  <span className={styles.heightUnit}>Высота грани, м</span>
+                  <input
+                    className={styles.heightInput}
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max="1"
+                    placeholder="0.12"
+                    value={activeRoom.ceilingShape.step_height_m ?? ""}
+                    onChange={(e) =>
+                      setCeilingShape({ step_height_m: e.target.value === "" ? null : Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+            )}
+            {activeRoom?.ceilingShape.type === "attic_slope" && (
+              <div className={styles.heightField} style={{ marginTop: 4 }}>
+                <span className={styles.heightUnit}>Угол ската, °</span>
+                <input
+                  className={styles.heightInput}
+                  type="number"
+                  step="1"
+                  min="0"
+                  max="84"
+                  placeholder="0"
+                  value={activeRoom.ceilingShape.slope_deg ?? ""}
+                  onChange={(e) =>
+                    setCeilingShape({ slope_deg: e.target.value === "" ? null : Number(e.target.value) })
+                  }
+                />
               </div>
             )}
           </div>
@@ -702,11 +842,6 @@ export function Workspace({
               </button>
             </div>
           </div>
-        </div>
-
-        <div className={styles.block}>
-          <div className={styles.blockLabel}>Тип комнаты</div>
-          <RoomTypeSelector />
         </div>
 
         <div className={styles.block}>
@@ -904,6 +1039,16 @@ export function Workspace({
                 </p>
               )}
 
+              {(data.scope ?? scope) === "rough_and_finish" && (
+                <p className={styles.scopeNote}>
+                  Некоторые работы и материалы (грунтовка, стартовая шпаклёвка стен,
+                  прокладка кабеля, монтаж труб) нужны и на черновом, и на чистовом этапе,
+                  поэтому здесь они учтены один раз. Из-за этого сумма отдельных смет
+                  «только черновая» и «только чистовая» получается больше, чем эта общая
+                  смета — это не ошибка расчёта.
+                </p>
+              )}
+
               {/* Блок: Переключатель уровней цен + кнопки экспорта */}
               <div className={styles.exportControlsWrapper}>
                 <div className={styles.rangeWrapper}>
@@ -965,8 +1110,18 @@ export function Workspace({
                       style={{ right: 0 }}
                     />
                   </div>
+
+                  {hasMixedOverrides && (
+                    <div className={styles.mixedOverrideHint}>
+                      <span className={styles.mixedOverrideIcon}>⚠</span>
+                      <span>Часть позиций закреплена на отдельном уровне</span>
+                      <button className={styles.resetOverridesBtn} onClick={clearAllOverrides}>
+                        Сбросить
+                      </button>
+                    </div>
+                  )}
                 </div>
-                
+
                 <div className={`${styles.exportRow} ${styles.exportRowPadded}`}>
                   <button
                     className={styles.exportBtn}
@@ -1037,6 +1192,7 @@ export function Workspace({
                 <div className={styles.hiddenSection}>
                   <div className={styles.blockLabel}>Скрытые работы · возможные доплаты</div>
                   <p className={styles.hiddenNote}>{data.hidden_works.note}</p>
+                  <div className={styles.hiddenTableWrap}>
                   <table className={styles.hiddenTable}>
                     <thead>
                       <tr>
@@ -1061,6 +1217,7 @@ export function Workspace({
                       ))}
                     </tbody>
                   </table>
+                  </div>
                   <div className={styles.hiddenTotal}>
                     <span>Итого возможных доплат</span>
                     <span>

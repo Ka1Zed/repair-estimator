@@ -68,11 +68,35 @@ def test_regions_endpoint():
     assert "Казань" in body["regions"]
 
 
+# --- справочник магазинов по городу (#363) ---
+
+def test_stores_endpoint_kazan_both_available():
+    """Казань не покрыта ни одним региональным источником (covered_cities) →
+    оба зарегистрированных магазина (Мегастрой, базовый Леман) доступны."""
+    response = client.get("/api/regions/stores", params={"city": "Казань"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["city"] == "Казань"
+    stores = {s["name"]: s["available"] for s in body["stores"]}
+    assert stores == {"Мегастрой": True, "Леман": True}
+
+
+def test_stores_endpoint_moscow_megastroy_unavailable():
+    """Москва покрыта региональным Леман-Москва (covered_cities={'Москва'}) →
+    он подменяет безрегиональные источники: Мегастрой недоступен физически."""
+    response = client.get("/api/regions/stores", params={"city": "Москва"})
+    assert response.status_code == 200
+    body = response.json()
+    stores = {s["name"]: s["available"] for s in body["stores"]}
+    assert stores == {"Мегастрой": False, "Леман": True}
+
+
 # --- сквозной расчёт: разные города дают разные суммы ---
 
-def _payload(city: str) -> dict:
+def _payload(city: str, stores: list[str] | None = None) -> dict:
     return {
         "city": city,
+        **({"stores": stores} if stores is not None else {}),
         "rooms": [
             {
                 "name": "Комната",
@@ -139,7 +163,7 @@ class _StubRegionalParser(BaseParser):
         self.covered_cities = covered_cities
         self._avg = Decimal(avg)
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
+    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
         return ParsedPrice(
             price_min=self._avg - 20,
             price_avg=self._avg,
@@ -218,3 +242,45 @@ def test_kazan_estimate_consistent_source_across_finish_key_materials(regional_m
     assert {m["name"] for m in finish_items} == finish_names
     assert all(set(m["sources"]) == {"Мегастрой", "Леман"} for m in finish_items)
     assert all(m["region"] is None for m in finish_items)
+
+
+# --- явный выбор магазина в /calculate (#363) ---
+
+def test_kazan_estimate_narrows_to_selected_store(regional_material_parsers):
+    """Казань: оба безрегиональных источника покрывают город, но пользователь явно
+    выбрал только Леман → в вилку идёт только он, Мегастрой не подмешивается."""
+    body = client.post(
+        "/api/estimates/calculate", json=_payload("Казань", stores=["Леман"])
+    ).json()
+    paint = next(m for m in body["materials"] if m["name"] == "Краска для стен")
+
+    assert paint["sources"] == ["Леман"]
+    assert paint["price_avg"] == 300.0
+
+
+def test_moscow_estimate_falls_back_when_selected_store_unavailable(regional_material_parsers):
+    """Москва: пользователь выбрал Мегастрой, но он физически не покрывает город
+    (единственный источник — региональный Леман-Москва) → тихий откат на
+    авто-подбор, а не пустая цена/падение."""
+    with_store = client.post(
+        "/api/estimates/calculate", json=_payload("Москва", stores=["Мегастрой"])
+    ).json()
+    without_store = client.post(
+        "/api/estimates/calculate", json=_payload("Москва")
+    ).json()
+
+    paint_with = next(m for m in with_store["materials"] if m["name"] == "Краска для стен")
+    paint_without = next(m for m in without_store["materials"] if m["name"] == "Краска для стен")
+
+    assert paint_with["sources"] == ["Леман"]
+    assert paint_with["price_avg"] == paint_without["price_avg"] == 250.0
+
+
+def test_estimate_rejects_unknown_store_name(regional_material_parsers):
+    """Опечатка в имени магазина — не то же самое, что «магазин не покрывает
+    город»: должна вернуться явная 422, а не тихий откат на автоподбор."""
+    response = client.post(
+        "/api/estimates/calculate", json=_payload("Казань", stores=["Ленман"])
+    )
+    assert response.status_code == 422
+    assert "Ленман" in response.json()["detail"]

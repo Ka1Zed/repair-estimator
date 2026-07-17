@@ -1,8 +1,9 @@
 
 from typing import List, Union, Dict, Any, Optional
 from decimal import Decimal, getcontext
+import math
 
-from app.core.norms import OTKOS_DEPTH_DEFAULT
+from app.core.norms import OTKOS_DEPTH_DEFAULT, CEILING_MULTILEVEL_STEP_HEIGHT_DEFAULT
 
 getcontext().prec = 28
 
@@ -62,6 +63,66 @@ def perimeter(points: List[Union[tuple, list, dict]]) -> Decimal:
     """
     return sum(side_lengths(points), Decimal('0.0'))
 
+def _segments_cross(a1: tuple, a2: tuple, b1: tuple, b2: tuple) -> bool:
+    """Пересекаются ли отрезки a1a2 и b1b2 (включая касание точкой)."""
+    def orient(p: tuple, q: tuple, r: tuple) -> Decimal:
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+
+    def on_segment(p: tuple, q: tuple, r: tuple) -> bool:
+        return (
+            min(p[0], q[0]) <= r[0] <= max(p[0], q[0])
+            and min(p[1], q[1]) <= r[1] <= max(p[1], q[1])
+        )
+
+    d1 = orient(b1, b2, a1)
+    d2 = orient(b1, b2, a2)
+    d3 = orient(a1, a2, b1)
+    d4 = orient(a1, a2, b2)
+
+    if ((d1 > 0 > d2) or (d1 < 0 < d2)) and ((d3 > 0 > d4) or (d3 < 0 < d4)):
+        return True
+    if d1 == 0 and on_segment(b1, b2, a1):
+        return True
+    if d2 == 0 and on_segment(b1, b2, a2):
+        return True
+    if d3 == 0 and on_segment(a1, a2, b1):
+        return True
+    if d4 == 0 and on_segment(a1, a2, b2):
+        return True
+    return False
+
+def _validate_polygon(points: List[Union[tuple, list, dict]]) -> None:
+    """
+    Валидация контура комнаты. Кидает ValueError с описанием ошибки.
+
+    Отвергает вырожденные контуры (меньше 3 точек, нулевая площадь — точки на
+    одной прямой) и самопересечения («бабочка»): по такой геометрии смета
+    считалась бы молча с floor_area = 0 при ненулевых стенах.
+    """
+    if len(points) < 3:
+        raise ValueError("Контур комнаты должен содержать минимум 3 точки.")
+
+    if floor_area(points) == 0:
+        raise ValueError(
+            "Контур комнаты вырожден: площадь равна нулю. "
+            "Проверьте, что точки не лежат на одной прямой и стены не накладываются друг на друга."
+        )
+
+    coords = [_get_xy(p) for p in points]
+    n = len(coords)
+    for i in range(n):
+        a1, a2 = coords[i], coords[(i + 1) % n]
+        for j in range(i + 1, n):
+            # Смежные стены общую вершину имеют законно — их не проверяем.
+            if j == i + 1 or (i == 0 and j == n - 1):
+                continue
+            b1, b2 = coords[j], coords[(j + 1) % n]
+            if _segments_cross(a1, a2, b1, b2):
+                raise ValueError(
+                    "Контур комнаты самопересекается: стены не должны пересекать друг друга. "
+                    "Проверьте порядок точек."
+                )
+
 def _validate_openings(
     height: Decimal,
     openings: List[Dict[str, Any]],
@@ -92,10 +153,57 @@ def _validate_openings(
             f"Суммарная площадь проёмов ({total_opening_area:.2f} м²) не может быть больше или равна площади стен ({wall_area_before:.2f} м²)."
         )
 
+def _ceiling_area(
+    floor: Decimal,
+    perim: Decimal,
+    ceiling_shape: Optional[Dict[str, Any]],
+) -> Decimal:
+    """
+    Площадь потолка по форме (#357). ceiling_shape=None или type="flat" —
+    плоский потолок, площадь равна проекции пола (прежнее поведение).
+
+    - multilevel: ceiling_area = floor + perimeter × step_height_m × levels
+      (верхние грани коробов ≈ проекция пола, добавляем только вертикальные
+      грани коробов по периметру помещения на каждый уровень).
+    - attic_slope: ceiling_area = floor / cos(slope_deg) (единая наклонная
+      плоскость над всей проекцией пола).
+    """
+    if not ceiling_shape:
+        return floor
+
+    shape_type = ceiling_shape.get('type', 'flat')
+    if shape_type == 'flat' or shape_type is None:
+        return floor
+
+    if shape_type == 'multilevel':
+        levels = ceiling_shape.get('levels')
+        levels = int(levels) if levels is not None else 1
+        if levels < 1 or levels > 5:
+            raise ValueError("Число уровней потолка должно быть от 1 до 5.")
+
+        step_height = ceiling_shape.get('step_height_m')
+        step_height = to_decimal(step_height) if step_height is not None else CEILING_MULTILEVEL_STEP_HEIGHT_DEFAULT
+        if step_height <= 0 or step_height > 1:
+            raise ValueError("Высота грани короба должна быть больше 0 и не более 1 м.")
+
+        return floor + perim * step_height * Decimal(levels)
+
+    if shape_type == 'attic_slope':
+        slope_deg = ceiling_shape.get('slope_deg')
+        slope_deg = to_decimal(slope_deg) if slope_deg is not None else Decimal('0')
+        if slope_deg < 0 or slope_deg >= 85:
+            raise ValueError("Угол ската потолка должен быть от 0 до 85°.")
+
+        cos_slope = Decimal(str(math.cos(math.radians(float(slope_deg)))))
+        return floor / cos_slope
+
+    raise ValueError(f'Неизвестная форма потолка: "{shape_type}".')
+
 def calculate_room_geometry(
     points: List[Union[tuple, list, dict]],
     height: Union[int, float, str, Decimal],
-    openings: Optional[List[Union[dict, tuple]]] = None
+    openings: Optional[List[Union[dict, tuple]]] = None,
+    ceiling_shape: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Decimal]:
     """
     Рассчитывает геометрию комнаты с валидацией проёмов.
@@ -108,6 +216,10 @@ def calculate_room_geometry(
         pts = [(p['x'], p['y']) for p in points]
     else:
         pts = [(float(p[0]), float(p[1])) for p in points]
+
+    # Валидация контура (кидает ValueError): вырожденный или самопересекающийся
+    # многоугольник дал бы смету с floor_area = 0 при ненулевых стенах.
+    _validate_polygon(pts)
 
     # Длины сторон считаем один раз: нужны и для периметра, и для проверки ширины проёмов.
     sides = side_lengths(pts)
@@ -171,7 +283,7 @@ def calculate_room_geometry(
 
     return {
         'floor_area': floor,
-        'ceiling_area': floor,
+        'ceiling_area': _ceiling_area(floor, perim, ceiling_shape),
         'wall_area': wall,
         'perimeter': perim,
         'door_width_sum': door_width_sum,

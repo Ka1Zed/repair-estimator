@@ -19,7 +19,8 @@ export interface EstimateExportData {
   hidden_works?: HiddenWorks;
 }
 
-const formatPricePDF = (price: number) => `${price.toLocaleString('ru-RU')} ₽`;
+// Рубли без копеек: суммы приходят с float-хвостами (77010.998…) — в документе целые.
+const formatPricePDF = (price: number) => `${Math.round(price).toLocaleString('ru-RU')} ₽`;
 
 // Палитра Excel (те же цвета, что в PDF из index.css). xlsx-js-style пишет
 // заливки/шрифты/рамки ячеек через свойство cell.s — обычный xlsx это не умеет.
@@ -52,6 +53,11 @@ const totalStyle = {
   font: { bold: true, color: { rgb: XLS.white } },
   fill: { patternType: 'solid', fgColor: { rgb: XLS.accent } },
   border: allBorders,
+};
+const bannerStyle = {
+  font: { bold: true, sz: 11, color: { rgb: XLS.white } },
+  fill: { patternType: 'solid', fgColor: { rgb: XLS.accent } },
+  alignment: { horizontal: 'left', vertical: 'center', wrapText: true },
 };
 
 const cellAt = (ws: XLSX.WorkSheet, r: number, c: number) => {
@@ -115,6 +121,31 @@ const MODE_LABELS: Record<PriceMode, string> = {
   min: 'Минимальный',
   avg: 'Средний',
   max: 'Максимальный'
+};
+
+// Человекочитаемое пояснение уровня вилки для баннера в начале документа (#369) —
+// клиенты не замечали мелкую строку «Уровень цен: ...», нужен явный смысл фразой.
+const TIER_SENTENCES: Record<PriceMode, string> = {
+  min: 'Смета рассчитана по минимальным ценам на материалы и работы',
+  avg: 'Смета рассчитана по средним ценам на материалы и работы',
+  max: 'Смета рассчитана по максимальным ценам на материалы и работы',
+};
+
+// Смешанный расчёт: часть позиций закреплена (#331/#364) на своём уровне вилки,
+// отличном от глобального priceMode — текст должен предупреждать об этом отдельно.
+const hasMixedTiers = (
+  priceMode: PriceMode,
+  materialOverrides?: Record<number, PriceMode>,
+  laborOverrides?: Record<number, PriceMode>,
+) => {
+  const matMixed = materialOverrides ? Object.values(materialOverrides).some((mode) => mode !== priceMode) : false;
+  const labMixed = laborOverrides ? Object.values(laborOverrides).some((mode) => mode !== priceMode) : false;
+  return matMixed || labMixed;
+};
+
+const buildTierBanner = (priceMode: PriceMode, mixed: boolean) => {
+  const sentence = `${TIER_SENTENCES[priceMode]}.`;
+  return mixed ? `${sentence} Часть позиций закреплена на отдельном уровне вилки.` : sentence;
 };
 
 // Множитель уровня цен, СВОЙ для каждого раздела: у позиций без своей вилки (нет
@@ -229,10 +260,13 @@ export const exportXlsx = (
   const scaleLab = scaleFor(s, priceMode, 'labor');
 
   const metaLine = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${today}`;
+  const mixed = hasMixedTiers(priceMode, materialOverrides, laborOverrides);
+  const banner = buildTierBanner(priceMode, mixed);
 
   // ---------- Сводка: город/дата, геометрия, итоги min/avg/max ----------
   const summaryAoa: (string | number)[][] = [
     ['Смета на ремонт'],
+    [banner],
     [metaLine],
     [],
   ];
@@ -256,13 +290,16 @@ export const exportXlsx = (
 
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryAoa);
   summarySheet['!cols'] = [{ wch: 26 }, { wch: 18 }, { wch: 18 }, { wch: 18 }];
+  summarySheet['!rows'] = [{ hpt: 20 }, { hpt: 24 }];
   summarySheet['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
     { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 3 } },
   ];
   cellAt(summarySheet, 0, 0).s = titleStyle;
-  cellAt(summarySheet, 1, 0).s = metaStyle;
-  if (geomEntries.length) cellAt(summarySheet, 3, 0).s = sectionStyle;
+  cellAt(summarySheet, 1, 0).s = bannerStyle;
+  cellAt(summarySheet, 2, 0).s = metaStyle;
+  if (geomEntries.length) cellAt(summarySheet, 4, 0).s = sectionStyle;
   cellAt(summarySheet, costFirst - 2, 0).s = sectionStyle;
   styleTable(summarySheet, {
     headerRow: costFirst - 1,
@@ -284,7 +321,7 @@ export const exportXlsx = (
     ...data.materials.map((m, i) => {
       const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
-        act.activeName, m.quantity, m.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
+        act.activeName, Math.round(m.quantity * 100) / 100, m.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
         sourceLabel(act.activeSource, m.region), fmtDate(m.updated_at),
       ];
     }),
@@ -323,7 +360,7 @@ export const exportXlsx = (
     ...data.labor.map((l, i) => {
       const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
       return [
-        l.service, l.specialist, l.volume, l.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
+        l.service, l.specialist, Math.round(l.volume * 100) / 100, l.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
         sourceLabel(act.activeSource, l.region),
       ];
     }),
@@ -535,20 +572,32 @@ export const exportPdf = async (
     },
   });
 
-  // Обложка: титул + акцентная линейка + мета
+  // Обложка: титул + акцентная линейка + баннер уровня вилки + мета
   doc.setFontSize(22);
   doc.setTextColor(...PDF_HEADING);
   doc.text('Смета на ремонт', marginX, 22);
   doc.setDrawColor(...PDF_ACCENT);
   doc.setLineWidth(0.8);
   doc.line(marginX, 26, pageW - marginX, 26);
+
+  // Цветной баннер вместо мелкой строки «Уровень цен: ...» — клиенты её не замечали (#369).
+  const mixed = hasMixedTiers(priceMode, materialOverrides, laborOverrides);
+  const bannerLines = doc.splitTextToSize(buildTierBanner(priceMode, mixed), pageW - marginX * 2 - 8);
+  const bannerY = 30;
+  const bannerHeight = bannerLines.length * 5 + 5;
+  doc.setFillColor(...PDF_ACCENT);
+  doc.roundedRect(marginX, bannerY, pageW - marginX * 2, bannerHeight, 2, 2, 'F');
+  doc.setFontSize(10.5);
+  doc.setTextColor(...PDF_WHITE);
+  doc.text(bannerLines, marginX + 4, bannerY + 6);
+
   doc.setFontSize(10);
   doc.setTextColor(...PDF_MUTED);
-  
   const meta = `Город: ${city}    ·    Уровень цен: ${MODE_LABELS[priceMode]}    ·    Дата: ${new Date().toLocaleDateString('ru-RU')}`;
-  doc.text(meta, marginX, 33);
+  const metaY = bannerY + bannerHeight + 6;
+  doc.text(meta, marginX, metaY);
 
-  let currentY = 44;
+  let currentY = metaY + 11;
 
   if (data.geometry && Object.keys(data.geometry).length > 0) {
     doc.setFontSize(11);
@@ -572,7 +621,7 @@ export const exportPdf = async (
     body: data.materials.map((m, i) => {
       const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
-        act.activeName, m.quantity, m.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, m.region)
+        act.activeName, fmtQty(m.quantity), m.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, m.region)
       ];
     }),
     columnStyles: {
@@ -595,7 +644,7 @@ export const exportPdf = async (
     body: data.labor.map((l, i) => {
       const act = getActiveLaborData(l, resolveTier(i, priceMode, laborOverrides), scaleLab);
       return [
-        l.service, l.specialist, l.volume, l.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, l.region)
+        l.service, l.specialist, fmtQty(l.volume), l.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, l.region)
       ];
     }),
     columnStyles: {
@@ -610,6 +659,11 @@ export const exportPdf = async (
   });
 
   currentY = getFinalY(doc) + 14;
+  // не оставлять заголовок секции «висеть» внизу страницы — перенести целиком
+  if (currentY > pageH - 45) {
+    doc.addPage();
+    currentY = 20;
+  }
   sectionHeading('Итоговая стоимость', currentY);
   autoTable(doc, {
     ...tableBase,
@@ -685,6 +739,9 @@ export const exportPdf = async (
     doc.text(noteLines, marginX, currentY + 5);
     autoTable(doc, {
       ...tableBase,
+      // Таблица маленькая — при нехватке места переносится на новую страницу
+      // целиком: иначе внизу оставался пустой огрызок «шапка + Итого» без строк.
+      pageBreak: 'avoid',
       startY: currentY + 5 + noteLines.length * 4,
       head: [['Работа', 'Специалист', 'Причина', 'Объём', 'Мин.', 'Макс.']],
       body: hw.items.map((item: HiddenWorkItem) => [

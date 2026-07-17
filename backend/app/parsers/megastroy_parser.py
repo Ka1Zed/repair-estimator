@@ -4,6 +4,7 @@ import re
 import statistics
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urljoin
@@ -13,7 +14,7 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.parsers import headless_session
-from app.parsers._stats import filter_outliers, price_band_slice
+from app.parsers._stats import filter_outliers, filter_undersized_packages, price_band_slice
 from app.parsers.base import BaseParser, ParsedPrice, DEFAULT_HEADERS, DEFAULT_REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -56,9 +57,52 @@ class MaterialCategory:
     # раньше (стандарт/avg). Сайт не даёт facet «бренд/класс» вне краски —
     # это приближение, а не курированный список брендов (docs/price-sources.md).
     price_band: str | None = None
+    # Семантический фильтр по названию карточки (#386, аналог _is_relevant в
+    # leman_parser.py) — для категорий, где facet URL не отделяет подтипы чисто
+    # (шпаклёвка стартовая/финишная не разведены ни одним facet'ом Мегастроя).
+    # Применяется к сырым карточкам ДО извлечения фасовки/статистики; если
+    # выкашивает всю выборку (разметка сменилась/имена не распознались) —
+    # откатываемся на нефильтрованную выборку, цена не должна пропасть (см.
+    # fetch_price).
+    title_filter: "Callable[[str], bool] | None" = None
 
 
 _SHPAKLEVKA = "https://kazan.megastroy.com/catalog/shpaklevka"
+
+# Классификация шпаклёвки по названию карточки (#386). Живая сверка реальных
+# названий на kazan.megastroy.com показала: слов «стартовая»/«базовая»/
+# «выравнивающая»/«под штукатурку» в этой категории на сайте физически НЕТ ни у
+# одной карточки — рынок здесь маркирует стартовый/базовый слой словом
+# «универсальная» (Кнауф Фуген универсальная, ЕК К200 универсальная и т.п.),
+# а финишный — словом «финиш»/«суперфиниш» (кириллица — не путает с латинским
+# "Finish" в бренд-неймах вроде "Bergauf Finish Zement", который по факту
+# цементная СТАРТОВАЯ шпаклёвка, см. docs/price-sources.md). Значит стартовая —
+# это "не финишная" по умолчанию, а не позитивный список маркеров.
+# Отдельно исключаем товары другого материала/назначения, затесавшиеся в общую
+# категорию: шпатлёвка по дереву (мебель/паркет), фасадная (наружная), замазка
+# для щелей/трещин (тюбик-герметик — именно этот подтип раньше ошибочно взяли
+# под field206, #386).
+_SHPAKLEVKA_IRRELEVANT_MARKERS = ("по дереву", "фасадн", "замазк")
+_SHPAKLEVKA_FINISH_MARKER = "финиш"
+_SHPAKLEVKA_UNIVERSAL_MARKER = "универсальн"
+
+
+def _is_startovaya_shpaklevka(title: str) -> bool:
+    low = title.lower()
+    if any(marker in low for marker in _SHPAKLEVKA_IRRELEVANT_MARKERS):
+        return False
+    return _SHPAKLEVKA_FINISH_MARKER not in low
+
+
+def _is_not_startovaya_shpaklevka(title: str) -> bool:
+    # Подстраховка для «Шпаклевка финишная» (#386): facet сайта иногда пропускает
+    # в выдачу дешёвую «универсальную» гипсовую шпаклёвку — по факту рынка это
+    # стартовый/базовый продукт (см. комментарий выше), не финишный.
+    low = title.lower()
+    if any(marker in low for marker in _SHPAKLEVKA_IRRELEVANT_MARKERS):
+        return False
+    return _SHPAKLEVKA_UNIVERSAL_MARKER not in low
+
 
 # Карта: материал в БД -> категория(и) Мегастроя (Казань) с фильтром, где нужен.
 CATEGORY_MAP: dict[str, MaterialCategory] = {
@@ -94,13 +138,22 @@ CATEGORY_MAP: dict[str, MaterialCategory] = {
         ),
         title_unit="л",
     ),
+    # #386: у Мегастроя нет facet'а, чисто отделяющего стартовую шпаклёвку от
+    # финишной/универсальной — прежний field206=«для заделки щелей, выбоин,
+    # трещин» на деле категория замазок для трещин (мелкая тюбиковая фасовка),
+    # смысловая ошибка привязки facet'а. Берём всю категорию без узкого facet'а
+    # и классифицируем по названию (_is_startovaya_shpaklevka).
     "Шпаклевка стартовая": MaterialCategory(
-        urls=(f"{_SHPAKLEVKA}?field206[]=для заделки щелей, выбоин, трещин",),
+        urls=(_SHPAKLEVKA,),
         title_unit="кг",
+        title_filter=_is_startovaya_shpaklevka,
     ),
     "Шпаклевка финишная": MaterialCategory(
         urls=(f"{_SHPAKLEVKA}?field206[]=под окраску и оклейку обоями",),
         title_unit="кг",
+        # #386: facet и так сужает выборку корректно — доп. фильтр лишь
+        # подстраховка от случайной протечки стартовой шпаклёвки в выдачу.
+        title_filter=_is_not_startovaya_shpaklevka,
     ),
     "Грунтовка": MaterialCategory(
         urls=("https://kazan.megastroy.com/catalog/grunty",),
@@ -496,7 +549,9 @@ class MegastroyParser(BaseParser):
             self._raw_cache[urls] = (time.monotonic(), raw_items)
             return raw_items
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size: Decimal | None = None
+    ) -> ParsedPrice:
         if material_name not in CATEGORY_MAP:
             raise ValueError(f"Нет категории Мегастроя для материала '{material_name}'")
 
@@ -505,6 +560,19 @@ class MegastroyParser(BaseParser):
 
         if not raw_items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (возможно, урезанная страница)")
+
+        if category.title_filter is not None:
+            # Семантический отсев по названию (#386) до статистики — если фильтр
+            # выкосил всё (имена не распознались/разметка сменилась), откатываемся
+            # к исходной выборке, как и в leman_parser._is_relevant.
+            filtered = [it for it in raw_items if category.title_filter(it[3])]
+            if filtered and len(filtered) < len(raw_items):
+                logger.info(
+                    f"  Мегастрой '{material_name}': отброшено нерелевантных подтипов "
+                    f"{len(raw_items) - len(filtered)} из {len(raw_items)}"
+                )
+            if filtered:
+                raw_items = filtered
 
         # Третий элемент кортежа — package_size (#306): фасовка ЭТОГО конкретного
         # товара, извлечённая при нормализации цены, а не справочная. Для
@@ -529,6 +597,19 @@ class MegastroyParser(BaseParser):
                 qty = _quantity_from_title(title, category.title_unit)
                 if qty:
                     items.append((price / qty, url, qty))
+
+            # Нетиповая (мелкая) фасовка отсекается ДО статистики (#382) — иначе
+            # мелкая упаковка (её обычно больше по числу карточек) тянет price_avg
+            # и товар-представитель к себе, хотя типовая закупка — мешками/канистрами.
+            items = filter_undersized_packages(
+                items, key=lambda it: it[2], reference_package_size=reference_package_size
+            )
+            if reference_package_size is not None and not items:
+                raise RuntimeError(
+                    f"Все карточки '{material_name}' — нетиповая фасовка "
+                    f"(< 1/3 справочной {reference_package_size} кг/л) — "
+                    "как парсер не смог, откат на seed"
+                )
         elif category.normalize_length_mm:
             # Плинтус продаётся рейкой ("72х2500мм") по цене за шт — приводим
             # к ₽/м делением на длину рейки из названия. Длина рейки — и есть

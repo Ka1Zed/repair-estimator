@@ -33,6 +33,10 @@ services:
       POSTGRES_PORT: 5432
       # CORS: на сервере выставить адрес сайта (см. .env.example).
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      # Ходить ли в живой парсер материалов при расчёте сметы (см. .env.example).
+      # На проде обязательно false — иначе расчёт синхронно дёргает
+      # headless-браузер прямо в request-path.
+      PARSER_LIVE_FETCH: ${PARSER_LIVE_FETCH:-true}
       # Ключи beta-распознавания чертежа (опциональны).
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}

@@ -63,11 +63,14 @@ def get_price(
     Логика (TTL-кэш, чтобы расчёт сметы не ходил в интернет на каждый запрос):
     1. Если есть свежая (моложе ttl_hours) цена парсера в БД — возвращаем её, не трогая сайт.
     2. Иначе, если передан парсер — пробуем спарсить и сохранить свежую цену.
-    3. Если парсер упал/не передан/нет источника — берём seed-цену из БД.
-       При заданном region сначала ищем seed-цену этого региона, при отсутствии —
-       базовую seed-цену с region IS NULL.
-    4. force_refresh=True заставляет дёрнуть парсер даже при свежем кэше (для CLI update_prices).
-    5. Наверх исключение не пробрасываем никогда.
+    3. Если рефетч не удался (или PARSER_LIVE_FETCH=false), но старая цена этого
+       парсера младше PRICE_STALE_TTL_HOURS — возвращаем её как есть: реальная
+       цена недельной давности точнее общего seed.
+    4. Если парсер упал/не передан/нет источника/цена старше PRICE_STALE_TTL_HOURS —
+       берём seed-цену из БД. При заданном region сначала ищем seed-цену этого
+       региона, при отсутствии — базовую seed-цену с region IS NULL.
+    5. force_refresh=True заставляет дёрнуть парсер даже при свежем кэше (для CLI update_prices).
+    6. Наверх исключение не пробрасываем никогда.
 
     Аргумент region используется ТОЛЬКО в seed-fallback (п.3). Ветка парсера (п.1-2)
     региону-аргументу не подчиняется — она адресует кэш по region САМОГО инстанса
@@ -136,7 +139,15 @@ def get_price(
         # update_prices с российского IP.
         if force_refresh or settings.PARSER_LIVE_FETCH:
             try:
-                parsed = parser.fetch_price(material_name)
+                # reference_package_size (#382) — справочная фасовка материала,
+                # парсеры кг/л-материалов отсеивают по ней нетиповую мелкую упаковку
+                # (см. app.parsers._stats.filter_undersized_packages).
+                reference_package_size = (
+                    Decimal(str(material.package_size)) if material.package_size else None
+                )
+                parsed = parser.fetch_price(
+                    material_name, reference_package_size=reference_package_size
+                )
 
                 # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —
                 # это закрепило бы 0 в кэше на весь TTL. Уходим в seed, как при исключении.
@@ -182,6 +193,17 @@ def get_price(
             except Exception as e:
                 # Парсер упал - логируем и идем в fallback
                 logger.warning(f"Парсер {parser.source_name} не смог получить цену для '{material_name}': {e}")
+
+        # Живой рефетч не удался (или выключен), но старая цена ЭТОГО парсера
+        # ещё не совсем протухла (< PRICE_STALE_TTL_HOURS) — она точнее общего
+        # seed, отдаём её вместо seed-fallback ниже.
+        if price_entry and _is_fresh(price_entry.updated_at, settings.PRICE_STALE_TTL_HOURS):
+            logger.warning(
+                f"Цена для '{material_name}': источник=parser устаревшая "
+                f"({parser.source_name}, updated_at={price_entry.updated_at}) — "
+                "живой рефетч не удался, но кэш ещё не старше PRICE_STALE_TTL_HOURS"
+            )
+            return price_entry
 
     # Fallback: берем seed-цену из БД
     seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
@@ -290,12 +312,29 @@ def _select_regional_parsers(parsers: list[BaseParser], city: str | None) -> lis
     return [p for p in parsers if not p.covered_cities]
 
 
+def get_available_stores(parsers: list[BaseParser], city: str | None) -> list[dict]:
+    '''
+    Справочник магазинов материалов с признаком доступности для города (#363) —
+    для явного выбора магазина пользователем (см. store_names в get_material_price),
+    вместо скрытого автоподбора по covered_cities.
+
+    Использует ту же _select_regional_parsers, что и get_material_price: магазин
+    (уникальный source_name среди parsers) доступен, если хотя бы один его инстанс
+    попадает в выборку для этого города. Так гарантируется согласованность со
+    списком источников, который реально участвует в расчёте.
+    '''
+    selected_names = {p.source_name for p in _select_regional_parsers(parsers, city)}
+    all_names = sorted({p.source_name for p in parsers})
+    return [{"name": name, "available": name in selected_names} for name in all_names]
+
+
 def get_material_price(
     material_name: str,
     db: Session,
     parsers: list[BaseParser],
     region: str | None = None,
     ttl_hours: int | None = None,
+    store_names: list[str] | None = None,
 ) -> MaterialPrice | None:
     '''
     Возвращает цену материала, объединённую по всем зарегистрированным источникам
@@ -304,6 +343,13 @@ def get_material_price(
     region здесь — это и запрошенный город (для выбора источников через
     _select_regional_parsers, #345), и seed-fallback регион, пробрасываемый в
     get_price как раньше.
+
+    store_names (#363) — явный выбор пользователя (напр. только "Леман"): сужает
+    уже отобранные для города источники до перечисленных по source_name. Если
+    после сужения источников не осталось (выбранный магазин не покрывает этот
+    город) — откатываемся на полный набор для города, как будто store_names не
+    задан: расчёт не должен падать или оставаться без цены из-за недоступного
+    в городе магазина.
 
     Для каждого выбранного парсера вызывает get_price (там уже реализованы
     кэш/TTL, живой fetch при PARSER_LIVE_FETCH и seed-fallback для ОДНОГО
@@ -321,9 +367,15 @@ def get_material_price(
         logger.warning(f"Материал '{material_name}' не найден в БД")
         return None
 
+    selected_parsers = _select_regional_parsers(parsers, region)
+    if store_names:
+        narrowed = [p for p in selected_parsers if p.source_name in store_names]
+        if narrowed:
+            selected_parsers = narrowed
+
     parser_results: list[MaterialPrice] = []
     seed_result: MaterialPrice | None = None
-    for parser in _select_regional_parsers(parsers, region):
+    for parser in selected_parsers:
         result = get_price(material_name, db=db, parser=parser, region=region, ttl_hours=ttl_hours)
         if result is None:
             continue

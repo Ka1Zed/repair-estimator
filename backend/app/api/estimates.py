@@ -20,7 +20,7 @@ from app.services.labor_calc_service import (
     calculate_labor, calculate_engineering_labor, calculate_rough_labor,
     WET_ROOM_TYPES,
 )
-from app.services.repair_coeffs_service import CONTINGENCY
+from app.services.repair_coeffs_service import CONTINGENCY, clamp_price_corridor
 from app.services.price_aggregator_service import get_material_price, get_labor_price
 from app.services.hidden_works_service import calculate_hidden_works
 from app.parsers.base import BaseParser
@@ -121,9 +121,12 @@ def _finish_options(room: RoomInput) -> Dict[str, Any]:
         "floor": finish(w.floor),
         "walls": finish(w.walls),
         "ceiling": finish(w.ceiling),
-        # Модификаторы живут на уровне поверхности (стены).
+        # Модификаторы живут на уровне поверхности. primer_two_coats — отдельно
+        # для стен и потолка (#380): один флаг на обе поверхности перетирал бы
+        # выбор одной из них при одновременной покраске стен и потолка.
         "wallpaper_pattern": bool(w.walls.enabled and w.walls.wallpaper_pattern),
         "primer_two_coats": bool(w.walls.enabled and w.walls.primer_two_coats),
+        "ceiling_primer_two_coats": bool(w.ceiling.enabled and w.ceiling.primer_two_coats),
         "wall_condition": w.walls.wall_condition if w.walls.enabled else None,
     }
 
@@ -139,6 +142,7 @@ def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> D
 def _tier_item(
     material_key: str, tier: str, quantity: Decimal, db: Session,
     parsers: list[BaseParser], region: str, sources_by_id: Dict[int, str],
+    store_names: List[str] | None = None,
 ) -> MaterialTierItem:
     """SKU-вариант позиции для одного уровня комплектации (#349, min_item/avg_item/max_item).
 
@@ -154,13 +158,21 @@ def _tier_item(
     if material is None:
         return MaterialTierItem(name="", price=0.0, total=0.0, source="нет цены", source_url=None)
 
-    price_obj = get_material_price(material.name, db=db, parsers=parsers, region=region)
+    price_obj = get_material_price(
+        material.name, db=db, parsers=parsers, region=region, store_names=store_names,
+    )
     if not price_obj:
         return MaterialTierItem(
             name=material.name, price=0.0, total=0.0, source="нет цены", source_url=None,
         )
 
-    price = pick_by_tier(tier, price_obj.price_min, price_obj.price_avg, price_obj.price_max)
+    # Границы вилки SKU прижимаются к коридору уровня — та же арифметика,
+    # что в основной строке, иначе числа min_item/max_item разошлись бы
+    # с ответом отдельного /calculate с этим tier.
+    p_min, p_max = clamp_price_corridor(
+        price_obj.price_min, price_obj.price_avg, price_obj.price_max
+    )
+    price = pick_by_tier(tier, p_min, price_obj.price_avg, p_max)
     total = quantity * price * CONTINGENCY[tier]
     return MaterialTierItem(
         name=material.name,
@@ -185,6 +197,24 @@ def calculate_estimate(
     # точечного запроса на каждую строку материала/работы (устраняет N+1, #278).
     sources_by_id = {s.id: s.name for s in db.query(PriceSource).all()}
 
+    # Валидация request.stores (#363): опечатка/несуществующий магазин не должна
+    # молча откатываться на автоподбор — get_material_price не различает "магазин
+    # не покрывает город" (штатный откат) и "такого магазина вообще нет"
+    # (ошибка клиента). Проверяем по ПОЛНОМУ списку зарегистрированных парсеров
+    # (без учёта города), а не по _select_regional_parsers — иначе валидный, но
+    # непокрывающий город магазин ложно считался бы неизвестным.
+    if request.stores:
+        known_stores = {p.source_name for p in parsers}
+        unknown_stores = sorted(set(request.stores) - known_stores)
+        if unknown_stores:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    f"Неизвестный магазин(ы) в stores: {', '.join(unknown_stores)}. "
+                    f"Доступные магазины: {', '.join(sorted(known_stores))}."
+                ),
+            )
+
     all_materials: List[Dict[str, Any]] = []
     all_labor: List[Dict[str, Any]] = []
     total_geometry = {
@@ -203,7 +233,8 @@ def calculate_estimate(
             geometry = calculate_room_geometry(
                 points=[(p.x, p.y) for p in room.points],
                 height=room.height,
-                openings=[(o.type, o.width, o.height, o.depth) for o in room.openings]
+                openings=[(o.type, o.width, o.height, o.depth) for o in room.openings],
+                ceiling_shape=room.ceiling_shape.model_dump() if room.ceiling_shape else None,
             )
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
@@ -300,7 +331,9 @@ def calculate_estimate(
         # с накрученным по факту коэффициентом даже после суммирования нескольких комнат.
         waste_factor = (group['quantity'] / base_quantity) if base_quantity > 0 else Decimal(1)
 
-        price_obj = get_material_price(name, db=db, parsers=parsers, region=request.city)
+        price_obj = get_material_price(
+            name, db=db, parsers=parsers, region=request.city, store_names=request.stores,
+        )
 
         # package_size (#306): если цена пришла от парсера и он отдал фасовку
         # КОНКРЕТНОГО товара за source_url — считаем упаковки по ней, а не по
@@ -350,13 +383,22 @@ def calculate_estimate(
             ))
             continue
 
-        price_min = price_obj.price_min
         price_avg = price_obj.price_avg
-        price_max = price_obj.price_max
+        # Категорийный разброс источника прижимаем к коридору уровня
+        # (−15%/+20% от средней, PRICE_CORRIDOR) — межтоварный разброс
+        # уровней остаётся в min_item/max_item.
+        price_min, price_max = clamp_price_corridor(
+            price_obj.price_min, price_avg, price_obj.price_max
+        )
         source_name = sources_by_id.get(price_obj.source_id, "unknown")
         updated_at = price_obj.updated_at.strftime("%Y-%m-%d") if price_obj.updated_at else ""
-        min_source_id = getattr(price_obj, "min_source_id", None)
-        max_source_id = getattr(price_obj, "max_source_id", None)
+        # min_source/max_source — «источник, чья цена реально стала границей» (#348).
+        # Если границу переопределил кламп коридора, цена этого источника в вилке
+        # уже не участвует — ссылку на него не отдаём.
+        min_clamped = price_min != price_obj.price_min
+        max_clamped = price_max != price_obj.price_max
+        min_source_id = None if min_clamped else getattr(price_obj, "min_source_id", None)
+        max_source_id = None if max_clamped else getattr(price_obj, "max_source_id", None)
         min_source_name = sources_by_id.get(min_source_id) if min_source_id else None
         max_source_name = sources_by_id.get(max_source_id) if max_source_id else None
         total_min = final_quantity * price_min * CONTINGENCY['min']
@@ -379,7 +421,7 @@ def calculate_estimate(
             if t not in tier_items:
                 tier_items[t] = _tier_item(
                     group['material_key'], t, final_quantity, db, parsers,
-                    request.city, sources_by_id,
+                    request.city, sources_by_id, store_names=request.stores,
                 )
 
         materials_response.append(MaterialItem(
@@ -405,17 +447,17 @@ def calculate_estimate(
             region=price_obj.region,
             sources=getattr(price_obj, "contributing_sources", None),
             min_source=min_source_name,
-            min_source_url=getattr(price_obj, "min_source_url", None),
+            min_source_url=None if min_clamped else getattr(price_obj, "min_source_url", None),
             max_source=max_source_name,
-            max_source_url=getattr(price_obj, "max_source_url", None),
+            max_source_url=None if max_clamped else getattr(price_obj, "max_source_url", None),
             min_item=tier_items["min"],
             avg_item=tier_items["avg"],
             max_item=tier_items["max"],
         ))
 
-        materials_sum['min'] += final_quantity * price_obj.price_min
-        materials_sum['avg'] += final_quantity * price_obj.price_avg
-        materials_sum['max'] += final_quantity * price_obj.price_max
+        materials_sum['min'] += final_quantity * price_min
+        materials_sum['avg'] += final_quantity * price_avg
+        materials_sum['max'] += final_quantity * price_max
 
     # Агрегация работ
     labor_groups: Dict[str, Dict] = {}
@@ -439,7 +481,9 @@ def calculate_estimate(
             continue
 
         volume = group['volume']
-        p_min, p_avg, p_max = labor_price.price_min, labor_price.price_avg, labor_price.price_max
+        p_avg = labor_price.price_avg
+        # Тот же коридор уровня, что и у материалов (PRICE_CORRIDOR).
+        p_min, p_max = clamp_price_corridor(labor_price.price_min, p_avg, labor_price.price_max)
 
         # Применяем непредвиденные расходы для каждой границы
         total_min = volume * p_min * CONTINGENCY['min']
@@ -452,8 +496,12 @@ def calculate_estimate(
 
         labor_source_name = sources_by_id.get(labor_price.source_id, "seed")
         updated_at = labor_price.updated_at.strftime("%Y-%m-%d") if labor_price.updated_at else ""
-        labor_min_source_id = getattr(labor_price, "min_source_id", None)
-        labor_max_source_id = getattr(labor_price, "max_source_id", None)
+        # Как и у материалов: если границу вилки задал кламп коридора, а не источник,
+        # ссылку на «источник границы» (#348) не отдаём.
+        lab_min_clamped = p_min != labor_price.price_min
+        lab_max_clamped = p_max != labor_price.price_max
+        labor_min_source_id = None if lab_min_clamped else getattr(labor_price, "min_source_id", None)
+        labor_max_source_id = None if lab_max_clamped else getattr(labor_price, "max_source_id", None)
         labor_min_source_name = sources_by_id.get(labor_min_source_id) if labor_min_source_id else None
         labor_max_source_name = sources_by_id.get(labor_max_source_id) if labor_max_source_id else None
 
@@ -478,9 +526,9 @@ def calculate_estimate(
             region=labor_price.region,
             sources=getattr(labor_price, "contributing_sources", None),
             min_source=labor_min_source_name,
-            min_source_url=getattr(labor_price, "min_source_url", None),
+            min_source_url=None if lab_min_clamped else getattr(labor_price, "min_source_url", None),
             max_source=labor_max_source_name,
-            max_source_url=getattr(labor_price, "max_source_url", None),
+            max_source_url=None if lab_max_clamped else getattr(labor_price, "max_source_url", None),
         ))
 
         labor_sum['min'] += volume * p_min

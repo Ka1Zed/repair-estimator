@@ -16,6 +16,8 @@
   {"service": "Стяжка пола", "source": "seed", "price_min": "350.00", "price_avg": "550.00", "price_max": "850.00", "region": null},
   {"service": "Гидроизоляция", "source": "seed", "price_min": "300.00", "price_avg": "500.00", "price_max": "750.00", "region": null},
   {"service": "Грунтование", "source": "seed", "price_min": "50.00", "price_avg": "90.00", "price_max": "140.00", "region": null},
+  {"service": "Грунтование потолка", "source": "seed", "price_min": "60.00", "price_avg": "110.00", "price_max": "170.00", "region": null},
+  {"service": "Шпаклевка потолка", "source": "seed", "price_min": "350.00", "price_avg": "500.00", "price_max": "780.00", "region": null},
   {"service": "Поклейка обоев", "source": "seed", "price_min": "250.00", "price_avg": "350.00", "price_max": "500.00", "region": null},
   {"service": "Укладка линолеума", "source": "seed", "price_min": "250.00", "price_avg": "400.00", "price_max": "600.00", "region": null},
   {"service": "Укладка паркета", "source": "seed", "price_min": "800.00", "price_avg": "1300.00", "price_max": "2000.00", "region": null},

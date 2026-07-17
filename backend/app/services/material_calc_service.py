@@ -122,7 +122,11 @@ def packs_to_buy(pack_quantity: Decimal) -> int:
 def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tuple]:
     """
     Разворачивает repair_options ({floor, walls, ceiling, ...}) в список
-    позиций (material_slug, area) — какую площадь использовать для материала.
+    позиций (material_slug, area, surface) — какую площадь использовать для
+    материала и к какой поверхности он относится (нужно quantity_of, чтобы
+    применить per-surface модификаторы: primer_two_coats, wall_condition —
+    см. #380). surface — "walls"/"ceiling" для грунта и стартовой шпаклёвки,
+    None для всего остального (для них модификаторы не действуют).
     Плинтус и плитка/клей/затирка добавляются как зависимые автоматически.
 
     area для unit='м' (плинтус) и unit='рулон' (обои) считается внутри
@@ -140,14 +144,14 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
 
     # --- пол ---
     if floor == "laminate":
-        sel.append((FK_FLOOR_LAMINATE, floor_area))
-        sel.append((M_PLINTH, floor_area))      # area для плинтуса не важна, считается по периметру
+        sel.append((FK_FLOOR_LAMINATE, floor_area, None))
+        sel.append((M_PLINTH, floor_area, None))  # area для плинтуса не важна, считается по периметру
     elif floor == "linoleum":
-        sel.append((M_LINOLEUM, floor_area))
-        sel.append((M_PLINTH, floor_area))
+        sel.append((M_LINOLEUM, floor_area, None))
+        sel.append((M_PLINTH, floor_area, None))
     elif floor == "parquet":
-        sel.append((M_PARQUET, floor_area))
-        sel.append((M_PLINTH, floor_area))
+        sel.append((M_PARQUET, floor_area, None))
+        sel.append((M_PLINTH, floor_area, None))
     # floor == "tile" обрабатывается в блоке плитки ниже (плинтус не нужен)
 
     # --- стены ---
@@ -156,22 +160,27 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
     # Вариант по уровню (#331) есть только у обычной краски (walls.paint) —
     # влагостойкая остаётся tier-agnostic материалом.
     if walls in ("paint", "moisture_paint"):
-        sel.append((M_PRIMER, wall_area))        # грунтовка, 1 слой
-        sel.append((M_PUTTY_START, wall_area))   # стартовая шпаклёвка (выравнивание)
-        sel.append((M_PUTTY, wall_area))         # финишная шпаклёвка
-        sel.append((FK_WALLS_PAINT if walls == "paint" else M_PAINT_MOIST, wall_area))  # 2 слоя
+        sel.append((M_PRIMER, wall_area, "walls"))        # грунтовка, 1 слой
+        sel.append((M_PUTTY_START, wall_area, "walls"))   # стартовая шпаклёвка (выравнивание)
+        sel.append((M_PUTTY, wall_area, None))            # финишная шпаклёвка
+        sel.append((FK_WALLS_PAINT if walls == "paint" else M_PAINT_MOIST, wall_area, None))  # 2 слоя
     elif walls == "wallpaper":
         # Обои тоже требуют выравнивания основания (#325), но без финишной
         # шпаклёвки — мелкие огрехи полотно скрывает само.
-        sel.append((M_PRIMER, wall_area))        # грунтовка, 1 слой
-        sel.append((M_PUTTY_START, wall_area))   # стартовая шпаклёвка (выравнивание)
-        sel.append((FK_WALLS_WALLPAPER, wall_area))
+        sel.append((M_PRIMER, wall_area, "walls"))        # грунтовка, 1 слой
+        sel.append((M_PUTTY_START, wall_area, "walls"))   # стартовая шпаклёвка (выравнивание)
+        sel.append((FK_WALLS_WALLPAPER, wall_area, None))
 
     # --- потолок ---
-    if ceiling == "paint":
-        sel.append((FK_CEILING_PAINT, ceiling_area))
-    elif ceiling == "moisture_paint":
-        sel.append((M_PAINT_MOIST, ceiling_area))   # влагостойкая (санузел)
+    # Симметрично стенам (#380): та же подготовка основания под покраску —
+    # грунт → стартовая → финишная шпаклёвка, отличается только сама краска.
+    # У потолка нет отдельного поля кривизны основания, поэтому WALL_CONDITION_FACTOR
+    # на стартовую шпаклёвку потолка не действует (см. quantity_of, surface="ceiling").
+    if ceiling in ("paint", "moisture_paint"):
+        sel.append((M_PRIMER, ceiling_area, "ceiling"))        # грунтовка, 1 слой
+        sel.append((M_PUTTY_START, ceiling_area, "ceiling"))   # стартовая шпаклёвка
+        sel.append((M_PUTTY, ceiling_area, None))              # финишная шпаклёвка
+        sel.append((FK_CEILING_PAINT if ceiling == "paint" else M_PAINT_MOIST, ceiling_area, None))
     # ceiling == "stretch" (натяжной) — материал (плёнка/профиль) входит в цену
     # работы «Монтаж натяжного потолка» → отдельной строки материала нет
 
@@ -182,9 +191,9 @@ def _selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> List[tu
     if walls == "tile":
         tiled += wall_area
     if tiled > 0:
-        sel.append((FK_TILE, tiled))
-        sel.append((M_ADHESIVE, tiled))
-        sel.append((M_GROUT, tiled))
+        sel.append((FK_TILE, tiled, None))
+        sel.append((M_ADHESIVE, tiled, None))
+        sel.append((M_GROUT, tiled, None))
 
     return sel
 
@@ -194,8 +203,15 @@ def quantity_of(
     area: Decimal,
     geom: Dict[str, Any],
     repair_options: Dict[str, Any] | None = None,
+    surface: str | None = None,
 ) -> tuple[Decimal, Decimal]:
     """Количество в базовых единицах по формуле из estimation-rules.md (по unit).
+
+    surface — какой поверхности принадлежит вызов ("walls"/"ceiling"/None, см.
+    _selections, #380): у грунта и стартовой шпаклёвки модификаторы (двойной слой,
+    кривизна основания) заданы раздельно по стенам и потолку, а не одним общим
+    флагом на repair_options — иначе выбор для стен перетирал бы выбор для потолка
+    и наоборот.
 
     Возвращает (quantity, base_quantity): base_quantity — до применения запаса
     (и, для обоев под рисунок, до подгонки по раппорту), quantity = base_quantity × waste_factor
@@ -209,15 +225,16 @@ def quantity_of(
     if unit == "л":
         layers = D(material.layers) if material.layers else Decimal(1)
         # Пористое основание → грунт в 2 слоя (см. estimation-rules.md).
-        if material.slug == M_PRIMER and repair_options.get("primer_two_coats"):
+        two_coats_key = "ceiling_primer_two_coats" if surface == "ceiling" else "primer_two_coats"
+        if material.slug == M_PRIMER and repair_options.get(two_coats_key):
             layers = Decimal(2)
         base = area * layers * c
         return base * w, base
     if unit in ("кг", "м²"):
         base = area * (c if c > 0 else Decimal(1))
-        # Кривизна основания масштабирует только стартовую шпаклёвку (выравнивание).
-        # Множитель складываем в base (до запаса), как раппорт у обоев.
-        if material.slug == M_PUTTY_START:
+        # Кривизна основания масштабирует только стартовую шпаклёвку (выравнивание)
+        # СТЕН — у потолка нет отдельного поля кривизны, множитель для него 1.0.
+        if material.slug == M_PUTTY_START and surface != "ceiling":
             base = base * WALL_CONDITION_FACTOR.get(
                 repair_options.get("wall_condition"), Decimal(1)
             )
@@ -342,7 +359,7 @@ def calculate_materials(
     """
     result: List[Dict[str, Any]] = []
 
-    for material_key, area in _selections(repair_options, geometry):
+    for material_key, area, surface in _selections(repair_options, geometry):
         if not include_finish and material_stage_of(material_key) == "finish":
             continue
         material = resolve_material(db, material_key, tier)
@@ -350,7 +367,7 @@ def calculate_materials(
             # материала нет в БД (например, не засидован) — пропускаем
             continue
 
-        quantity, base_quantity = quantity_of(material, area, geometry, repair_options)
+        quantity, base_quantity = quantity_of(material, area, geometry, repair_options, surface)
         if quantity <= 0:
             continue
 

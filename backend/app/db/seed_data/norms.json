@@ -8,5 +8,6 @@
     "door": 0.15,
     "window": 0.25,
     "unknown": 0.20
-  }
+  },
+  "ceiling_multilevel_step_height_default_m": 0.12
 }

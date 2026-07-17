@@ -258,6 +258,9 @@ def seed_test_data(session):
         {"name": "Стяжка пола", "slug": "screed_floor", "specialist_type": "Стяжечник", "unit": "м²"},
         {"name": "Гидроизоляция", "slug": "waterproof", "specialist_type": "Гидроизолировщик", "unit": "м²"},
         {"name": "Грунтование", "slug": "priming", "specialist_type": "Маляр", "unit": "м²"},
+        # Подготовка потолка под покраску (#380), по аналогии со стенами.
+        {"name": "Грунтование потолка", "slug": "priming_ceiling", "specialist_type": "Маляр", "unit": "м²"},
+        {"name": "Шпаклевка потолка", "slug": "putty_ceiling", "specialist_type": "Штукатур", "unit": "м²"},
     ]
     for s in services_data:
         svc = LaborService(**s)
@@ -342,7 +345,7 @@ class _StubMaterialParser(BaseParser):
     def __init__(self, fetch=None):
         self._fetch = fetch
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
+    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
         if self._fetch is None:
             raise RuntimeError("парсер материалов отключён в тестах (#174)")
         return self._fetch(material_name)

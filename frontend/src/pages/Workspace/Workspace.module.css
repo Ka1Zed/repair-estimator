@@ -549,6 +549,12 @@
   line-height: 1.5;
 }
 
+/* На узком вьюпорте таблица шире экрана — скроллим её внутри обёртки,
+   а не всю страницу по горизонтали. */
+.hiddenTableWrap {
+  overflow-x: auto;
+}
+
 .hiddenTable {
   width: 100%;
   border-collapse: collapse;
@@ -604,6 +610,8 @@
 /* переключатель глубины сметы (scope) */
 .scopeToggle {
   display: flex;
+  /* на узком экране три кнопки не помещаются в ряд — переносим, а не распираем страницу */
+  flex-wrap: wrap;
   gap: 0;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -840,4 +848,34 @@
   font-size: 12px;
   color: #b04a4a;
   margin-top: 2px;
+}
+
+.mixedOverrideHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #b07b5e;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.mixedOverrideIcon {
+  font-size: 13px;
+}
+
+.resetOverridesBtn {
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: inherit;
+  cursor: pointer;
+  margin-left: 4px;
+  opacity: 0.8;
+}
+
+.resetOverridesBtn:hover {
+  opacity: 1;
 }

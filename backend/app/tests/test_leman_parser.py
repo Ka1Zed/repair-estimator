@@ -417,6 +417,87 @@ def test_putty_uses_unitprice_kg(monkeypatch):
     assert parsed.price_min == Decimal("33.64")
 
 
+# Нетиповая (мелкая) фасовка кг-материалов (#382): категория обычно содержит больше
+# карточек мелкой фасовки, чем мешков — без фильтра price_avg и представитель
+# съезжают к цене мелкой упаковки.
+
+
+def test_putty_filters_out_undersized_package_when_reference_given(monkeypatch):
+    html = _page(
+        _item(
+            "/product/putty-small/",
+            name="Шпаклёвка Knauf Фуген 5 кг",
+            price="180",
+            price_unit="шт.",
+            unitprice="36",  # 180/5 ₽/кг
+            unitprice_unit="кг",
+        ),
+        _item(
+            "/product/putty-bag/",
+            name="Шпаклёвка Knauf Фуген 25 кг",
+            price="841",
+            price_unit="шт.",
+            unitprice="33.64",  # 841/25 ₽/кг
+            unitprice_unit="кг",
+        ),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price(
+        "Шпаклевка финишная", reference_package_size=Decimal("25")
+    )
+
+    assert parsed.price_avg == Decimal("34")  # round(33.64), только мешок
+    assert parsed.package_size == Decimal("25")
+    assert "putty-bag" in (parsed.source_url or "")
+
+
+def test_putty_without_reference_package_size_keeps_all_items(monkeypatch):
+    # reference_package_size=None (дефолт, как у всех старых вызовов) — фильтр не
+    # применяется, поведение как раньше.
+    html = _page(
+        _item(
+            "/product/putty-small/",
+            name="Шпаклёвка Knauf Фуген 5 кг",
+            price="180",
+            price_unit="шт.",
+            unitprice="36",
+            unitprice_unit="кг",
+        ),
+        _item(
+            "/product/putty-bag/",
+            name="Шпаклёвка Knauf Фуген 25 кг",
+            price="841",
+            price_unit="шт.",
+            unitprice="33.64",
+            unitprice_unit="кг",
+        ),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Шпаклевка финишная")
+
+    assert parsed.price_min == Decimal("33.64")
+    assert parsed.price_max == Decimal("36")
+
+
+def test_putty_all_undersized_raises_when_reference_given(monkeypatch):
+    html = _page(
+        _item(
+            "/product/putty-small/",
+            name="Шпаклёвка Knauf Фуген 5 кг",
+            price="180",
+            price_unit="шт.",
+            unitprice="36",
+            unitprice_unit="кг",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    with pytest.raises(RuntimeError):
+        LemanParser().fetch_price("Шпаклевка финишная", reference_package_size=Decimal("25"))
+
+
 def test_plintus_normalizes_price_per_piece_by_length_from_title(monkeypatch):
     html = _page(
         _item(

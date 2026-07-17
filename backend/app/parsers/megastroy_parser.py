@@ -4,6 +4,7 @@ import re
 import statistics
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urljoin
@@ -56,9 +57,40 @@ class MaterialCategory:
     # раньше (стандарт/avg). Сайт не даёт facet «бренд/класс» вне краски —
     # это приближение, а не курированный список брендов (docs/price-sources.md).
     price_band: str | None = None
+    # Семантический фильтр по названию карточки (#386, аналог _is_relevant в
+    # leman_parser.py) — для категорий, где facet URL не отделяет подтипы чисто
+    # (шпаклёвка стартовая/финишная не разведены ни одним facet'ом Мегастроя).
+    # Применяется к сырым карточкам ДО извлечения фасовки/статистики; если
+    # выкашивает всю выборку (разметка сменилась/имена не распознались) —
+    # откатываемся на нефильтрованную выборку, цена не должна пропасть (см.
+    # fetch_price).
+    title_filter: "Callable[[str], bool] | None" = None
 
 
 _SHPAKLEVKA = "https://kazan.megastroy.com/catalog/shpaklevka"
+
+# Классификация шпаклёвки по названию карточки (#386) — Мегастрой не даёт facet,
+# который бы чисто отделял стартовую (базовую, выравнивающую) от финишной/
+# универсальной, поэтому решаем по маркерам в названии, аналогично _is_relevant
+# в leman_parser.py. Стартовая: явно назначенные под выравнивание/базовый слой.
+# Финишная-маркеры сначала — комбо-товар «универсальная (старт+финиш)» не должен
+# засчитаться как чисто стартовый.
+_SHPAKLEVKA_START_MARKERS = ("стартов", "базов", "выравнива", "под штукатурк")
+_SHPAKLEVKA_FINISH_MARKERS = ("финиш", "универсальн")
+
+
+def _is_startovaya_shpaklevka(title: str) -> bool:
+    low = title.lower()
+    if any(marker in low for marker in _SHPAKLEVKA_FINISH_MARKERS):
+        return False
+    return any(marker in low for marker in _SHPAKLEVKA_START_MARKERS)
+
+
+def _is_not_startovaya_shpaklevka(title: str) -> bool:
+    # Подстраховка для «Шпаклевка финишная» (#386) — не пускать в выдачу
+    # карточки, явно названные стартовыми/базовыми/выравнивающими.
+    return not any(marker in title.lower() for marker in _SHPAKLEVKA_START_MARKERS)
+
 
 # Карта: материал в БД -> категория(и) Мегастроя (Казань) с фильтром, где нужен.
 CATEGORY_MAP: dict[str, MaterialCategory] = {
@@ -94,13 +126,22 @@ CATEGORY_MAP: dict[str, MaterialCategory] = {
         ),
         title_unit="л",
     ),
+    # #386: у Мегастроя нет facet'а, чисто отделяющего стартовую шпаклёвку от
+    # финишной/универсальной — прежний field206=«для заделки щелей, выбоин,
+    # трещин» на деле категория замазок для трещин (мелкая тюбиковая фасовка),
+    # смысловая ошибка привязки facet'а. Берём всю категорию без узкого facet'а
+    # и классифицируем по названию (_is_startovaya_shpaklevka).
     "Шпаклевка стартовая": MaterialCategory(
-        urls=(f"{_SHPAKLEVKA}?field206[]=для заделки щелей, выбоин, трещин",),
+        urls=(_SHPAKLEVKA,),
         title_unit="кг",
+        title_filter=_is_startovaya_shpaklevka,
     ),
     "Шпаклевка финишная": MaterialCategory(
         urls=(f"{_SHPAKLEVKA}?field206[]=под окраску и оклейку обоями",),
         title_unit="кг",
+        # #386: facet и так сужает выборку корректно — доп. фильтр лишь
+        # подстраховка от случайной протечки стартовой шпаклёвки в выдачу.
+        title_filter=_is_not_startovaya_shpaklevka,
     ),
     "Грунтовка": MaterialCategory(
         urls=("https://kazan.megastroy.com/catalog/grunty",),
@@ -507,6 +548,19 @@ class MegastroyParser(BaseParser):
 
         if not raw_items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (возможно, урезанная страница)")
+
+        if category.title_filter is not None:
+            # Семантический отсев по названию (#386) до статистики — если фильтр
+            # выкосил всё (имена не распознались/разметка сменилась), откатываемся
+            # к исходной выборке, как и в leman_parser._is_relevant.
+            filtered = [it for it in raw_items if category.title_filter(it[3])]
+            if filtered and len(filtered) < len(raw_items):
+                logger.info(
+                    f"  Мегастрой '{material_name}': отброшено нерелевантных подтипов "
+                    f"{len(raw_items) - len(filtered)} из {len(raw_items)}"
+                )
+            if filtered:
+                raw_items = filtered
 
         # Третий элемент кортежа — package_size (#306): фасовка ЭТОГО конкретного
         # товара, извлечённая при нормализации цены, а не справочная. Для

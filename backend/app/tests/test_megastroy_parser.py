@@ -19,6 +19,8 @@ from app.parsers.megastroy_parser import (
     MegastroyParser,
     _build_headers,
     _cable_length_m_from_title,
+    _is_not_startovaya_shpaklevka,
+    _is_startovaya_shpaklevka,
     _length_m_from_title,
     _parse_page,
     _pipe_length_m_from_title,
@@ -432,6 +434,72 @@ def test_putty_divides_price_by_kg_from_title(monkeypatch):
     parsed = MegastroyParser().fetch_price("Шпаклевка финишная")
 
     assert parsed.price_avg == Decimal("34")  # round(841/25)
+
+
+# Классификация шпаклёвки по названию (#386): у Мегастроя нет facet, чисто
+# отделяющего стартовую от финишной/универсальной — решаем по маркерам в
+# названии карточки, аналогично _is_relevant в leman_parser.py.
+
+
+def test_is_startovaya_shpaklevka_matches_start_markers():
+    assert _is_startovaya_shpaklevka("Шпаклевка стартовая гипсовая ЕК К200 20 кг")
+    assert _is_startovaya_shpaklevka("Шпатлевка базовая выравнивающая Волма 30 кг")
+    assert _is_startovaya_shpaklevka("Шпаклевка для стен под штукатурку 25 кг")
+
+
+def test_is_startovaya_shpaklevka_rejects_finish_and_universal():
+    assert not _is_startovaya_shpaklevka("Шпаклевка финишная полимерная Ветонит 20 кг")
+    assert not _is_startovaya_shpaklevka("Шпаклевка универсальная (старт+финиш) 20 кг")
+    assert not _is_startovaya_shpaklevka("Шпаклёвка Knauf Фуген 25 кг")  # нет маркеров вовсе
+
+
+def test_is_not_startovaya_shpaklevka_excludes_start_markers():
+    assert not _is_not_startovaya_shpaklevka("Шпаклевка стартовая гипсовая 20 кг")
+    assert _is_not_startovaya_shpaklevka("Шпаклевка финишная полимерная Ветонит 20 кг")
+    assert _is_not_startovaya_shpaklevka("Шпаклёвка Knauf Фуген 25 кг")
+
+
+def test_startovaya_shpaklevka_filters_finish_products_from_shared_category(monkeypatch):
+    # #386: обе категории теперь могут читать общую страницу shpaklevka без
+    # узкого facet'а — классификация по названию должна развести карточки
+    # правильно, не полагаясь на URL.
+    html = _page(
+        _item("810", "/products/start", title="Шпаклевка стартовая гипсовая ЕК К200 20 кг"),
+        _item("498", "/products/finish", title="Шпаклевка финишная полимерная ЕК К300 20 кг"),
+        _item("495", "/products/universal", title="Шпаклевка универсальная Волма 20 кг"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Шпаклевка стартовая")
+
+    assert "start" in (parsed.source_url or "")
+    assert "finish" not in (parsed.source_url or "")
+    assert "universal" not in (parsed.source_url or "")
+
+
+def test_startovaya_shpaklevka_falls_back_to_full_category_when_no_markers_match(monkeypatch):
+    # Разметка/названия не дали ни одного совпадения по маркерам — фильтр не
+    # должен обнулить выдачу целиком (иначе цена уходит в seed без нужды).
+    html = _page(_item("750", "/products/putty", title="Шпаклёвка Knauf Фуген 25 кг"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Шпаклевка стартовая")
+
+    assert parsed.price_avg == Decimal("30")  # round(750/25)
+
+
+def test_finishing_shpaklevka_excludes_startovaya_leakage(monkeypatch):
+    # Подстраховка (#386): даже если под узкий facet попала явно стартовая
+    # карточка, она не должна засорять выдачу «Шпаклевка финишная».
+    html = _page(
+        _item("498", "/products/finish", title="Шпаклевка финишная полимерная ЕК К300 20 кг"),
+        _item("400", "/products/start-leak", title="Шпаклевка стартовая гипсовая 20 кг"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Шпаклевка финишная")
+
+    assert "start-leak" not in (parsed.source_url or "")
 
 
 def test_glue_divides_price_by_kg_from_title(monkeypatch):

@@ -69,27 +69,39 @@ class MaterialCategory:
 
 _SHPAKLEVKA = "https://kazan.megastroy.com/catalog/shpaklevka"
 
-# Классификация шпаклёвки по названию карточки (#386) — Мегастрой не даёт facet,
-# который бы чисто отделял стартовую (базовую, выравнивающую) от финишной/
-# универсальной, поэтому решаем по маркерам в названии, аналогично _is_relevant
-# в leman_parser.py. Стартовая: явно назначенные под выравнивание/базовый слой.
-# Финишная-маркеры сначала — комбо-товар «универсальная (старт+финиш)» не должен
-# засчитаться как чисто стартовый.
-_SHPAKLEVKA_START_MARKERS = ("стартов", "базов", "выравнива", "под штукатурк")
-_SHPAKLEVKA_FINISH_MARKERS = ("финиш", "универсальн")
+# Классификация шпаклёвки по названию карточки (#386). Живая сверка реальных
+# названий на kazan.megastroy.com показала: слов «стартовая»/«базовая»/
+# «выравнивающая»/«под штукатурку» в этой категории на сайте физически НЕТ ни у
+# одной карточки — рынок здесь маркирует стартовый/базовый слой словом
+# «универсальная» (Кнауф Фуген универсальная, ЕК К200 универсальная и т.п.),
+# а финишный — словом «финиш»/«суперфиниш» (кириллица — не путает с латинским
+# "Finish" в бренд-неймах вроде "Bergauf Finish Zement", который по факту
+# цементная СТАРТОВАЯ шпаклёвка, см. docs/price-sources.md). Значит стартовая —
+# это "не финишная" по умолчанию, а не позитивный список маркеров.
+# Отдельно исключаем товары другого материала/назначения, затесавшиеся в общую
+# категорию: шпатлёвка по дереву (мебель/паркет), фасадная (наружная), замазка
+# для щелей/трещин (тюбик-герметик — именно этот подтип раньше ошибочно взяли
+# под field206, #386).
+_SHPAKLEVKA_IRRELEVANT_MARKERS = ("по дереву", "фасадн", "замазк")
+_SHPAKLEVKA_FINISH_MARKER = "финиш"
+_SHPAKLEVKA_UNIVERSAL_MARKER = "универсальн"
 
 
 def _is_startovaya_shpaklevka(title: str) -> bool:
     low = title.lower()
-    if any(marker in low for marker in _SHPAKLEVKA_FINISH_MARKERS):
+    if any(marker in low for marker in _SHPAKLEVKA_IRRELEVANT_MARKERS):
         return False
-    return any(marker in low for marker in _SHPAKLEVKA_START_MARKERS)
+    return _SHPAKLEVKA_FINISH_MARKER not in low
 
 
 def _is_not_startovaya_shpaklevka(title: str) -> bool:
-    # Подстраховка для «Шпаклевка финишная» (#386) — не пускать в выдачу
-    # карточки, явно названные стартовыми/базовыми/выравнивающими.
-    return not any(marker in title.lower() for marker in _SHPAKLEVKA_START_MARKERS)
+    # Подстраховка для «Шпаклевка финишная» (#386): facet сайта иногда пропускает
+    # в выдачу дешёвую «универсальную» гипсовую шпаклёвку — по факту рынка это
+    # стартовый/базовый продукт (см. комментарий выше), не финишный.
+    low = title.lower()
+    if any(marker in low for marker in _SHPAKLEVKA_IRRELEVANT_MARKERS):
+        return False
+    return _SHPAKLEVKA_UNIVERSAL_MARKER not in low
 
 
 # Карта: материал в БД -> категория(и) Мегастроя (Казань) с фильтром, где нужен.

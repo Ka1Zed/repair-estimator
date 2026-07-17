@@ -728,6 +728,20 @@ def test_rough_scope_adds_rough_works():
     assert labor["Гидроизоляция"]["volume"] == pytest.approx(4.0)
 
 
+def test_rough_and_finish_adds_ceiling_prep_labor():
+    """scope=rough_and_finish + ceiling=paint (#380): «Грунтование потолка» (rough) и
+    «Шпаклевка потолка» (pre_finish) появляются в labor[] с ожидаемой стадией."""
+    response = client.post("/api/estimates/calculate",
+                           json={**PAINT_PAYLOAD, "scope": "rough_and_finish"})
+    assert response.status_code == 200
+    labor = {x["service"]: x for x in response.json()["labor"]}
+
+    assert "Грунтование потолка" in labor
+    assert labor["Грунтование потолка"]["stage"] == "rough"
+    assert "Шпаклевка потолка" in labor
+    assert labor["Шпаклевка потолка"]["stage"] == "pre_finish"
+
+
 def test_rough_only_excludes_finish_labor():
     """scope=rough_only: черновая+предчистовая есть, чистовой отделки нет (#303)."""
     response = client.post("/api/estimates/calculate",
@@ -798,7 +812,9 @@ WALLPAPER_PAYLOAD = {
             ],
             "room_type": "living",
             "openings": [],
-            "works": W(walls="wallpaper")
+            # ceiling=None: тест только про подготовку стен под обои (#325) — потолок
+            # выключен, чтобы его собственный грунт/шпаклёвка (#380) не примешивались.
+            "works": W(walls="wallpaper", ceiling=None)
         }
     ]
 }
@@ -839,6 +855,49 @@ def test_wallpaper_rough_only_keeps_prep_drops_wallpaper():
     names = {m["name"] for m in data["materials"]}
     assert {"Грунтовка", "Шпаклевка стартовая"} <= names
     assert "Обои" not in names
+
+
+def test_ceiling_and_walls_primer_two_coats_independent():
+    """walls.primer_two_coats и ceiling.primer_two_coats независимы (#380): при
+    одновременной покраске стен и потолка расход грунта — сумма по обеим
+    поверхностям со своим числом слоёв на каждой, агрегированная в ОДНУ строку
+    сметы (по material_id), без задвоения и без потери одной из поверхностей."""
+    def _payload(walls_two_coats, ceiling_two_coats):
+        return {
+            "city": "Казань",
+            "rooms": [{
+                "name": "Спальня", "height": 2.7,
+                "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+                "room_type": "living",
+                "openings": [],
+                "works": {
+                    "floor": {"enabled": False, "finish": None},
+                    "walls": {"enabled": True, "finish": "paint", "primer_two_coats": walls_two_coats},
+                    "ceiling": {"enabled": True, "finish": "paint", "primer_two_coats": ceiling_two_coats},
+                    "electric": {"enabled": False},
+                    "plumbing": {"enabled": False},
+                },
+            }],
+        }
+
+    def primer_base_qty(payload):
+        data = client.post("/api/estimates/calculate", json=payload).json()
+        rows = [m for m in data["materials"] if m["name"] == "Грунтовка"]
+        assert len(rows) == 1, "грунт стен и потолка должен агрегироваться в одну строку"
+        return rows[0]["base_quantity"]
+
+    base_qty = primer_base_qty(_payload(False, False))
+    ceiling_qty = primer_base_qty(_payload(False, True))
+    walls_qty = primer_base_qty(_payload(True, False))
+    both_qty = primer_base_qty(_payload(True, True))
+
+    assert ceiling_qty > base_qty
+    assert walls_qty > base_qty
+    # Оба флага одновременно = сумма отдельных прибавок к базовому расходу (не
+    # задвоение и не перетирание одного флага другим).
+    assert both_qty == pytest.approx(
+        base_qty + (ceiling_qty - base_qty) + (walls_qty - base_qty), rel=1e-6
+    )
 
 
 def test_hidden_works_block_present_and_not_in_summary():

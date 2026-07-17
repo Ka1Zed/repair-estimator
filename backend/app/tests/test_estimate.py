@@ -170,6 +170,65 @@ class TestMaterialCalc:
         assert finish(even) == finish(no_field)
         assert finish(uneven) == finish(no_field)
 
+    def test_ceiling_paint_adds_primer_and_putty(self, db_session):
+        """ceiling=paint (#380) кладёт грунт и шпаклёвку потолка симметрично стенам,
+        от ceiling_area (а не только краску, как было)."""
+        geometry = {
+            'floor_area': Decimal('12.0'),
+            'ceiling_area': Decimal('15.0'),
+            'wall_area': Decimal('34.1'),
+            'perimeter': Decimal('14.0'),
+            'door_width_sum': Decimal('0.8'),
+        }
+        opts = {'floor': None, 'walls': None, 'ceiling': 'paint'}
+
+        materials = calculate_materials(geometry, opts, db_session)
+        by_name = {m['name']: m for m in materials}
+        for name in ('Грунтовка', 'Шпаклевка стартовая', 'Шпаклевка финишная', 'Краска потолочная'):
+            assert name in by_name, f"нет материала «{name}» для потолка"
+
+        # Грунт потолка: 15.0 * 1 слой * 0.12 * 1.1 = 1.98 (без wall_condition — у потолка его нет)
+        assert by_name['Грунтовка']['quantity'] == Decimal('1.98')
+        # Стартовая шпаклёвка потолка: 15.0 * 5.0 * 1.1 = 82.5, без масштабирования кривизны
+        assert by_name['Шпаклевка стартовая']['quantity'] == Decimal('82.5')
+        # Финишная: 15.0 * 1.0 * 1.1 = 16.5
+        assert by_name['Шпаклевка финишная']['quantity'] == Decimal('16.5')
+
+    def test_ceiling_primer_two_coats_independent_of_walls(self, db_session):
+        """works.ceiling.primer_two_coats удваивает только грунт потолка, не затрагивая
+        стены, и наоборот (#380) — общий флаг на repair_options не должен перетирать
+        выбор одной из поверхностей при одновременной покраске стен и потолка."""
+        geometry = {
+            'floor_area': Decimal('12.0'),
+            'ceiling_area': Decimal('12.0'),
+            'wall_area': Decimal('34.1'),
+            'perimeter': Decimal('14.0'),
+            'door_width_sum': Decimal('0.8'),
+        }
+        opts = {'floor': None, 'walls': 'paint', 'ceiling': 'paint'}
+
+        def primers(mats):
+            # _selections кладёт грунт стен раньше грунта потолка — порядок стабилен.
+            found = [m for m in mats if m['name'] == 'Грунтовка']
+            assert len(found) == 2
+            return found  # (стены, потолок)
+
+        base_wall, base_ceiling = primers(calculate_materials(geometry, opts, db_session))
+        c2_wall, c2_ceiling = primers(calculate_materials(
+            geometry, {**opts, 'ceiling_primer_two_coats': True}, db_session,
+        ))
+        w2_wall, w2_ceiling = primers(calculate_materials(
+            geometry, {**opts, 'primer_two_coats': True}, db_session,
+        ))
+
+        # ceiling_primer_two_coats удваивает только потолок, стены не трогает.
+        assert c2_wall['quantity'] == base_wall['quantity']
+        assert c2_ceiling['quantity'] == base_ceiling['quantity'] * Decimal('2')
+
+        # primer_two_coats (стеновой) удваивает только стены, потолок не трогает.
+        assert w2_wall['quantity'] == base_wall['quantity'] * Decimal('2')
+        assert w2_ceiling['quantity'] == base_ceiling['quantity']
+
     def test_unknown_material_slug_skipped_not_crashed(self, db_session):
         """Опечатка/расхождение slug в seed → материал тихо пропускается (как раньше
         было с name), расчёт остальных строк не падает (#278)."""
@@ -295,6 +354,21 @@ class TestLaborCalc:
         assert by_service['Покраска стен']['stage'] == 'finish'
         assert by_service['Шпаклевка стен']['stage'] == 'pre_finish'
 
+    def test_ceiling_finish_labor_carries_stage(self, db_session):
+        """Покраска потолка — finish, шпаклёвка потолка — pre_finish (#380), симметрично
+        стенам (test_finish_labor_carries_stage)."""
+        geometry = {
+            'floor_area': Decimal('12.0'),
+            'ceiling_area': Decimal('12.0'),
+            'wall_area': Decimal('34.1'),
+            'perimeter': Decimal('14.0'),
+        }
+        labor = calculate_labor(geometry, {'ceiling': 'paint'}, db_session)
+        by_service = {item['service']: item for item in labor}
+        assert by_service['Покраска потолка']['stage'] == 'finish'
+        assert by_service['Шпаклевка потолка']['stage'] == 'pre_finish'
+        assert by_service['Шпаклевка потолка']['volume'] == Decimal('12.0')
+
     def test_stretch_ceiling_is_block_not_multiplier(self, db_session):
         """Натяжной потолок (#191) — блок потолочника: полотно + закладные + ниша.
 
@@ -408,6 +482,28 @@ class TestRoughLabor:
         )
         services = {item['service'] for item in rough}
         assert 'Гидроизоляция' not in services
+
+    def test_ceiling_paint_pulls_ceiling_primer(self, db_session):
+        """Покраска потолка тянет грунт потолка на черновой стадии (#380), симметрично
+        стенам (walls тянут S_LEVEL_WALLS+S_PRIMER), но не выравнивание — у потолка
+        своей операции выравнивания в MVP нет."""
+        rough = calculate_rough_labor(
+            self.GEOM, {'walls': None, 'ceiling': 'paint', 'floor': None}, 'living', db_session,
+        )
+        by_service = {item['service']: item for item in rough}
+        assert 'Грунтование потолка' in by_service
+        assert by_service['Грунтование потолка']['stage'] == 'rough'
+        assert by_service['Грунтование потолка']['volume'] == Decimal('12.0')
+        # Стен нет (walls=None) — их выравнивание/грунт не должны появиться.
+        assert 'Выравнивание стен' not in by_service
+        assert 'Грунтование' not in by_service
+
+    def test_stretch_ceiling_skips_ceiling_primer(self, db_session):
+        """Натяжной потолок не тянет грунт — своей подготовки основания не требует (#380)."""
+        rough = calculate_rough_labor(
+            self.GEOM, {'walls': None, 'ceiling': 'stretch', 'floor': None}, 'living', db_session,
+        )
+        assert 'Грунтование потолка' not in {item['service'] for item in rough}
 
 
 class TestEngineeringCalc:
@@ -662,19 +758,23 @@ class TestDifferentRooms:
         # Итого: 31.5
         assert plinth['quantity'] == Decimal('31.5')
 
-        # Грунтовка и стартовая шпаклёвка суммируются из обеих комнат: покраска (комната1)
-        # и обои (комната2) обе тянут подготовку основания (#325). Финишная шпаклёвка —
-        # только из первой, под обои она не нужна (полотно скрывает огрехи).
+        # Грунтовка и стартовая шпаклёвка суммируются из обеих комнат: покраска стен+потолка
+        # (комната1) и обои (комната2) все тянут подготовку основания (#325, #380).
+        # Финишная шпаклёвка — из покраски (комната1, стены и потолок), под обои она не
+        # нужна (полотно скрывает огрехи).
         primer = next((v for k, v in aggregated.items() if v['name'] == 'Грунтовка'), None)
         assert primer is not None
-        # Комната1: 34.1 * 0.12 * 1.1 = 4.5012; комната2: 48.6 * 0.12 * 1.1 = 6.4152
-        assert primer['quantity'] == Decimal('10.9164')
+        # Комната1 стены: 34.1*0.12*1.1=4.5012; комната1 потолок: 12.0*0.12*1.1=1.584;
+        # комната2 стены (обои): 48.6*0.12*1.1=6.4152. Итого 12.5004.
+        assert primer['quantity'] == Decimal('12.5004')
 
         putty = next((v for k, v in aggregated.items() if v['name'] == 'Шпаклевка финишная'), None)
         assert putty is not None
-        assert putty['quantity'] == Decimal('37.51')  # 34.1 * 1.0 * 1.1 (только комната1)
+        # Комната1 стены: 34.1*1.0*1.1=37.51; комната1 потолок: 12.0*1.0*1.1=13.2. Итого 50.71.
+        assert putty['quantity'] == Decimal('50.71')
 
         putty_start = next((v for k, v in aggregated.items() if v['name'] == 'Шпаклевка стартовая'), None)
         assert putty_start is not None
-        # Комната1: 34.1 * 5.0 * 1.1 = 187.55; комната2: 48.6 * 5.0 * 1.1 = 267.3
-        assert putty_start['quantity'] == Decimal('454.85')
+        # Комната1 стены: 34.1*5.0*1.1=187.55; комната1 потолок: 12.0*5.0*1.1=66.0;
+        # комната2 стены (обои): 48.6*5.0*1.1=267.3. Итого 520.85.
+        assert putty_start['quantity'] == Decimal('520.85')

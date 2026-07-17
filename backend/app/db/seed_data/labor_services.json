@@ -22,5 +22,7 @@
   {"name": "Выравнивание стен", "slug": "level_walls", "specialist_type": "Штукатур", "unit": "м²"},
   {"name": "Стяжка пола", "slug": "screed_floor", "specialist_type": "Стяжечник", "unit": "м²"},
   {"name": "Гидроизоляция", "slug": "waterproof", "specialist_type": "Гидроизолировщик", "unit": "м²"},
-  {"name": "Грунтование", "slug": "priming", "specialist_type": "Маляр", "unit": "м²"}
+  {"name": "Грунтование", "slug": "priming", "specialist_type": "Маляр", "unit": "м²"},
+  {"name": "Грунтование потолка", "slug": "priming_ceiling", "specialist_type": "Маляр", "unit": "м²"},
+  {"name": "Шпаклевка потолка", "slug": "putty_ceiling", "specialist_type": "Штукатур", "unit": "м²"}
 ]

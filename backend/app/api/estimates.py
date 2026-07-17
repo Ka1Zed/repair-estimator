@@ -121,9 +121,12 @@ def _finish_options(room: RoomInput) -> Dict[str, Any]:
         "floor": finish(w.floor),
         "walls": finish(w.walls),
         "ceiling": finish(w.ceiling),
-        # Модификаторы живут на уровне поверхности (стены).
+        # Модификаторы живут на уровне поверхности. primer_two_coats — отдельно
+        # для стен и потолка (#380): один флаг на обе поверхности перетирал бы
+        # выбор одной из них при одновременной покраске стен и потолка.
         "wallpaper_pattern": bool(w.walls.enabled and w.walls.wallpaper_pattern),
         "primer_two_coats": bool(w.walls.enabled and w.walls.primer_two_coats),
+        "ceiling_primer_two_coats": bool(w.ceiling.enabled and w.ceiling.primer_two_coats),
         "wall_condition": w.walls.wall_condition if w.walls.enabled else None,
     }
 

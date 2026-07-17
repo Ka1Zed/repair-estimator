@@ -140,7 +140,7 @@ def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> D
 
 
 def _cached_material_price(
-    cache: Dict[tuple, Any], material_name: str, db: Session,
+    cache: Dict[tuple, "MaterialPrice | None"], material_name: str, db: Session,
     parsers: list[BaseParser], region: str, store_names: List[str] | None,
 ) -> MaterialPrice | None:
     """get_material_price с мемоизацией в пределах одного /calculate.
@@ -163,7 +163,7 @@ def _cached_material_price(
 def _tier_item(
     material_key: str, tier: str, quantity: Decimal, db: Session,
     parsers: list[BaseParser], region: str, sources_by_id: Dict[int, str],
-    price_cache: Dict[tuple, Any], store_names: List[str] | None = None,
+    price_cache: Dict[tuple, "MaterialPrice | None"], store_names: List[str] | None = None,
 ) -> MaterialTierItem:
     """SKU-вариант позиции для одного уровня комплектации (#349, min_item/avg_item/max_item).
 
@@ -241,7 +241,7 @@ def calculate_estimate(
     # (основная строка + min_item/max_item), а get_material_price каждый раз заново
     # гоняет цикл по парсерам и запросы к БД. Ключ полностью определяет результат
     # в пределах запроса (см. _cached_material_price).
-    material_price_cache: Dict[tuple, Any] = {}
+    material_price_cache: Dict[tuple, "MaterialPrice | None"] = {}
 
     all_materials: List[Dict[str, Any]] = []
     all_labor: List[Dict[str, Any]] = []

@@ -19,6 +19,8 @@ from app.parsers.megastroy_parser import (
     MegastroyParser,
     _build_headers,
     _cable_length_m_from_title,
+    _is_not_startovaya_shpaklevka,
+    _is_startovaya_shpaklevka,
     _length_m_from_title,
     _parse_page,
     _pipe_length_m_from_title,
@@ -432,6 +434,88 @@ def test_putty_divides_price_by_kg_from_title(monkeypatch):
     parsed = MegastroyParser().fetch_price("Шпаклевка финишная")
 
     assert parsed.price_avg == Decimal("34")  # round(841/25)
+
+
+# Классификация шпаклёвки по названию (#386): у Мегастроя нет facet, чисто
+# отделяющего стартовую от финишной/универсальной. Живая сверка реальных
+# карточек kazan.megastroy.com показала, что слов «стартовая»/«базовая»/
+# «выравнивающая» на сайте вообще нет — рынок маркирует стартовый/базовый слой
+# словом «универсальная» (Кнауф Фуген универсальная и т.п.), а финишный —
+# «финиш»/«суперфиниш». Поэтому «стартовая» — это «не финишная и не мусорный
+# подтип» по умолчанию, а не позитивный список маркеров.
+
+
+def test_is_startovaya_shpaklevka_accepts_universal_and_untagged_gypsum_cement():
+    # Реальные названия с живого прогона (#386): нет явного тег-слова "финиш" —
+    # считается стартовой/базовой.
+    assert _is_startovaya_shpaklevka("Шпатлевка гипсовая ЕК К200 универсальная 20кг")
+    assert _is_startovaya_shpaklevka("Шпаклевка гипсовая Bergauf Fugen Gips универсальная 25кг")
+    assert _is_startovaya_shpaklevka("Шпатлевка цементная ЕК VH80 белая 20кг")
+    # Латинское "Finish" в бренд-нейме — не кириллический маркер, не считается финишем.
+    assert _is_startovaya_shpaklevka("Шпаклевка цементная Bergauf Finish Zement белая 20кг")
+
+
+def test_is_startovaya_shpaklevka_rejects_finish_products():
+    assert not _is_startovaya_shpaklevka("Шпаклевка гипсовая Bergauf Silk Gips финишная 18кг")
+    assert not _is_startovaya_shpaklevka("Шпаклевка полимерная готовая Danogips SuperFinish финишная 28кг")
+
+
+def test_is_startovaya_shpaklevka_rejects_unrelated_material_or_use():
+    # Другой материал/назначение, затесавшиеся в общую категорию (#386) — не
+    # шпаклёвка для стен под покраску/обои.
+    assert not _is_startovaya_shpaklevka("Шпатлевка по дереву дуб Лакра (1,5кг)Л-С")
+    assert not _is_startovaya_shpaklevka("Шпаклевка фасадная 1,5кг ведро Ижсинтез")
+    assert not _is_startovaya_shpaklevka("Замазка строительная универсальная 1,4кг ведро Ижсинтез")
+
+
+def test_is_not_startovaya_shpaklevka_excludes_universal_leak():
+    # Подстраховка для «Шпаклевка финишная» (#386): «универсальная» на этом
+    # сайте — фактически стартовый/базовый продукт, не финишный.
+    assert not _is_not_startovaya_shpaklevka("Шпатлевка гипсовая ЕК К200 универсальная 20кг")
+    assert _is_not_startovaya_shpaklevka("Шпаклевка гипсовая Bergauf Silk Gips финишная 18кг")
+
+
+def test_startovaya_shpaklevka_filters_finish_and_junk_from_shared_category(monkeypatch):
+    # #386: обе категории читают общую страницу shpaklevka без узкого facet'а —
+    # классификация по названию должна развести карточки правильно.
+    html = _page(
+        _item("690", "/products/start", title="Шпатлевка гипсовая ЕК К200 универсальная 20кг"),
+        _item("525", "/products/finish", title="Шпаклевка гипсовая Bergauf Silk Gips финишная 18кг"),
+        _item("205", "/products/wood", title="Шпатлевка по дереву дуб Лакра (1,5кг)Л-С"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Шпаклевка стартовая")
+
+    assert "start" in (parsed.source_url or "")
+    assert "finish" not in (parsed.source_url or "")
+    assert "wood" not in (parsed.source_url or "")
+
+
+def test_startovaya_shpaklevka_falls_back_to_full_category_when_filter_empties_it(monkeypatch):
+    # Если фильтр вдруг выкосил всю выборку (например, категория на 100% стала
+    # мусорным подтипом) — откатываемся к исходной, цена не должна пропасть.
+    html = _page(_item("205", "/products/wood", title="Шпатлевка по дереву дуб Лакра (1,5кг)Л-С"))
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Шпаклевка стартовая")
+
+    assert parsed.price_avg == Decimal("137")  # round(205 / 1.5 кг) — фильтр откатился, но фасовка всё равно распозналась
+
+
+def test_finishing_shpaklevka_excludes_universal_leakage(monkeypatch):
+    # Подстраховка (#386): даже если под узкий facet попала дешёвая
+    # «универсальная» шпаклёвка (по факту стартовая), она не должна засорять
+    # выдачу «Шпаклевка финишная».
+    html = _page(
+        _item("525", "/products/finish", title="Шпаклевка гипсовая Bergauf Silk Gips финишная 18кг"),
+        _item("690", "/products/universal-leak", title="Шпатлевка гипсовая ЕК К200 универсальная 20кг"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Шпаклевка финишная")
+
+    assert "universal-leak" not in (parsed.source_url or "")
 
 
 def test_glue_divides_price_by_kg_from_title(monkeypatch):

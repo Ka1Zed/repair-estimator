@@ -139,7 +139,15 @@ def get_price(
         # update_prices с российского IP.
         if force_refresh or settings.PARSER_LIVE_FETCH:
             try:
-                parsed = parser.fetch_price(material_name)
+                # reference_package_size (#382) — справочная фасовка материала,
+                # парсеры кг/л-материалов отсеивают по ней нетиповую мелкую упаковку
+                # (см. app.parsers._stats.filter_undersized_packages).
+                reference_package_size = (
+                    Decimal(str(material.package_size)) if material.package_size else None
+                )
+                parsed = parser.fetch_price(
+                    material_name, reference_package_size=reference_package_size
+                )
 
                 # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —
                 # это закрепило бы 0 в кэше на весь TTL. Уходим в seed, как при исключении.

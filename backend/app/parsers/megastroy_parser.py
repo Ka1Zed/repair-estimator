@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.parsers import headless_session
-from app.parsers._stats import filter_outliers, price_band_slice
+from app.parsers._stats import filter_outliers, filter_undersized_packages, price_band_slice
 from app.parsers.base import BaseParser, ParsedPrice, DEFAULT_HEADERS, DEFAULT_REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -496,7 +496,9 @@ class MegastroyParser(BaseParser):
             self._raw_cache[urls] = (time.monotonic(), raw_items)
             return raw_items
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size: Decimal | None = None
+    ) -> ParsedPrice:
         if material_name not in CATEGORY_MAP:
             raise ValueError(f"Нет категории Мегастроя для материала '{material_name}'")
 
@@ -529,6 +531,19 @@ class MegastroyParser(BaseParser):
                 qty = _quantity_from_title(title, category.title_unit)
                 if qty:
                     items.append((price / qty, url, qty))
+
+            # Нетиповая (мелкая) фасовка отсекается ДО статистики (#382) — иначе
+            # мелкая упаковка (её обычно больше по числу карточек) тянет price_avg
+            # и товар-представитель к себе, хотя типовая закупка — мешками/канистрами.
+            items = filter_undersized_packages(
+                items, key=lambda it: it[2], reference_package_size=reference_package_size
+            )
+            if reference_package_size is not None and not items:
+                raise RuntimeError(
+                    f"Все карточки '{material_name}' — нетиповая фасовка "
+                    f"(< 1/3 справочной {reference_package_size} кг/л) — "
+                    "как парсер не смог, откат на seed"
+                )
         elif category.normalize_length_mm:
             # Плинтус продаётся рейкой ("72х2500мм") по цене за шт — приводим
             # к ₽/м делением на длину рейки из названия. Длина рейки — и есть

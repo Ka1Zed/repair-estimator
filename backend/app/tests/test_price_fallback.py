@@ -17,7 +17,7 @@ class _ZeroParser(BaseParser):
     """Имитирует VPN/блок-страницу: HTTP 200, но цена нулевая (исключения нет)."""
     source_name = "Мегастрой"
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
+    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
         return ParsedPrice(price_min=Decimal(0), price_avg=Decimal(0), price_max=Decimal(0))
 
 
@@ -25,7 +25,7 @@ class _RaisingParser(BaseParser):
     """Парсер падает (сеть недоступна и т.п.)."""
     source_name = "Мегастрой"
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
+    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
         raise RuntimeError("сеть недоступна")
 
 
@@ -36,7 +36,7 @@ class _RecordingParser(BaseParser):
     def __init__(self):
         self.called = False
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
+    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
         self.called = True
         return ParsedPrice(
             price_min=Decimal("200"), price_avg=Decimal("250"), price_max=Decimal("300")
@@ -113,7 +113,7 @@ class _PackageSizeParser(BaseParser):
     """Отдаёт валидную цену вместе с фасовкой конкретного товара (#306)."""
     source_name = "Мегастрой"
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
+    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
         return ParsedPrice(
             price_min=Decimal("200"), price_avg=Decimal("250"), price_max=Decimal("300"),
             source_url="https://kazan.megastroy.com/products/kraska-2.5l",

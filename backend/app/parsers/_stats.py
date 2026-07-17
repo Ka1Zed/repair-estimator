@@ -32,6 +32,27 @@ def filter_outliers(items: list, key=lambda x: x) -> list:
     return filtered or items
 
 
+def filter_undersized_packages(items: list, key, reference_package_size: Decimal | None) -> list:
+    """Отсеивает карточки с нетиповой (мелкой) фасовкой перед агрегацией цены (#382).
+
+    У кг/л-материалов (шпаклёвка, клей, затирка, грунтовка) категория обычно содержит
+    больше карточек мелкой фасовки (3-5 кг), чем мешков/канистр (25-30 кг) — без этого
+    фильтра price_avg и товар-представитель (ближайший к avg) съезжают к цене мелкой
+    фасовки, хотя типовая закупка — мешками. key(item) -> Decimal | None (package_size
+    конкретной карточки); карточка без известной фасовки (None) не отсеивается — про
+    неё нечего сказать. Порог — треть от справочной Material.package_size.
+
+    reference_package_size is None (материал без справочной фасовки) — фильтр no-op.
+    В отличие от filter_outliers, пустой результат НЕ откатывается к исходной выборке:
+    если вся категория — нетиповая фасовка, типового представителя нет, и это должно
+    вести к seed-fallback у вызывающего кода, а не к неверной цене.
+    """
+    if reference_package_size is None or reference_package_size <= 0:
+        return items
+    threshold = reference_package_size / 3
+    return [it for it in items if key(it) is None or key(it) >= threshold]
+
+
 def price_band_slice(items: list, band: str, key=lambda x: x) -> list:
     """Режет уже отфильтрованную (filter_outliers) выборку на терции по цене (#331).
 

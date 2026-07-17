@@ -475,6 +475,50 @@ def test_material_without_matching_quantity_raises(monkeypatch):
         MegastroyParser().fetch_price("Шпаклевка стартовая")
 
 
+# Нетиповая (мелкая) фасовка кг-материалов (#382): категория обычно содержит больше
+# карточек мелкой фасовки, чем мешков — без фильтра price_avg и представитель
+# съезжают к цене мелкой упаковки.
+
+
+def test_putty_filters_out_undersized_package_when_reference_given(monkeypatch):
+    html = _page(
+        _item("156", "/products/putty-small", title="Шпаклёвка Knauf Фуген 5 кг"),  # 31.2 ₽/кг
+        _item("750", "/products/putty-bag", title="Шпаклёвка Knauf Фуген 25 кг"),  # 30 ₽/кг
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price(
+        "Шпаклевка финишная", reference_package_size=Decimal("25")
+    )
+
+    assert parsed.price_avg == Decimal("30")
+    assert parsed.package_size == Decimal("25")
+    assert "putty-bag" in (parsed.source_url or "")
+
+
+def test_putty_without_reference_package_size_keeps_all_items(monkeypatch):
+    # reference_package_size=None (дефолт, как у всех старых вызовов) — фильтр не
+    # применяется, поведение как раньше.
+    html = _page(
+        _item("156", "/products/putty-small", title="Шпаклёвка Knauf Фуген 5 кг"),
+        _item("750", "/products/putty-bag", title="Шпаклёвка Knauf Фуген 25 кг"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Шпаклевка финишная")
+
+    assert parsed.price_min == Decimal("30")
+    assert parsed.price_max == Decimal("31.2")
+
+
+def test_putty_all_undersized_raises_when_reference_given(monkeypatch):
+    html = _page(_item("156", "/products/putty-small", title="Шпаклёвка Knauf Фуген 5 кг"))
+    _patch_pages(monkeypatch, html)
+
+    with pytest.raises(RuntimeError):
+        MegastroyParser().fetch_price("Шпаклевка финишная", reference_package_size=Decimal("25"))
+
+
 # Плинтус (#277): витринная единица — "шт" (рейка фиксированной длины), наша
 # база — метр; цену приводим делением на длину рейки из названия.
 

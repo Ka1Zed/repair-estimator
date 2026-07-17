@@ -68,7 +68,9 @@ class BaseParser(ABC):
         return []
 
     @abstractmethod
-    def fetch_price(self, material_name: str) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size: Decimal | None = None
+    ) -> ParsedPrice:
         '''
         Получить цену по названию материала
 
@@ -76,5 +78,10 @@ class BaseParser(ABC):
         агрегатор сам поймает и возьмет seed-цену
 
         material_name: название как в БД, например "Краска для стен"
+        reference_package_size (#382): справочная Material.package_size вызывающего
+        материала — парсеры кг/л-материалов используют её, чтобы отсеять нетиповую
+        мелкую фасовку (см. app.parsers._stats.filter_undersized_packages) при выборе
+        цены/представителя категории. None (по умолчанию) — фильтр не применяется,
+        поведение как раньше; так остаются рабочими вызовы без этого аргумента.
         '''
         ...

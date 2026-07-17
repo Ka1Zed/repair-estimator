@@ -7,8 +7,11 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Material, MaterialPrice, PriceSource, LaborService, LaborPrice
+from app.db.models import MaterialPrice, PriceSource, LaborService, LaborPrice
 from app.parsers.base import BaseParser, ParsedPrice
+from app.services._query_cache import (
+    labor_service_by_name, material_by_name, source_by_name, source_name_by_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,16 +88,14 @@ def get_price(
         ttl_hours = settings.PRICE_TTL_HOURS
 
     session = db
-    material = session.query(Material).filter(Material.name == material_name).first()
+    material = material_by_name(session, material_name)
     if not material:
         logger.warning(f"Материал '{material_name}' не найден в БД")
         return None
 
     # Пробуем парсер
     if parser is not None:
-        source = session.query(PriceSource).filter(
-            PriceSource.name == parser.source_name
-        ).first()
+        source = source_by_name(session, parser.source_name)
 
         if source is None:
             # Источник парсера отсутствует в БД (например, добавили парсер в код,
@@ -206,7 +207,7 @@ def get_price(
             return price_entry
 
     # Fallback: берем seed-цену из БД
-    seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
+    seed_source = source_by_name(session, "seed")
     if not seed_source:
         logger.error("Источник 'seed' не найден в БД")
         return None
@@ -267,9 +268,9 @@ def _combine_material_prices(session, material_id: int,
     representative = min(rows, key=lambda r: abs(r.price_avg - price_avg))
 
     source_names = [
-        s.name for s in session.query(PriceSource).filter(
-            PriceSource.id.in_({r.source_id for r in rows})
-        ).all()
+        name for name in (
+            source_name_by_id(session, sid) for sid in {r.source_id for r in rows}
+        ) if name is not None
     ]
 
     combined = MaterialPrice(
@@ -360,9 +361,9 @@ def get_material_price(
 
     Источников 0 (пустой parsers) — вернётся seed, как раньше при одном парсере.
     '''
-    seed_source = db.query(PriceSource).filter(PriceSource.name == "seed").first()
+    seed_source = source_by_name(db, "seed")
 
-    material = db.query(Material).filter(Material.name == material_name).first()
+    material = material_by_name(db, material_name)
     if not material:
         logger.warning(f"Материал '{material_name}' не найден в БД")
         return None
@@ -418,9 +419,9 @@ def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
     representative = min(rows, key=lambda r: abs(r.price_avg - price_avg))
 
     source_names = [
-        s.name for s in session.query(PriceSource).filter(
-            PriceSource.id.in_({r.source_id for r in rows})
-        ).all()
+        name for name in (
+            source_name_by_id(session, sid) for sid in {r.source_id for r in rows}
+        ) if name is not None
     ]
 
     combined = LaborPrice(
@@ -468,12 +469,12 @@ def get_labor_price(service_name: str, db: Session, region: str | None = None) -
     '''
     ttl_hours = settings.PRICE_TTL_HOURS
     session = db
-    service = session.query(LaborService).filter(LaborService.name == service_name).first()
+    service = labor_service_by_name(session, service_name)
     if not service:
         logger.warning(f"Услуга '{service_name}' не найдена в БД")
         return None
 
-    seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
+    seed_source = source_by_name(session, "seed")
     if not seed_source:
         logger.error("Источник 'seed' не найден в БД")
         return None

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.core.norms import WALL_CONDITION_FACTOR
 from app.db.models import Material
 from app.services._num import D
+from app.services._query_cache import material_by_slug, material_variants_by_finish_key
 
 
 # ---- slug материалов (как в seed_data/materials.json, поле slug) ----
@@ -86,13 +87,13 @@ def resolve_material(db: Session, key: str, tier: str) -> Material | None:
     slug, как раньше (без лишнего запроса по finish_key на каждый материал).
     """
     if key in _FINISH_KEYS:
-        variants = db.query(Material).filter(Material.finish_key == key).all()
+        variants = material_variants_by_finish_key(db, key)
         by_tier = {m.variant_tier: m for m in variants}
         for t in _FALLBACK_ORDER.get(tier, _FALLBACK_ORDER["avg"]):
             if t in by_tier:
                 return by_tier[t]
         return None
-    return db.query(Material).filter(Material.slug == key).first()
+    return material_by_slug(db, key)
 
 # ---- стадии материалов (#303): rough / finish ----
 # Только грунт и стартовая (выравнивающая) шпаклёвка — ближайший существующий аналог

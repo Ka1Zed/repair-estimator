@@ -16,8 +16,9 @@
 from decimal import Decimal
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from app.db.models import LaborService, LaborPrice, PriceSource
+from app.db.models import LaborPrice, PriceSource
 from app.services._num import D
+from app.services._query_cache import labor_service_by_slug, source_by_name
 
 
 # ---- slug операций (как в seed_data/labor_services.json, поле slug) ----
@@ -165,7 +166,7 @@ def _labor_selections(repair_options: Dict[str, Any], geom: Dict[str, Any]) -> L
 
 
 def _seed_source_id(db: Session):
-    src = db.query(PriceSource).filter(PriceSource.name == "seed").first()
+    src = source_by_name(db, "seed")
     return src.id if src else None
 
 
@@ -186,7 +187,7 @@ def _labor_rows(
         if volume <= 0:
             continue
 
-        service = db.query(LaborService).filter(LaborService.slug == service_slug).first()
+        service = labor_service_by_slug(db, service_slug)
         if service is None:
             continue  # услуга не засидована — пропускаем
 

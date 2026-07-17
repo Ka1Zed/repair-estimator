@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.db.models import PriceSource
+from app.db.models import PriceSource, MaterialPrice
 from app.schemas.estimate import (
     EstimateRequest, EstimateResponse, Summary, GeometrySummary,
     MaterialItem, MaterialTierItem, LaborItem, HiddenWorks, HiddenWorkItem, RoomInput,
@@ -139,10 +139,31 @@ def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> D
     return v_avg
 
 
+def _cached_material_price(
+    cache: Dict[tuple, "MaterialPrice | None"], material_name: str, db: Session,
+    parsers: list[BaseParser], region: str, store_names: List[str] | None,
+) -> MaterialPrice | None:
+    """get_material_price с мемоизацией в пределах одного /calculate.
+
+    Одна позиция материала запрашивается до 3 раз за запрос: основная строка +
+    min_item/max_item (см. _tier_item). Когда tier-варианты SKU не заведены,
+    resolve_material для всех трёх уровней отдаёт один и тот же товар → три
+    идентичных прохода get_material_price (цикл по парсерам + запросы к БД).
+    Кэшируем по (материал, город, магазины) — ключ, полностью определяющий
+    результат в рамках запроса; объект только читается вызывающими, не мутируется.
+    """
+    key = (material_name, region, tuple(store_names) if store_names else None)
+    if key not in cache:
+        cache[key] = get_material_price(
+            material_name, db=db, parsers=parsers, region=region, store_names=store_names,
+        )
+    return cache[key]
+
+
 def _tier_item(
     material_key: str, tier: str, quantity: Decimal, db: Session,
     parsers: list[BaseParser], region: str, sources_by_id: Dict[int, str],
-    store_names: List[str] | None = None,
+    price_cache: Dict[tuple, "MaterialPrice | None"], store_names: List[str] | None = None,
 ) -> MaterialTierItem:
     """SKU-вариант позиции для одного уровня комплектации (#349, min_item/avg_item/max_item).
 
@@ -152,14 +173,15 @@ def _tier_item(
     (pick_by_tier), что и основной расчёт строки — числа обязаны совпасть с тем,
     что вернул бы отдельный /calculate с этим tier. quantity — общая с родительской
     строкой (см. MaterialTierItem), доп. обращений к БД/парсеру сверх обычных для
-    resolve_material/get_material_price нет.
+    resolve_material/get_material_price нет. price_cache — общий с основным циклом
+    мемо цен (см. _cached_material_price).
     """
     material = resolve_material(db, material_key, tier)
     if material is None:
         return MaterialTierItem(name="", price=0.0, total=0.0, source="нет цены", source_url=None)
 
-    price_obj = get_material_price(
-        material.name, db=db, parsers=parsers, region=region, store_names=store_names,
+    price_obj = _cached_material_price(
+        price_cache, material.name, db, parsers, region, store_names,
     )
     if not price_obj:
         return MaterialTierItem(
@@ -214,6 +236,12 @@ def calculate_estimate(
                     f"Доступные магазины: {', '.join(sorted(known_stores))}."
                 ),
             )
+
+    # Мемо цен материалов на весь запрос: одну позицию смета запрашивает до 3 раз
+    # (основная строка + min_item/max_item), а get_material_price каждый раз заново
+    # гоняет цикл по парсерам и запросы к БД. Ключ полностью определяет результат
+    # в пределах запроса (см. _cached_material_price).
+    material_price_cache: Dict[tuple, "MaterialPrice | None"] = {}
 
     all_materials: List[Dict[str, Any]] = []
     all_labor: List[Dict[str, Any]] = []
@@ -331,8 +359,8 @@ def calculate_estimate(
         # с накрученным по факту коэффициентом даже после суммирования нескольких комнат.
         waste_factor = (group['quantity'] / base_quantity) if base_quantity > 0 else Decimal(1)
 
-        price_obj = get_material_price(
-            name, db=db, parsers=parsers, region=request.city, store_names=request.stores,
+        price_obj = _cached_material_price(
+            material_price_cache, name, db, parsers, request.city, request.stores,
         )
 
         # package_size (#306): если цена пришла от парсера и он отдал фасовку
@@ -421,7 +449,8 @@ def calculate_estimate(
             if t not in tier_items:
                 tier_items[t] = _tier_item(
                     group['material_key'], t, final_quantity, db, parsers,
-                    request.city, sources_by_id, store_names=request.stores,
+                    request.city, sources_by_id, material_price_cache,
+                    store_names=request.stores,
                 )
 
         materials_response.append(MaterialItem(

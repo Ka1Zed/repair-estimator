@@ -258,6 +258,9 @@ def seed_test_data(session):
         {"name": "Стяжка пола", "slug": "screed_floor", "specialist_type": "Стяжечник", "unit": "м²"},
         {"name": "Гидроизоляция", "slug": "waterproof", "specialist_type": "Гидроизолировщик", "unit": "м²"},
         {"name": "Грунтование", "slug": "priming", "specialist_type": "Маляр", "unit": "м²"},
+        # Подготовка потолка под покраску (#380), по аналогии со стенами.
+        {"name": "Грунтование потолка", "slug": "priming_ceiling", "specialist_type": "Маляр", "unit": "м²"},
+        {"name": "Шпаклевка потолка", "slug": "putty_ceiling", "specialist_type": "Штукатур", "unit": "м²"},
     ]
     for s in services_data:
         svc = LaborService(**s)

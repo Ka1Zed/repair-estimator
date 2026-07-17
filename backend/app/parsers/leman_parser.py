@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.parsers import leman_browser
-from app.parsers._stats import filter_outliers, price_band_slice
+from app.parsers._stats import filter_outliers, filter_undersized_packages, price_band_slice
 from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
@@ -475,7 +475,9 @@ class LemanParser(BaseParser):
             self._raw_cache[base_urls] = (time.monotonic(), raw)
             return raw
 
-    def fetch_price(self, material_name: str) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size: Decimal | None = None
+    ) -> ParsedPrice:
         if material_name not in CATEGORY_MAP:
             raise ValueError(f"Нет категории Лемана для материала '{material_name}'")
 
@@ -514,6 +516,22 @@ class LemanParser(BaseParser):
                 package_size = _select_package_size(candidates, spec, price)
 
             items.append((price, url, name, package_size))
+
+        if not spec.normalize_length:
+            # Нетиповая (мелкая) фасовка отсекается ДО статистики (#382) — иначе
+            # мелкая упаковка (её обычно больше по числу карточек) тянет price_avg
+            # и товар-представитель к себе, хотя типовая закупка — мешками/канистрами.
+            # normalize_length (плинтус) сюда не попадает — там package_size это длина
+            # рейки, а не масса/объём, треть справочной фасовки к ней не применима.
+            items = filter_undersized_packages(
+                items, key=lambda it: it[3], reference_package_size=reference_package_size
+            )
+            if reference_package_size is not None and not items:
+                raise RuntimeError(
+                    f"Все карточки '{material_name}' — нетиповая фасовка "
+                    f"(< 1/3 справочной {reference_package_size} кг/л) — "
+                    "как парсер не смог, откат на seed"
+                )
 
         if not items:
             raise RuntimeError(f"Не найдено цен для '{material_name}' (единица/размер не распознаны)")

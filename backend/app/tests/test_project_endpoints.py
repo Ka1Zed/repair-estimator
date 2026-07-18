@@ -49,6 +49,24 @@ def test_create_and_get_project_round_trip():
 
 
 @pytest.mark.usefixtures("override_get_db")
+def test_create_project_rejects_invalid_city():
+    """Незнакомый город → 422, а не молчаливое сохранение проекта (#394)."""
+    payload = _project_payload("Проект с опечаткой")
+    payload["city"] = "Мсква"
+    response = client.post("/api/projects", json=payload)
+    assert response.status_code == 422
+
+
+@pytest.mark.usefixtures("override_get_db")
+def test_create_project_normalizes_city_case():
+    payload = _project_payload("Проект с регистром")
+    payload["city"] = "москва"
+    response = client.post("/api/projects", json=payload)
+    assert response.status_code == 201
+    assert response.json()["city"] == "Москва"
+
+
+@pytest.mark.usefixtures("override_get_db")
 def test_list_contains_created_project():
     created = client.post("/api/projects", json=_project_payload("Список: проект"))
     project_id = created.json()["id"]

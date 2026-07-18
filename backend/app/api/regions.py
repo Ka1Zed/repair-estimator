@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.core.regions import DEFAULT_REGION
 from app.db.session import get_db
 from app.db.models import MaterialPrice, LaborPrice
 from app.parsers.base import BaseParser
@@ -8,10 +9,6 @@ from app.services.price_aggregator_service import get_available_stores
 from app.api.estimates import get_material_parsers
 
 router = APIRouter(prefix="/api", tags=["regions"])
-
-# Город по умолчанию: для него и для любого города без своих цен расчёт идёт
-# по базовым seed-ценам (region IS NULL).
-DEFAULT_REGION = "Казань"
 
 
 @router.get("/regions")

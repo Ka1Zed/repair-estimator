@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.regions import normalize_city
 from app.main import app
 from app.api.estimates import get_material_parsers
 from app.parsers.base import BaseParser, ParsedPrice
@@ -68,6 +69,48 @@ def test_regions_endpoint():
     assert "Казань" in body["regions"]
 
 
+# --- валидация/нормализация city (#394) ---
+
+def test_normalize_city_case_and_whitespace_insensitive():
+    assert normalize_city("москва") == "Москва"
+    assert normalize_city(" Москва ") == "Москва"
+    assert normalize_city("МОСКВА") == "Москва"
+
+
+def test_normalize_city_rejects_unknown():
+    with pytest.raises(ValueError):
+        normalize_city("Мсква")
+    with pytest.raises(ValueError):
+        normalize_city("Novosibirsk")
+
+
+@pytest.mark.usefixtures("override_get_db", "stub_material_parser")
+def test_calculate_rejects_typo_city():
+    """Опечатка в городе → явный 422, а не тихий откат на цены Казани."""
+    response = client.post("/api/estimates/calculate", json=_payload("Мсква"))
+    assert response.status_code == 422
+
+
+@pytest.mark.usefixtures("override_get_db", "stub_material_parser")
+def test_calculate_rejects_unknown_city():
+    """Незнакомый (в т.ч. нероссийский/непокрытый) город → явный 422."""
+    response = client.post("/api/estimates/calculate", json=_payload("Novosibirsk"))
+    assert response.status_code == 422
+
+
+@pytest.mark.usefixtures("override_get_db", "stub_material_parser")
+def test_calculate_normalizes_city_case():
+    """«москва» и «Москва» матчат один и тот же региональный источник (LEMAN_MOSCOW)."""
+    lower = client.post("/api/estimates/calculate", json=_payload("москва")).json()
+    proper = client.post("/api/estimates/calculate", json=_payload("Москва")).json()
+
+    paint_lower = next(m for m in lower["materials"] if m["name"] == "Краска для стен")
+    paint_proper = next(m for m in proper["materials"] if m["name"] == "Краска для стен")
+
+    assert paint_lower["region"] == paint_proper["region"] == "Москва"
+    assert paint_lower["price_avg"] == paint_proper["price_avg"]
+
+
 # --- справочник магазинов по городу (#363) ---
 
 def test_stores_endpoint_kazan_both_available():
@@ -121,26 +164,27 @@ def _payload(city: str, stores: list[str] | None = None) -> dict:
 
 @pytest.mark.usefixtures("override_get_db", "stub_material_parser")
 def test_estimate_labor_differs_by_city():
-    """Покраска стен в Москве дороже базовой → labor_avg для Москвы выше, чем для города без цен."""
+    """Покраска стен в Москве дороже, чем в Казани (обе — валидные поддерживаемые
+    города со своей региональной seed-строкой, #394) → labor_avg различается."""
     moscow = client.post("/api/estimates/calculate", json=_payload("Москва")).json()
-    other = client.post("/api/estimates/calculate", json=_payload("Тверь")).json()
-    assert moscow["summary"]["labor_avg"] != other["summary"]["labor_avg"]
+    kazan = client.post("/api/estimates/calculate", json=_payload("Казань")).json()
+    assert moscow["summary"]["labor_avg"] != kazan["summary"]["labor_avg"]
 
 
 @pytest.mark.usefixtures("override_get_db", "stub_material_parser")
 def test_estimate_item_reports_actual_region():
-    """Строка ответа несёт фактический регион цены: город при региональной seed,
-    null при fallback на базовую — а не просто эхо запрошенного city.
+    """Строка ответа несёт фактический регион цены — не просто эхо запрошенного
+    city: «Краска для стен» имеет свою региональную seed-строку для Москвы →
+    region == "Москва"; «Краска потолочная» такой строки не имеет ни для одного
+    города (только базовая, region IS NULL) → у неё region == null даже для Москвы.
     Парсер материалов заглушён (stub_material_parser), цены берутся из seed."""
     moscow = client.post("/api/estimates/calculate", json=_payload("Москва")).json()
-    other = client.post("/api/estimates/calculate", json=_payload("Тверь")).json()
 
-    paint_msk = next(m for m in moscow["materials"] if m["name"] == "Краска для стен")
-    paint_other = next(m for m in other["materials"] if m["name"] == "Краска для стен")
+    paint_walls = next(m for m in moscow["materials"] if m["name"] == "Краска для стен")
+    paint_ceiling = next(m for m in moscow["materials"] if m["name"] == "Краска потолочная")
 
-    assert paint_msk["region"] == "Москва"
-    # Для города без своих цен сработал fallback на базовую → region == null, а не "Тверь".
-    assert paint_other["region"] is None
+    assert paint_walls["region"] == "Москва"
+    assert paint_ceiling["region"] is None
 
 
 # --- сквозной выбор регионального источника материалов (#345) ---

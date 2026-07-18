@@ -1417,7 +1417,11 @@ def test_material_min_avg_max_item_single_request():
                     "walls": {"enabled": True, "finish": "paint"},
                     "ceiling": {"enabled": False, "finish": None},
                     "electric": {"enabled": False},
-                    "plumbing": {"enabled": False},
+                    # plumbing даёт трубу — единственный материал в этом наборе работ,
+                    # который после #390 остался без finish_key (грунт/шпаклёвка/плинтус/
+                    # краска стен теперь все тиренные, для примера "один товар на все tier"
+                    # нужен подлинно tier-agnostic материал).
+                    "plumbing": {"enabled": True, "points": 0, "pipe_m": 2},
                 }
             }
         ],
@@ -1446,14 +1450,14 @@ def test_material_min_avg_max_item_single_request():
     assert laminate["avg_item"]["price"] == pytest.approx(laminate["price_avg"])
     assert laminate["avg_item"]["total"] == pytest.approx(laminate["total_avg"])
 
-    # Позиция без finish_key (напр. грунтовка) — один товар на все tier: имя и ссылка
-    # совпадают у всех трёх *_item.
-    primer = next(m for m in materials if m["name"] == "Грунтовка")
-    assert primer["min_item"]["name"] == primer["avg_item"]["name"] == primer["max_item"]["name"] == "Грунтовка"
+    # Позиция без finish_key (труба) — один товар на все tier: имя и ссылка совпадают
+    # у всех трёх *_item.
+    pipe = next(m for m in materials if m["name"] == "Труба водопроводная")
+    assert pipe["min_item"]["name"] == pipe["avg_item"]["name"] == pipe["max_item"]["name"] == "Труба водопроводная"
     assert (
-        primer["min_item"]["source_url"]
-        == primer["avg_item"]["source_url"]
-        == primer["max_item"]["source_url"]
+        pipe["min_item"]["source_url"]
+        == pipe["avg_item"]["source_url"]
+        == pipe["max_item"]["source_url"]
     )
 
 

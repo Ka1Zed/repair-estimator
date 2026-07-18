@@ -74,6 +74,24 @@ def test_electric_plumbing_services_seeded_with_units():
         assert services[name]["unit"] == unit
 
 
+def test_finish_key_variants_have_all_three_tiers():
+    """#390: у позиции с finish_key должны быть все три variant_tier (min/avg/max) —
+    иначе resolve_material тихо откатывается на соседний уровень и в min/avg/max
+    колонках сметы оказывается один и тот же товар вместо разных SKU."""
+    by_finish_key: dict[str, set] = {}
+    for m in _load("materials.json"):
+        finish_key = m.get("finish_key")
+        if finish_key is None:
+            continue
+        by_finish_key.setdefault(finish_key, set()).add(m["variant_tier"])
+
+    assert by_finish_key, "в seed нет ни одной finish_key-позиции"
+    for finish_key, tiers in by_finish_key.items():
+        assert tiers == {"min", "avg", "max"}, (
+            f"finish_key «{finish_key}» не покрывает все три уровня: {tiers}"
+        )
+
+
 def test_electric_plumbing_prices_cover_all_regions():
     """Инвариант fallback: у каждой позиции есть базовая seed-цена (region null),
     парсеры эти единицы не покрывают → без цены строка сметы была бы нулевой."""

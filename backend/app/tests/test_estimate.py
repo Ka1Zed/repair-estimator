@@ -231,11 +231,16 @@ class TestMaterialCalc:
 
     def test_unknown_material_slug_skipped_not_crashed(self, db_session):
         """Опечатка/расхождение slug в seed → материал тихо пропускается (как раньше
-        было с name), расчёт остальных строк не падает (#278)."""
+        было с name), расчёт остальных строк не падает (#278).
+
+        Берём влагостойкую краску — единственный материал стеновой подготовки,
+        который после #390 остался слаг-резолвом (грунт/шпаклёвка/обычная краска
+        стен теперь резолвятся по finish_key и не матчат по slug вообще, так что
+        порча их slug на резолв не повлияла бы — не годится для этого сценария)."""
         from app.db.models import Material
 
-        primer = db_session.query(Material).filter(Material.slug == "primer").first()
-        primer.slug = "primer_TYPO"
+        moist = db_session.query(Material).filter(Material.slug == "paint_moisture").first()
+        moist.slug = "paint_moisture_TYPO"
         db_session.commit()
         try:
             geometry = {
@@ -243,16 +248,16 @@ class TestMaterialCalc:
                 'wall_area': Decimal('34.1'), 'perimeter': Decimal('14.0'),
                 'door_width_sum': Decimal('0.8'),
             }
-            repair_options = {'floor': None, 'walls': 'paint', 'ceiling': None}
+            repair_options = {'floor': None, 'walls': 'moisture_paint', 'ceiling': None}
 
             materials = calculate_materials(geometry, repair_options, db_session)
 
             names = {m['name'] for m in materials}
-            assert 'Грунтовка' not in names          # slug разошёлся — строка пропущена
-            assert 'Шпаклевка стартовая' in names     # остальные материалы посчитаны как обычно
-            assert 'Краска для стен' in names
+            assert 'Краска влагостойкая' not in names  # slug разошёлся — строка пропущена
+            assert 'Грунтовка' in names                # остальные материалы посчитаны как обычно
+            assert 'Шпаклевка стартовая' in names
         finally:
-            primer.slug = "primer"
+            moist.slug = "paint_moisture"
             db_session.commit()
 
 
@@ -299,6 +304,40 @@ class TestFinishVariants:
         )
         socket = next((m for m in sockets_max if m['name'] == 'Розетка'), None)
         assert socket is not None  # socket не имеет max-варианта → fallback на avg
+
+    def test_tier_selects_different_sku_for_primer(self, db_session):
+        """#390: грунт тоже вошёл в finish_key-систему — tier=min/avg/max даёт три
+        разных SKU, а не один товар с другой ценой (как было до фикса)."""
+        repair_options = {'floor': None, 'walls': 'paint', 'ceiling': None}
+
+        by_tier = {}
+        for tier in ("min", "avg", "max"):
+            materials = calculate_materials(self.GEOM, repair_options, db_session, tier=tier)
+            primer = next(m for m in materials if m['unit'] == 'л' and 'Грунтовка' in m['name'])
+            by_tier[tier] = primer
+
+        assert by_tier['min']['name'] == 'Грунтовка эконом'
+        assert by_tier['avg']['name'] == 'Грунтовка'
+        assert by_tier['max']['name'] == 'Грунтовка премиум'
+        assert len({by_tier[t]['material_id'] for t in by_tier}) == 3
+
+    def test_primer_two_coats_applies_to_non_avg_tier(self, db_session):
+        """Регрессия #390: модификатор двойного слоя раньше матчил по material.slug ==
+        M_PRIMER, который есть только у avg-товара. У эконом/премиум SKU свой slug
+        (primer_economy/primer_premium) — без фикса на finish_key двойной слой на них
+        тихо переставал бы применяться."""
+        repair_options = {'floor': None, 'walls': 'paint', 'ceiling': None, 'tier': 'min'}
+
+        one_coat = calculate_materials(
+            self.GEOM, {**repair_options}, db_session, tier="min",
+        )
+        two_coats = calculate_materials(
+            self.GEOM, {**repair_options, 'primer_two_coats': True}, db_session, tier="min",
+        )
+
+        primer_1 = next(m for m in one_coat if m['name'] == 'Грунтовка эконом')
+        primer_2 = next(m for m in two_coats if m['name'] == 'Грунтовка эконом')
+        assert primer_2['quantity'] == primer_1['quantity'] * Decimal('2')
 
 
 class TestLaborCalc:

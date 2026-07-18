@@ -166,11 +166,11 @@ def seed_test_data(session):
     materials_data = [
         {"name": "Краска для стен", "slug": "paint_walls", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "walls.paint", "variant_tier": "avg"},
         {"name": "Краска потолочная", "slug": "paint_ceiling", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "ceiling.paint", "variant_tier": "avg"},
-        {"name": "Грунтовка", "slug": "primer", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10, "layers": 1},
-        {"name": "Шпаклевка стартовая", "slug": "putty_start", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30},
-        {"name": "Шпаклевка финишная", "slug": "putty_finish", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
+        {"name": "Грунтовка", "slug": "primer", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10, "layers": 1, "finish_key": "primer", "variant_tier": "avg"},
+        {"name": "Шпаклевка стартовая", "slug": "putty_start", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30, "finish_key": "putty_start", "variant_tier": "avg"},
+        {"name": "Шпаклевка финишная", "slug": "putty_finish", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25, "finish_key": "putty_finish", "variant_tier": "avg"},
         {"name": "Ламинат", "slug": "laminate", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0, "finish_key": "floor.laminate", "variant_tier": "avg"},
-        {"name": "Плинтус", "slug": "plinth", "category": "floor", "unit": "м", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
+        {"name": "Плинтус", "slug": "plinth", "category": "floor", "unit": "м", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0, "finish_key": "plinth", "variant_tier": "avg"},
         {"name": "Плитка", "slug": "tile", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 1.2, "finish_key": "tile", "variant_tier": "avg"},
         {"name": "Плиточный клей", "slug": "tile_adhesive", "category": "tile", "unit": "кг", "consumption_per_m2": 4.5, "waste_factor": 1.1, "package_size": 25},
         {"name": "Затирка", "slug": "grout", "category": "tile", "unit": "кг", "consumption_per_m2": 0.4, "waste_factor": 1.1, "package_size": 2},
@@ -219,6 +219,34 @@ def seed_test_data(session):
     session.add(MaterialPrice(
         material_id=variant_materials[1].id, source_id=src.id,
         price_min=2200, price_avg=3200, price_max=4500,
+    ))
+
+    # Варианты primer (#390) — в отличие от ламината, у грунта на unit="л" висит
+    # модификатор двойного слоя (primer_two_coats, см. quantity_of), матчащийся по
+    # finish_key. Даёт regression-покрытие: эконом/премиум SKU (свой slug) должны
+    # получать двойной слой так же, как и avg-товар.
+    primer_variants = [
+        Material(
+            name="Грунтовка эконом", slug="primer_economy", category="paint", unit="л",
+            consumption_per_m2=0.12, waste_factor=1.1, package_size=5, layers=1,
+            finish_key="primer", variant_tier="min",
+        ),
+        Material(
+            name="Грунтовка премиум", slug="primer_premium", category="paint", unit="л",
+            consumption_per_m2=0.12, waste_factor=1.1, package_size=10, layers=1,
+            finish_key="primer", variant_tier="max",
+        ),
+    ]
+    for mat in primer_variants:
+        session.add(mat)
+    session.flush()
+    session.add(MaterialPrice(
+        material_id=primer_variants[0].id, source_id=src.id,
+        price_min=45, price_avg=65, price_max=90,
+    ))
+    session.add(MaterialPrice(
+        material_id=primer_variants[1].id, source_id=src.id,
+        price_min=300, price_avg=450, price_max=650,
     ))
 
     # Региональная seed-цена для теста регионального lookup (#127):

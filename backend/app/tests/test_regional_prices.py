@@ -134,6 +134,22 @@ def test_stores_endpoint_moscow_megastroy_unavailable():
     assert stores == {"Мегастрой": False, "Леман": True}
 
 
+def test_stores_endpoint_normalizes_city_case():
+    """«москва» матчит тот же регион, что «Москва» (#394/#396) — без нормализации
+    covered_cities сравнивался бы точной строкой и все магазины были бы недоступны."""
+    response = client.get("/api/regions/stores", params={"city": "москва"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["city"] == "Москва"
+    stores = {s["name"]: s["available"] for s in body["stores"]}
+    assert stores == {"Мегастрой": False, "Леман": True}
+
+
+def test_stores_endpoint_rejects_unknown_city():
+    response = client.get("/api/regions/stores", params={"city": "Мсква"})
+    assert response.status_code == 422
+
+
 # --- сквозной расчёт: разные города дают разные суммы ---
 
 def _payload(city: str, stores: list[str] | None = None) -> dict:

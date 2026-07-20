@@ -141,13 +141,21 @@ def get_price(
         if force_refresh or settings.PARSER_LIVE_FETCH:
             try:
                 # reference_package_size (#382) — справочная фасовка материала,
-                # парсеры кг/л-материалов отсеивают по ней нетиповую мелкую упаковку
-                # (см. app.parsers._stats.filter_undersized_packages).
+                # участвует в выборе товара-представителя (#395, select_representative)
+                # для любых материалов. Отсев нетиповой мелкой фасовки ДО статистики
+                # (filter_undersized_packages) включаем только для кг-материалов —
+                # именно на них проверено допущение «типовая закупка — мешками»
+                # (#382). У краски-премиум оно не подтвердилось: декоративная банка
+                # 0.9-1 л — легитимный формат, а не выброс, фильтр ложно её отсекал
+                # (#389). См. docs/price-sources.md.
                 reference_package_size = (
                     Decimal(str(material.package_size)) if material.package_size else None
                 )
+                apply_undersized_filter = material.unit == "кг"
                 parsed = parser.fetch_price(
-                    material_name, reference_package_size=reference_package_size
+                    material_name,
+                    reference_package_size=reference_package_size,
+                    apply_undersized_filter=apply_undersized_filter,
                 )
 
                 # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —

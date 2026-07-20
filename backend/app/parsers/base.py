@@ -69,7 +69,10 @@ class BaseParser(ABC):
 
     @abstractmethod
     def fetch_price(
-        self, material_name: str, reference_package_size: Decimal | None = None
+        self,
+        material_name: str,
+        reference_package_size: Decimal | None = None,
+        apply_undersized_filter: bool = True,
     ) -> ParsedPrice:
         '''
         Получить цену по названию материала
@@ -79,9 +82,18 @@ class BaseParser(ABC):
 
         material_name: название как в БД, например "Краска для стен"
         reference_package_size (#382): справочная Material.package_size вызывающего
-        материала — парсеры кг/л-материалов используют её, чтобы отсеять нетиповую
-        мелкую фасовку (см. app.parsers._stats.filter_undersized_packages) при выборе
-        цены/представителя категории. None (по умолчанию) — фильтр не применяется,
-        поведение как раньше; так остаются рабочими вызовы без этого аргумента.
+        материала — влияет на выбор товара-представителя категории (см.
+        app.parsers._stats.select_representative, #395): карточка с фасовкой ближе
+        к справочной весит больше при прочих равных. None (по умолчанию) —
+        фасовка не учитывается, поведение как раньше.
+        apply_undersized_filter (#382, сужено в #389): включает отсев карточек
+        мельче трети reference_package_size ДО статистики (см.
+        app.parsers._stats.filter_undersized_packages). Допущение «типовая закупка —
+        мешками/канистрами» проверено только для кг-материалов (шпаклёвка, плиточный
+        клей, затирка, #382) — у премиум-краски мелкая декоративная банка (0.9-1 л)
+        оказалась легитимным форматом, а не выбросом (#389). Вызывающая сторона
+        (price_aggregator_service) включает фильтр только для material.unit == "кг";
+        для остальных материалов reference_package_size всё равно передаётся и
+        участвует в select_representative, просто без отсева мелкой фасовки.
         '''
         ...

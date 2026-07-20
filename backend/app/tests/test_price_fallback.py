@@ -17,7 +17,9 @@ class _ZeroParser(BaseParser):
     """Имитирует VPN/блок-страницу: HTTP 200, но цена нулевая (исключения нет)."""
     source_name = "Мегастрой"
 
-    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size=None, apply_undersized_filter=True
+    ) -> ParsedPrice:
         return ParsedPrice(price_min=Decimal(0), price_avg=Decimal(0), price_max=Decimal(0))
 
 
@@ -25,7 +27,9 @@ class _RaisingParser(BaseParser):
     """Парсер падает (сеть недоступна и т.п.)."""
     source_name = "Мегастрой"
 
-    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size=None, apply_undersized_filter=True
+    ) -> ParsedPrice:
         raise RuntimeError("сеть недоступна")
 
 
@@ -36,7 +40,9 @@ class _RecordingParser(BaseParser):
     def __init__(self):
         self.called = False
 
-    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size=None, apply_undersized_filter=True
+    ) -> ParsedPrice:
         self.called = True
         return ParsedPrice(
             price_min=Decimal("200"), price_avg=Decimal("250"), price_max=Decimal("300")
@@ -109,11 +115,53 @@ def test_force_refresh_fetches_even_when_live_fetch_disabled(db_session, monkeyp
     assert _megastroy_price_row(db_session, "Краска для стен") is not None  # кэш записан
 
 
+class _UndersizedFilterFlagParser(BaseParser):
+    """Фиксирует, каким apply_undersized_filter её вызвал агрегатор (#389) —
+    без сети, только запись аргумента вызова."""
+    source_name = "Мегастрой"
+
+    def __init__(self):
+        self.apply_undersized_filter = None
+
+    def fetch_price(
+        self, material_name: str, reference_package_size=None, apply_undersized_filter=True
+    ) -> ParsedPrice:
+        self.apply_undersized_filter = apply_undersized_filter
+        return ParsedPrice(
+            price_min=Decimal("200"), price_avg=Decimal("250"), price_max=Decimal("300")
+        )
+
+
+@pytest.mark.usefixtures("setup_test_db")
+def test_undersized_filter_disabled_for_non_kg_material(db_session):
+    """Краска (unit="л") — отсев мелкой фасовки выключен (#389): допущение
+    "типовая закупка — мешками" на ней не проверено, декоративная банка —
+    легитимный формат, а не выброс."""
+    parser = _UndersizedFilterFlagParser()
+
+    get_price("Краска для стен", db=db_session, parser=parser, force_refresh=True)
+
+    assert parser.apply_undersized_filter is False
+
+
+@pytest.mark.usefixtures("setup_test_db")
+def test_undersized_filter_enabled_for_kg_material(db_session):
+    """Шпаклёвка (unit="кг") — отсев мелкой фасовки остаётся включённым (#382):
+    именно на кг-материалах допущение "типовая закупка — мешками" проверено."""
+    parser = _UndersizedFilterFlagParser()
+
+    get_price("Шпаклевка финишная", db=db_session, parser=parser, force_refresh=True)
+
+    assert parser.apply_undersized_filter is True
+
+
 class _PackageSizeParser(BaseParser):
     """Отдаёт валидную цену вместе с фасовкой конкретного товара (#306)."""
     source_name = "Мегастрой"
 
-    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size=None, apply_undersized_filter=True
+    ) -> ParsedPrice:
         return ParsedPrice(
             price_min=Decimal("200"), price_avg=Decimal("250"), price_max=Decimal("300"),
             source_url="https://kazan.megastroy.com/products/kraska-2.5l",

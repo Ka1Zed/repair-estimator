@@ -555,7 +555,10 @@ class MegastroyParser(BaseParser):
             return raw_items
 
     def fetch_price(
-        self, material_name: str, reference_package_size: Decimal | None = None
+        self,
+        material_name: str,
+        reference_package_size: Decimal | None = None,
+        apply_undersized_filter: bool = True,
     ) -> ParsedPrice:
         if material_name not in CATEGORY_MAP:
             raise ValueError(f"Нет категории Мегастроя для материала '{material_name}'")
@@ -606,13 +609,16 @@ class MegastroyParser(BaseParser):
             # Нетиповая (мелкая) фасовка отсекается ДО статистики (#382) — иначе
             # мелкая упаковка (её обычно больше по числу карточек) тянет price_avg
             # и товар-представитель к себе, хотя типовая закупка — мешками/канистрами.
+            # Допущение проверено только для кг-материалов — apply_undersized_filter
+            # выключает отсев там, где оно не подтверждено (например, краска, #389).
+            filter_reference = reference_package_size if apply_undersized_filter else None
             items = filter_undersized_packages(
-                items, key=lambda it: it[2], reference_package_size=reference_package_size
+                items, key=lambda it: it[2], reference_package_size=filter_reference
             )
-            if reference_package_size is not None and not items:
+            if filter_reference is not None and not items:
                 raise RuntimeError(
                     f"Все карточки '{material_name}' — нетиповая фасовка "
-                    f"(< 1/3 справочной {reference_package_size} кг/л) — "
+                    f"(< 1/3 справочной {filter_reference} кг/л) — "
                     "как парсер не смог, откат на seed"
                 )
         elif category.normalize_length_mm:

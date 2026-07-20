@@ -223,7 +223,9 @@ class _StubRegionalParser(BaseParser):
         self.covered_cities = covered_cities
         self._avg = Decimal(avg)
 
-    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size=None, apply_undersized_filter=True
+    ) -> ParsedPrice:
         return ParsedPrice(
             price_min=self._avg - 20,
             price_avg=self._avg,

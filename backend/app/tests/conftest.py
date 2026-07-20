@@ -373,7 +373,9 @@ class _StubMaterialParser(BaseParser):
     def __init__(self, fetch=None):
         self._fetch = fetch
 
-    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size=None, apply_undersized_filter=True
+    ) -> ParsedPrice:
         if self._fetch is None:
             raise RuntimeError("парсер материалов отключён в тестах (#174)")
         return self._fetch(material_name)

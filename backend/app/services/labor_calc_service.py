@@ -41,9 +41,22 @@ S_CABLE_LAY     = "cable_lay"
 S_SOCKET_MOUNT  = "socket_mount"
 S_LIGHT_MOUNT   = "light_mount"
 S_PIPE_MOUNT    = "pipe_mount"
-S_PLUMBING      = "plumbing_works"
+# Установка приборов сантехники разбита по типу (#401): бачок/смеситель/унитаз
+# отличаются по цене в 2-3 раза — одна услуга "plumbing_works" искажала вилку.
+# works.plumbing.points — агрегатный счётчик без разбивки по прибору (контракт
+# docs/api.md не меняем в этой задаче, фронт не трогаем), поэтому берём одну
+# услугу-представителя: смеситель — самая универсальная "точка" (есть в любой
+# мокрой зоне), середина по цене между бачком и полноценным унитазом. Полная
+# дифференциация по прибору — follow-up, требует расширения works.plumbing до
+# per-fixture счётчиков.
+S_PLUMBING      = "install_faucet"
 # Черновые работы (#190) — добавляются только при scope=rough_and_finish.
-S_DEMOLITION    = "demolition"
+# Демонтаж разбит по типу операции (#401: пол/стены/стяжка — разный порядок цен).
+# Для безусловной строки "старая отделка под замену" (calculate_rough_labor)
+# берём demolition_floor_covering — единственная демонтажная операция, которая
+# гарантированно актуальна в ЛЮБОЙ комнате вне зависимости от scope; демонтаж
+# стен/стяжки уже покрыт соседними гейтнутыми строками level_walls/screed_floor.
+S_DEMOLITION    = "demolition_floor_covering"
 S_LEVEL_WALLS   = "level_walls"
 S_SCREED_FLOOR  = "screed_floor"
 S_WATERPROOF    = "waterproof"
@@ -317,11 +330,11 @@ def calculate_engineering_labor(
     Маппинг поле → операция (источник правды docs/estimation-rules.md):
         cable_m → Прокладка кабеля, sockets → Монтаж розетки,
         lights → Монтаж светильника, pipe_m → Монтаж труб,
-        plumbing.points → Сантехнические работы (подключение приборов).
+        plumbing.points → Установка смесителя (подключение приборов, #401).
 
     include_finish: False при scope=rough_only (#303) — оставляет только разводку
         (cable_lay/pipe_mount, stage="rough", не гейтится scope и без этого флага),
-        убирает монтаж приборов (socket_mount/light_mount/plumbing_works, stage="finish").
+        убирает монтаж приборов (socket_mount/light_mount/install_faucet, stage="finish").
     """
     selections = [
         (S_CABLE_LAY, cable_m),

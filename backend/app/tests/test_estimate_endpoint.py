@@ -483,11 +483,11 @@ def test_full_workset_has_electric_and_plumbing():
     assert labor["Прокладка кабеля"]["unit"] == "м"
 
     # Сантехника bathroom по дефолту: 3 точки → труба 3*3 = 9 м.
-    assert labor["Сантехнические работы"]["volume"] == pytest.approx(3.0)
-    assert labor["Сантехнические работы"]["unit"] == "точка"
+    assert labor["Установка смесителя"]["volume"] == pytest.approx(3.0)
+    assert labor["Установка смесителя"]["unit"] == "точка"
     assert labor["Монтаж труб"]["volume"] == pytest.approx(9.0)
 
-    for name in ("Монтаж розетки", "Прокладка кабеля", "Сантехнические работы", "Монтаж труб"):
+    for name in ("Монтаж розетки", "Прокладка кабеля", "Установка смесителя", "Монтаж труб"):
         assert labor[name]["total_avg"] > 0
 
     # Материалы инженерки: розетки/светильники штучно, кабель/труба с запасом.
@@ -585,7 +585,7 @@ def test_explicit_zero_disables_default():
     assert response.status_code == 200
     services = {x["service"] for x in response.json()["labor"]}
     # Явный 0 → сантехнических работ и монтажа труб нет.
-    assert "Сантехнические работы" not in services
+    assert "Установка смесителя" not in services
     assert "Монтаж труб" not in services
 
 
@@ -611,7 +611,7 @@ def test_plumbing_enabled_adds_plumbing_rows():
     response = client.post("/api/estimates/calculate", json=payload)
     assert response.status_code == 200
     services = {x["service"] for x in response.json()["labor"]}
-    assert "Сантехнические работы" in services
+    assert "Установка смесителя" in services
 
 
 def test_plinth_subtracts_door_width():
@@ -680,7 +680,7 @@ def test_finish_only_is_default_and_labeled():
     assert data["scope"] == "finish_only"
 
     services = {x["service"] for x in data["labor"]}
-    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+    for rough in ("Демонтаж напольного покрытия", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
         assert rough not in services
     # У каждой строки работ есть стадия.
     assert all("stage" in lab for lab in data["labor"])
@@ -702,11 +702,11 @@ def test_finish_only_keeps_engineering_wiring():
         assert labor[wiring]["stage"] == "rough"
         assert labor[wiring]["total_avg"] > 0
 
-    for fixture in ("Монтаж розетки", "Монтаж светильника", "Сантехнические работы"):
+    for fixture in ("Монтаж розетки", "Монтаж светильника", "Установка смесителя"):
         assert fixture in labor, f"монтаж приборов «{fixture}» должен остаться в finish_only"
         assert labor[fixture]["stage"] == "finish"
 
-    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+    for rough in ("Демонтаж напольного покрытия", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
         assert rough not in labor, f"черновая работа «{rough}» не должна попасть в finish_only"
 
 
@@ -719,7 +719,7 @@ def test_rough_scope_adds_rough_works():
     assert data["scope"] == "rough_and_finish"
 
     labor = {x["service"]: x for x in data["labor"]}
-    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+    for rough in ("Демонтаж напольного покрытия", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
         assert rough in labor, f"нет черновой работы «{rough}»"
         assert labor[rough]["stage"] == "rough"
         assert labor[rough]["total_avg"] > 0
@@ -751,7 +751,7 @@ def test_rough_only_excludes_finish_labor():
     assert data["scope"] == "rough_only"
 
     labor = {x["service"]: x for x in data["labor"]}
-    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Грунтование",
+    for rough in ("Демонтаж напольного покрытия", "Выравнивание стен", "Стяжка пола", "Грунтование",
                   "Прокладка кабеля"):
         assert rough in labor, f"нет черновой работы «{rough}»"
         assert labor[rough]["stage"] == "rough"
@@ -911,7 +911,7 @@ def test_hidden_works_block_present_and_not_in_summary():
     services = {x["service"] for x in hidden["items"]}
     # Жилая комната с отделкой пола/стен и электрикой: демонтаж всегда, плюс стяжка,
     # выравнивание стен, штробы под кабель. Гидроизоляции в сухой комнате нет.
-    assert {"Демонтаж", "Стяжка пола", "Выравнивание стен", "Штробление"} <= services
+    assert {"Демонтаж напольного покрытия", "Стяжка пола", "Выравнивание стен", "Штробление"} <= services
     assert "Гидроизоляция" not in services
     assert hidden["total_avg"] > 0
 

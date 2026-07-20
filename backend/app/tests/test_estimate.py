@@ -366,7 +366,7 @@ class TestLaborCalc:
         returned_services = {item['service'] for item in labor}
         assert expected_services.issubset(returned_services)
         assert 'Электромонтаж' not in returned_services
-        assert 'Сантехнические работы' not in returned_services
+        assert 'Установка смесителя' not in returned_services
 
         painter_walls = next(item for item in labor if item['service'] == 'Покраска стен')
         assert painter_walls['volume'] == Decimal('34.1')
@@ -494,13 +494,14 @@ class TestRoughLabor:
         )
         by_service = {item['service']: item for item in rough}
 
-        expected = {'Демонтаж', 'Выравнивание стен', 'Стяжка пола', 'Гидроизоляция', 'Грунтование'}
+        expected = {'Демонтаж напольного покрытия', 'Выравнивание стен', 'Стяжка пола',
+                    'Гидроизоляция', 'Грунтование'}
         assert expected.issubset(set(by_service))
         # Все черновые строки помечены стадией rough.
         assert all(item['stage'] == 'rough' for item in rough)
 
         # Жёсткие связки по объёму: демонтаж/стяжка/гидроизоляция — по полу, выравнивание — по стенам.
-        assert by_service['Демонтаж']['volume'] == Decimal('12.0')
+        assert by_service['Демонтаж напольного покрытия']['volume'] == Decimal('12.0')
         assert by_service['Стяжка пола']['volume'] == Decimal('12.0')
         assert by_service['Гидроизоляция']['volume'] == Decimal('12.0')
         assert by_service['Выравнивание стен']['volume'] == Decimal('34.1')
@@ -512,7 +513,7 @@ class TestRoughLabor:
         )
         services = {item['service'] for item in rough}
         assert 'Гидроизоляция' not in services
-        assert {'Демонтаж', 'Выравнивание стен', 'Стяжка пола'}.issubset(services)
+        assert {'Демонтаж напольного покрытия', 'Выравнивание стен', 'Стяжка пола'}.issubset(services)
 
     def test_dry_room_with_tile_floor_skips_waterproof(self, db_session):
         """Плитка на полу в сухой комнате гидроизоляцию не тянет — только мокрая зона."""
@@ -561,7 +562,7 @@ class TestEngineeringCalc:
         assert by_service['Монтаж светильника']['volume'] == Decimal('2')
         assert by_service['Прокладка кабеля']['volume'] == Decimal('48')
         assert by_service['Прокладка кабеля']['unit'] == 'м'
-        assert by_service['Сантехнические работы']['volume'] == Decimal('3')
+        assert by_service['Установка смесителя']['volume'] == Decimal('3')
         assert by_service['Монтаж труб']['volume'] == Decimal('9')
 
     def test_engineering_materials_units_and_waste(self, db_session):

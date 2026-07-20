@@ -24,7 +24,7 @@ ELECTRIC_PLUMBING_SERVICES = {
     "Монтаж розетки": "шт",
     "Монтаж светильника": "шт",
     "Монтаж труб": "м",
-    "Сантехнические работы": "точка",
+    "Установка смесителя": "точка",
 }
 
 
@@ -106,8 +106,4 @@ def test_electric_plumbing_prices_cover_all_regions():
         assert material_regions.get(name, set()) == REGIONS, f"не все регионы у «{name}»"
     for name in ELECTRIC_PLUMBING_SERVICES:
         regions = labor_regions.get(name, set())
-        if name == "Сантехнические работы":
-            # старая позиция недели 1, заведена только с базовой ценой
-            assert None in regions, f"нет базовой seed-цены у «{name}»"
-        else:
-            assert regions == REGIONS, f"не все регионы у «{name}»"
+        assert regions == REGIONS, f"не все регионы у «{name}»"

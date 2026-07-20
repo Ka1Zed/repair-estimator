@@ -274,14 +274,20 @@ def seed_test_data(session):
         {"name": "Отделка откосов", "slug": "otkos", "specialist_type": "Штукатур", "unit": "м²"},
         {"name": "Электромонтаж", "slug": "electrical_install", "specialist_type": "Электрик", "unit": "точка"},
         {"name": "Штробление", "slug": "chasing", "specialist_type": "Электрик", "unit": "м"},
-        {"name": "Сантехнические работы", "slug": "plumbing_works", "specialist_type": "Сантехник", "unit": "точка"},
+        # Сантехника (#401): установка по типу прибора вместо одной широкой услуги.
+        {"name": "Установка смесителя", "slug": "install_faucet", "specialist_type": "Сантехник", "unit": "точка"},
+        {"name": "Установка унитаза", "slug": "install_toilet", "specialist_type": "Сантехник", "unit": "точка"},
+        {"name": "Установка бачка унитаза", "slug": "install_toilet_tank", "specialist_type": "Сантехник", "unit": "точка"},
         # Гранулярная инженерка works (#222).
         {"name": "Прокладка кабеля", "slug": "cable_lay", "specialist_type": "Электрик", "unit": "м"},
         {"name": "Монтаж розетки", "slug": "socket_mount", "specialist_type": "Электрик", "unit": "шт"},
         {"name": "Монтаж светильника", "slug": "light_mount", "specialist_type": "Электрик", "unit": "шт"},
         {"name": "Монтаж труб", "slug": "pipe_mount", "specialist_type": "Сантехник", "unit": "м"},
-        # Черновые работы (#190).
-        {"name": "Демонтаж", "slug": "demolition", "specialist_type": "Разнорабочий", "unit": "м²"},
+        # Черновые работы (#190). Демонтаж (#401) — по типу операции вместо одной
+        # услуги на м² вперемешку с лёгким и капитальным демонтажом.
+        {"name": "Демонтаж напольного покрытия", "slug": "demolition_floor_covering", "specialist_type": "Разнорабочий", "unit": "м²"},
+        {"name": "Демонтаж стен и перегородок", "slug": "demolition_walls", "specialist_type": "Разнорабочий", "unit": "м²"},
+        {"name": "Демонтаж стяжки", "slug": "demolition_screed", "specialist_type": "Разнорабочий", "unit": "м²"},
         {"name": "Выравнивание стен", "slug": "level_walls", "specialist_type": "Штукатур", "unit": "м²"},
         {"name": "Стяжка пола", "slug": "screed_floor", "specialist_type": "Стяжечник", "unit": "м²"},
         {"name": "Гидроизоляция", "slug": "waterproof", "specialist_type": "Гидроизолировщик", "unit": "м²"},

@@ -30,7 +30,10 @@ NOTE = (
 
 # Slug операций (как в seed_data/labor_services.json, поле slug) — цену берём
 # по ним, name — только человекочитаемый label для API-ответа (#278).
-_S_DEMOLITION = "demolition"
+# Демонтаж разбит по типу операции (#401) — берём demolition_floor_covering как
+# единственную подуслугу, актуальную в любой комнате (см. labor_calc_service.py,
+# тот же выбор для симметричной строки в calculate_rough_labor).
+_S_DEMOLITION = "demolition_floor_covering"
 _S_SCREED = "screed_floor"
 _S_LEVEL_WALLS = "level_walls"
 _S_CHASING = "chasing"

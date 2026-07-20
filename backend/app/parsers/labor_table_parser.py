@@ -126,14 +126,12 @@ LABOR_SERVICE_MAP = {
     },
 }
 
-# Единицы, которые сайты пишут по-разному, но означают одно и то же с точки зрения
-# отбора строк прайса. "точка" — наша каталожная единица для электрики/сантехники
-# (docs/estimation-rules.md), но ни один прайс не пишет буквально "точка" — сайты
-# считают такие позиции штучно ("шт"), поэтому группируем их вместе (#391).
-_UNIT_GROUPS = {
-    "шт": {"шт", "точка"},
-    "точка": {"шт", "точка"},
-}
+# Группы единиц, которые сайты пишут по-разному, но означают одно и то же с точки
+# зрения отбора строк прайса. "точка" — наша каталожная единица для электрики/
+# сантехники (docs/estimation-rules.md), но ни один прайс не пишет буквально
+# "точка" — сайты считают такие позиции штучно ("шт"), поэтому группируем их
+# вместе (#391).
+_UNIT_EQUIVALENT_GROUPS = [{"шт", "точка"}]
 
 
 def _unit_matches(row_unit: str | None, expected_unit: str) -> bool:
@@ -143,7 +141,9 @@ def _unit_matches(row_unit: str | None, expected_unit: str) -> bool:
         return True
     if row_unit == expected_unit:
         return True
-    return row_unit in _UNIT_GROUPS.get(expected_unit, set())
+    return any(
+        row_unit in group and expected_unit in group for group in _UNIT_EQUIVALENT_GROUPS
+    )
 
 
 # Единицу "м3"/"куб.м" намеренно не сводим к "м²" — объёмная работа (демонтаж
@@ -154,7 +154,7 @@ _UNIT_PATTERNS = [
     (re.compile(r"пог\.?\s?м|п\.?\s?м\.?|м\s*/\s*п|мп\b|м\.п", re.I), "м"),
     (re.compile(r"компл", re.I), "шт"),
     (re.compile(r"\bшт\b", re.I), "шт"),
-    (re.compile(r"точ", re.I), "точка"),
+    (re.compile(r"\bточ", re.I), "точка"),
 ]
 
 

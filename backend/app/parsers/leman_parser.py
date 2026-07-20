@@ -12,7 +12,12 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.parsers import leman_browser
-from app.parsers._stats import filter_outliers, filter_undersized_packages, price_band_slice
+from app.parsers._stats import (
+    filter_outliers,
+    filter_undersized_packages,
+    price_band_slice,
+    select_representative,
+)
 from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
@@ -573,7 +578,11 @@ class LemanParser(BaseParser):
 
         # package_size берём у ТОГО ЖЕ товара-представителя (#306) — иначе
         # фасовка в смете и фасовка на странице source_url могут не совпадать.
-        representative = min(items, key=lambda it: abs(it[0] - price_avg))
+        # Выбор представителя учитывает и фасовку, а не только цену (#395) —
+        # см. select_representative.
+        representative = select_representative(
+            items, price_avg, reference_package_size, price_key=lambda it: it[0], package_key=lambda it: it[3]
+        )
         source_url = representative[1] or base_urls[0]
         package_size = representative[3]
 

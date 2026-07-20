@@ -16,7 +16,9 @@ from app.parsers._stats import filter_outliers
 from app.parsers.labor_table_parser import (
     LABOR_SERVICE_MAP,
     _matches,
+    _normalize_unit,
     _parse_price,
+    _unit_matches,
 )
 from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
 from app.parsers.prorabneva_parser import ProrabnevaParser
@@ -395,6 +397,95 @@ def test_labor_single_site_reports_one_source(db_session):
     finally:
         db_session.delete(row)
         db_session.commit()
+
+
+# --- контекстный матчинг: единица измерения и отсев дельт (#391) ---
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("м2", "м²"), ("м 2", "м²"), ("кв.м.", "м²"), ("м²", "м²"),
+        ("м3", "м³"), ("куб.м", "м³"),
+        ("п.м.", "м"), ("пог.м.", "м"), ("мп", "м"), ("м/п", "м"), ("м", "м"),
+        ("шт", "шт"), ("шт.", "шт"), ("компл", "шт"),
+        ("точка", "точка"),
+        ("Покраска стен", None), ("", None),
+    ],
+)
+def test_normalize_unit(text, expected):
+    assert _normalize_unit(text) == expected
+
+
+@pytest.mark.parametrize(
+    "row_unit,expected_unit,expected_match",
+    [
+        (None, "м²", True),     # единицу не распознали -> не отсеиваем (подстраховка)
+        ("м²", "м²", True),
+        ("м³", "м²", False),    # объём не сопоставим с площадью (#391)
+        ("шт", "точка", True),  # сайты пишут "шт" там, где у нас каталожная "точка"
+        ("точка", "шт", True),
+        ("м", "м²", False),
+    ],
+)
+def test_unit_matches(row_unit, expected_unit, expected_match):
+    assert _unit_matches(row_unit, expected_unit) is expected_match
+
+
+def test_matches_rejects_addon_surcharge_rows():
+    '''«... (дополнительно к стоимости ...)» — доплата к другой строке прайса,
+    а не цена самостоятельной операции (prorabneva.ru, #391).'''
+    rule = LABOR_SERVICE_MAP["Укладка плитки"]
+    assert not _matches(
+        "облицовка стен кафельной плиткой по диагонали (дополнительно к стоимости "
+        "облицовки кафельной плитки одного рисунка)", rule,
+    )
+    assert _matches("облицовка стен каф.плиткой", rule)
+
+
+def test_wall_leveling_excludes_removal_row():
+    '''«Выравнивание стен» — нанесение/выравнивание, а не снятие старой штукатурки
+    (otdelka-spb.ru: «отбивка штукатурки со стен», #391).'''
+    rule = LABOR_SERVICE_MAP["Выравнивание стен"]
+    assert not _matches("отбивка штукатурки со стен", rule)
+    assert _matches("штукатурка стен по маякам", rule)
+
+
+def test_electrical_install_excludes_switchboard_row():
+    '''«Электромонтаж» — розетка/выключатель «за точку», а не монтаж/установка
+    электрощита (otdelka-spb.ru, #391): старое слово "электрощит" не матчилось
+    реальной формулировке "электрического щита".'''
+    rule = LABOR_SERVICE_MAP["Электромонтаж"]
+    assert not _matches(
+        "установка электрического щита под электроавтоматы на 24 модулей врезка в бетон",
+        rule,
+    )
+    assert _matches("установка розетки", rule)
+
+
+def test_priming_excludes_bundled_waterproofing_row():
+    '''«Грунтование» — не составная строка с чужой услугой: для гидроизоляции есть
+    отдельная услуга «Гидроизоляция» (otdelka-spb.ru, #391).'''
+    rule = LABOR_SERVICE_MAP["Грунтование"]
+    assert not _matches("устройство гидроизоляции пола/грунтовка пола/обеспыливание", rule)
+    assert _matches("грунтовка стен", rule)
+
+
+def test_demolition_excludes_per_item_and_volume_rows_on_fixture():
+    '''«Демонтаж» — услуга за м²; штучные (шт) и объёмные (м³) строки прайса не
+    сопоставимы по цене с площадью и не должны попадать в вилку (#391). На фикстуре
+    без фильтра по единице price_max доходил до 8500 ₽ («разборка монолитных
+    бетонных конструкций», м³) — заведомо не то же самое, что демонтаж линолеума.'''
+    parser = _parser_on_fixture(GarantStroiParser, "garantstroikompleks.html")
+    parsed = parser.fetch_price("Демонтаж")
+    assert parsed.price_max < Decimal(8500)
+
+
+def test_electrical_install_narrows_spread_on_fixture():
+    '''На otdelka-spb.ru «Электромонтаж» без фильтра включал ~20 строк монтажа
+    электрощита (400-8500 ₽) — вилка сужается после их исключения (#391).'''
+    parser = _parser_on_fixture(OtdelkaSpbParser, "otdelka-spb.html")
+    parsed = parser.fetch_price("Электромонтаж")
+    assert parsed.price_max < Decimal(2000)
 
 
 class TestRoughWorksRouting:

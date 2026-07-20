@@ -73,14 +73,15 @@ def select_representative(
     отклонения цены от price_avg и package_size от reference_package_size —
     карточка с "нетипичной" фасовкой, но чуть более близкой ценой, больше не
     выигрывает автоматически. reference_package_size или package_size
-    конкретной карточки неизвестны (None) — вклад фасовки в скор = 0 (нечего
+    конкретной карточки неизвестны (None) либо reference_package_size <= 0
+    (как и в filter_undersized_packages) — вклад фасовки в скор = 0 (нечего
     сравнивать, откатываемся к чистой цене, как и раньше).
     """
     def score(item) -> Decimal:
         price = price_key(item)
         price_dist = abs(price - price_avg) / price_avg if price_avg else Decimal(0)
         package_size = package_key(item)
-        if reference_package_size and package_size:
+        if reference_package_size is not None and reference_package_size > 0 and package_size is not None:
             package_dist = abs(package_size - reference_package_size) / reference_package_size
         else:
             package_dist = Decimal(0)

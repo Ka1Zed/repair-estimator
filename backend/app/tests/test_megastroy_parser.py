@@ -290,6 +290,30 @@ def test_price_band_slice_takes_low_and_high_terciles():
     assert price_band_slice(small, "low", key=lambda it: it[0]) == small
 
 
+def test_price_band_representative_prefers_reference_package_size_on_price_tie(monkeypatch):
+    # #395: внутри уже отрезанной эконом-терции цены двух карточек (95 и 105
+    # ₽/л) равноудалены от avg=100 — раньше побеждала первая по порядку сортировки
+    # (5 л), теперь должна побеждать карточка с фасовкой (10 л), совпадающей со
+    # справочной Material.package_size этого tier-варианта.
+    html = _page(
+        _item("475", "/catalog/x/eco-5l", title="Краска Economy 5 л"),
+        _item("1050", "/catalog/x/eco-10l", title="Краска Economy 10 л"),
+        _item("2000", "/catalog/x/mid-a", title="Краска Mid A 5 л"),
+        _item("2200", "/catalog/x/mid-b", title="Краска Mid B 5 л"),
+        _item("2400", "/catalog/x/mid-c", title="Краска Mid C 5 л"),
+        _item("2600", "/catalog/x/mid-d", title="Краска Mid D 5 л"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price(
+        "Краска для стен эконом", reference_package_size=Decimal("10")
+    )
+
+    assert parsed.price_avg == Decimal("100")
+    assert "eco-10l" in parsed.source_url
+    assert parsed.package_size == Decimal("10")
+
+
 def test_fetch_price_economy_and_premium_return_different_products(monkeypatch):
     """#331: 'Ламинат эконом'/'Ламинат премиум' берут нижнюю/верхнюю треть цен той
     же категории — разные товары (source_url), а не только разная цена."""

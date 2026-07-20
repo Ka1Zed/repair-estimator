@@ -334,7 +334,7 @@ def calculate_engineering_labor(
 
     include_finish: False при scope=rough_only (#303) — оставляет только разводку
         (cable_lay/pipe_mount, stage="rough", не гейтится scope и без этого флага),
-        убирает монтаж приборов (socket_mount/light_mount/plumbing_works, stage="finish").
+        убирает монтаж приборов (socket_mount/light_mount/install_faucet, stage="finish").
     """
     selections = [
         (S_CABLE_LAY, cable_m),

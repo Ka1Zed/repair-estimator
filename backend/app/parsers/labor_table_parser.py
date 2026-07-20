@@ -22,6 +22,9 @@ MIN_PRICE = Decimal(10)
 #   include_all — все эти слова должны встретиться в названии
 #   include_any — хотя бы одно из этих (если список не пуст)
 #   exclude     — ни одного из этих не должно быть
+#   unit        — каталожная единица услуги (LaborService.unit, см.
+#                 db/seed_data/labor_services.json); строка прайса без совпадающей
+#                 единицы отсекается (см. _normalize_unit/_unit_matches, #391)
 # Единый словарь правил для всех парсеров работ (в т.ч. RembrigadaParser) —
 # чтобы карты не расходились. Расширен под вёрстку московского, питерского и
 # казанского прайсов (напр. «Настил ламината», «шпатлёвка» с ё, «шпаклевание»).
@@ -33,6 +36,7 @@ LABOR_SERVICE_MAP = {
                     "колонн", "металлоконструк", "шпатлевка", "шпаклевка", "шпатлёвка",
                     "ошкуривание", "шлифовк", "грунтовк", "радиатор", "галтел",
                     "обоями", "оклейк"],
+        "unit": "м²",
     },
     "Покраска потолка": {
         "include_all": ["потолк"],
@@ -40,6 +44,7 @@ LABOR_SERVICE_MAP = {
         "exclude": ["демонтаж", "очистк", "багет", "плинтус", "распылител",
                     "шпатлевка", "шпаклевка", "шпатлёвка", "ошкуривание", "шлифовк",
                     "грунтовк", "плитк", "галтел"],
+        "unit": "м²",
     },
     "Шпаклевка стен": {
         "include_all": ["стен"],
@@ -47,33 +52,40 @@ LABOR_SERVICE_MAP = {
         "include_any": ["шпатлевка", "шпаклевка", "шпатлёвка", "шпаклеван", "шпатлеван"],
         "exclude": ["демонтаж", "очистк", "откос", "короб", "потолк", "галтел",
                     "армирован"],
+        "unit": "м²",
     },
     "Укладка ламината": {
         "include_all": ["ламинат"],
         "include_any": ["укладк", "настил"],
         "exclude": ["разборк", "демонтаж"],
+        "unit": "м²",
     },
     "Укладка плитки": {
         "include_all": ["плитк"],
         "include_any": ["облицовк", "укладк"],
         "exclude": ["демонтаж", "расчистк", "затирк", "рез", "уголк", "очистк",
                     "потолочн", "потолк", "сбивк", "фартук", "короб"],
+        "unit": "м²",
     },
     "Электромонтаж": {
         "include_all": [],
         "include_any": ["розетк", "выключател", "электр"],
         # Услуга считается «за точку» (docs/estimation-rules.md) — исключаем
         # крупные работы не про точки: щиты, котлы, зарядные станции и т.п.
+        # "щит" (не "электрощит") — реальная формулировка на сайтах «электрического
+        # щита», «электрощита» не встречается как цельное слово (#391).
         "exclude": ["демонтаж", "домофон", "звонок", "теплого пола", "сверление",
-                    "водогре", "водонагрева", "конвектор", "электрощит", "котл",
+                    "водогре", "водонагрева", "конвектор", "щит", "котл",
                     "электромобил",
                     "генератор", "расходомер", "гидромассаж", "кондиционер",
                     "сплит"],
+        "unit": "точка",
     },
     "Сантехнические работы": {
         "include_all": [],
         "include_any": ["смесител", "унитаз", "установка бачк"],
         "exclude": ["демонтаж", "демонтах"],
+        "unit": "точка",
     },
     # Черновые работы (#190): раньше эти строки выкидывались exclude-списками
     # финишных услуг подчистую. Теперь роутим их в отдельные услуги, чтобы
@@ -82,29 +94,84 @@ LABOR_SERVICE_MAP = {
         "include_all": [],
         "include_any": ["демонтаж", "демонтах", "разборк", "снос"],
         "exclude": [],
+        "unit": "м²",
     },
     "Выравнивание стен": {
         "include_all": ["стен"],
-        # штукатурка/выравнивание стен под финиш; не декоративка и не откосы
+        # штукатурка/выравнивание стен под финиш; не декоративка, не откосы и не
+        # снятие старой штукатурки («отбивка» — демонтажная операция, не финиш, #391)
         "include_any": ["выравниван", "штукатур"],
-        "exclude": ["демонтаж", "потолк", "откос", "декоратив"],
+        "exclude": ["демонтаж", "потолк", "откос", "декоратив", "отбивк"],
+        "unit": "м²",
     },
     "Стяжка пола": {
         "include_all": [],
         "include_any": ["стяжк", "наливн пол", "выравнивание пол"],
         "exclude": ["демонтаж"],
+        "unit": "м²",
     },
     "Гидроизоляция": {
         "include_all": [],
         "include_any": ["гидроизол"],
         "exclude": ["демонтаж"],
+        "unit": "м²",
     },
     "Грунтование": {
         "include_all": [],
         "include_any": ["грунтован", "грунтовк"],
-        "exclude": ["демонтаж", "потолк"],
+        # "гидроизол" — комбинированная строка с чужой услугой (у гидроизоляции
+        # своя услуга «Гидроизоляция»), не грунтовка (#391).
+        "exclude": ["демонтаж", "потолк", "гидроизол"],
+        "unit": "м²",
     },
 }
+
+# Группы единиц, которые сайты пишут по-разному, но означают одно и то же с точки
+# зрения отбора строк прайса. "точка" — наша каталожная единица для электрики/
+# сантехники (docs/estimation-rules.md), но ни один прайс не пишет буквально
+# "точка" — сайты считают такие позиции штучно ("шт"), поэтому группируем их
+# вместе (#391).
+_UNIT_EQUIVALENT_GROUPS = [{"шт", "точка"}]
+
+
+def _unit_matches(row_unit: str | None, expected_unit: str) -> bool:
+    # Единицу строки не распознали — не отсеиваем (подстраховка на случай вёрстки
+    # без чистой ячейки-единицы измерения, старое поведение).
+    if row_unit is None:
+        return True
+    if row_unit == expected_unit:
+        return True
+    return any(
+        row_unit in group and expected_unit in group for group in _UNIT_EQUIVALENT_GROUPS
+    )
+
+
+# Единицу "м3"/"куб.м" намеренно не сводим к "м²" — объёмная работа (демонтаж
+# монолитных конструкций и т.п.) не сопоставима по цене с квадратным метром (#391).
+_UNIT_PATTERNS = [
+    (re.compile(r"куб\.?\s?м|м\s*3\b|м³", re.I), "м³"),
+    (re.compile(r"кв\.?\s?м|м\s*2\b|m2|м\s*²|м²", re.I), "м²"),
+    (re.compile(r"пог\.?\s?м|п\.?\s?м\.?|м\s*/\s*п|мп\b|м\.п", re.I), "м"),
+    (re.compile(r"компл", re.I), "шт"),
+    (re.compile(r"\bшт\b", re.I), "шт"),
+    (re.compile(r"\bточ", re.I), "точка"),
+]
+
+
+def _normalize_unit(text: str) -> str | None:
+    '''Сводит сырую ячейку единицы измерения ("кв.м.", "м2", "п.м.", "шт" и т.п.)
+    к одной из каталожных единиц (docs: labor_services.json). Нераспознанный текст
+    (например, само название работы) -> None.'''
+    stripped = text.strip()
+    if not stripped:
+        return None
+    for pattern, normalized in _UNIT_PATTERNS:
+        if pattern.search(stripped):
+            return normalized
+    # Голое "м" (без "2"/"3"/приставок) — линейный метр (напр. штробление, кабель).
+    if re.fullmatch(r"м\.?", stripped, re.I):
+        return "м"
+    return None
 
 
 def _parse_price(text: str) -> Decimal | None:
@@ -120,6 +187,11 @@ def _parse_price(text: str) -> Decimal | None:
 
 
 def _matches(name: str, rule: dict) -> bool:
+    # "дополнительно" — доплата/дельта к другой строке прайса (напр. "укладка по
+    # диагонали, дополнительно к стоимости..."), а не цена самостоятельной операции.
+    # Отсекаем глобально, до правил конкретной услуги (#391).
+    if "дополнительно" in name:
+        return False
     if any(w in name for w in rule["exclude"]):
         return False
     if rule["include_all"] and not all(w in name for w in rule["include_all"]):
@@ -167,7 +239,7 @@ class LaborTableParser(BaseParser):
         resp.raise_for_status()
         return resp.text
 
-    def _load_rows(self) -> list[tuple[str, Decimal, str]]:
+    def _load_rows(self) -> list[tuple[str, Decimal, str, str | None]]:
         if self._rows_cache is not None:
             return self._rows_cache
         rows = []
@@ -184,19 +256,30 @@ class LaborTableParser(BaseParser):
                 cells = [td.get_text(" ", strip=True) for td in tr.select("td")]
                 if len(cells) < 2:
                     continue
-                name = next((c for c in cells if re.search(r"[А-Яа-яA-Za-z]", c)), None)
-                if not name:
+                name_idx = next(
+                    (i for i, c in enumerate(cells) if re.search(r"[А-Яа-яA-Za-z]", c)), None
+                )
+                if name_idx is None:
                     continue
                 # Цена — последняя ячейка с числом >= MIN_PRICE (последней может
                 # быть единица измерения «м2» -> 2, её пропускаем).
-                price = None
-                for cell in reversed(cells):
-                    value = _parse_price(cell)
+                price_idx, price = None, None
+                for i in range(len(cells) - 1, -1, -1):
+                    value = _parse_price(cells[i])
                     if value is not None and value >= MIN_PRICE:
-                        price = value
+                        price_idx, price = i, value
                         break
-                if price:
-                    rows.append((self._clean_name(name.lower()), price, url))
+                if not price:
+                    continue
+                # Единица — первая из оставшихся ячеек (не имя, не цена), которую
+                # удалось распознать (#391); не нашли -> None, старое поведение.
+                unit = next(
+                    (u for i, c in enumerate(cells)
+                     if i not in (name_idx, price_idx)
+                     and (u := _normalize_unit(c)) is not None),
+                    None,
+                )
+                rows.append((self._clean_name(cells[name_idx].lower()), price, url, unit))
         self._rows_cache = rows
         return rows
 
@@ -207,7 +290,10 @@ class LaborTableParser(BaseParser):
         rule = LABOR_SERVICE_MAP[material_name]
         rows = self._load_rows()
 
-        matched = [(price, url) for (name, price, url) in rows if _matches(name, rule)]
+        matched = [
+            (price, url) for (name, price, url, unit) in rows
+            if _matches(name, rule) and _unit_matches(unit, rule["unit"])
+        ]
 
         if not matched:
             raise RuntimeError(f"Не найдено строк прайса для '{material_name}'")

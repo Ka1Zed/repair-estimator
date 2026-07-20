@@ -7,7 +7,13 @@ from bs4 import BeautifulSoup
 
 from app.parsers.base import BaseParser, ParsedPrice, DEFAULT_HEADERS, DEFAULT_REQUEST_TIMEOUT
 from app.parsers._stats import filter_outliers
-from app.parsers.labor_table_parser import LABOR_SERVICE_MAP, _matches, _parse_price
+from app.parsers.labor_table_parser import (
+    LABOR_SERVICE_MAP,
+    _matches,
+    _normalize_unit,
+    _parse_price,
+    _unit_matches,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +37,7 @@ class RembrigadaParser(BaseParser):
     def __init__(self):
         self._rows_cache = None  # таблицу качаем один раз на все услуги
 
-    def _load_rows(self) -> list[tuple[str, Decimal]]:
+    def _load_rows(self) -> list[tuple[str, Decimal, str | None]]:
         if self._rows_cache is not None:
             return self._rows_cache
         resp = requests.get(PRICE_URL, headers=HEADERS, timeout=REQUEST_TIMEOUT)
@@ -44,7 +50,15 @@ class RembrigadaParser(BaseParser):
                 name = cells[0].lower()
                 price = _parse_price(cells[-1])
                 if price and price > 0:
-                    rows.append((name, price))
+                    # Единица — первая из оставшихся ячеек (не имя, не цена),
+                    # которую удалось распознать (#391, см. labor_table_parser).
+                    unit = next(
+                        (u for i, c in enumerate(cells)
+                         if i not in (0, len(cells) - 1)
+                         and (u := _normalize_unit(c)) is not None),
+                        None,
+                    )
+                    rows.append((name, price, unit))
         self._rows_cache = rows
         return rows
 
@@ -55,7 +69,10 @@ class RembrigadaParser(BaseParser):
         rule = LABOR_SERVICE_MAP[material_name]
         rows = self._load_rows()
 
-        prices = [price for (name, price) in rows if _matches(name, rule)]
+        prices = [
+            price for (name, price, unit) in rows
+            if _matches(name, rule) and _unit_matches(unit, rule["unit"])
+        ]
 
         if not prices:
             raise RuntimeError(f"Не найдено строк прайса для '{material_name}'")

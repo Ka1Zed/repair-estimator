@@ -865,17 +865,22 @@ def test_socket_economy_takes_lower_tercile(monkeypatch):
 
 
 def test_parse_page_reads_collection_card_price_from_text():
-    # #335: линолеум показывает карточки-коллекции без itemprop=price.
+    # #335: линолеум показывает карточки-коллекции без itemprop=price. Цену берём,
+    # но ссылку на /catalog/collection/<id> — нет (#405): это листинг расцветок,
+    # а не карточка товара.
     html = _page(_collection_item("от 325 ₽/м2", "/catalog/collection/13673", title="Линолеум BAZIS"))
     items = _parse_page(html, "https://kazan.megastroy.com/catalog/linoleum")
     assert [(p, u, unit, t) for p, u, unit, t in items] == [
-        (
-            Decimal("325"),
-            "https://kazan.megastroy.com/catalog/collection/13673",
-            "м²",
-            "Линолеум BAZIS",
-        )
+        (Decimal("325"), None, "м²", "Линолеум BAZIS"),
     ]
+
+
+def test_item_url_rejects_collection_page_link():
+    # #405: карточка, у которой единственная ссылка ведёт на страницу коллекции —
+    # это не товар, source_url не должен её сохранять.
+    html = _page(_collection_item("от 325 ₽/м2", "/catalog/collection/9058", title="Линолеум X"))
+    items = _parse_page(html, "https://kazan.megastroy.com/catalog/linoleum")
+    assert items[0][1] is None
 
 
 def test_linoleum_reads_price_from_collection_cards(monkeypatch):
@@ -892,6 +897,37 @@ def test_linoleum_reads_price_from_collection_cards(monkeypatch):
     # site_unit-материалы не дают отдельной "цены за упаковку" (#306) — как у
     # плитки/ламината/обоев.
     assert parsed.package_size is None
+
+
+def test_linoleum_source_url_never_points_to_collection_listing(monkeypatch):
+    # #405: даже когда вся выдача — карточки-коллекции, source_url не должен вести
+    # на /catalog/collection/<id>; деградируем до URL категории (#197), а не на
+    # листинг конкретной коллекции.
+    html = _page(
+        _collection_item("от 325 ₽/м2", "/catalog/collection/1", title="Линолеум А"),
+        _collection_item("от 450 ₽/м2", "/catalog/collection/2", title="Линолеум Б"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Линолеум")
+
+    assert "/catalog/collection/" not in (parsed.source_url or "")
+    assert parsed.source_url == CATEGORY_MAP["Линолеум"].urls[0]
+
+
+def test_linoleum_prefers_real_product_card_over_collection(monkeypatch):
+    # #405: если в выдаче линолеума среди коллекций есть настоящая карточка
+    # /products/<id> с ценой около avg — берём именно её как source_url.
+    html = _page(
+        _collection_item("от 300 ₽/м2", "/catalog/collection/1", title="Линолеум А"),
+        _item("400", "/products/lino-real", title="Линолеум реальный", unit="м2"),
+        _collection_item("от 500 ₽/м2", "/catalog/collection/2", title="Линолеум В"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Линолеум")
+
+    assert parsed.source_url == "https://kazan.megastroy.com/products/lino-real"
 
 
 def test_light_takes_price_as_is_without_unit_normalization(monkeypatch):

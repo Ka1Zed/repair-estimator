@@ -300,26 +300,30 @@
       "min_source_url": null,
       "max_source": "Леман",
       "max_source_url": "https://lemanapro.ru/catalog/kraski-dlya-vnutrennih-rabot",
+      "category_mismatch": false,
       "min_item": {
         "name": "Краска для стен",
         "price": 2975,
         "total": 53550,
         "source": "Мегастрой",
-        "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"
+        "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot",
+        "category_mismatch": false
       },
       "avg_item": {
         "name": "Краска для стен",
         "price": 3500,
         "total": 63000,
         "source": "Мегастрой",
-        "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"
+        "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot",
+        "category_mismatch": false
       },
       "max_item": {
         "name": "Краска для стен",
         "price": 4200,
         "total": 75600,
         "source": "Мегастрой",
-        "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot"
+        "source_url": "https://kazan.megastroy.com/catalog/kraski-dlya-vnutrennih-rabot",
+        "category_mismatch": false
       }
     }
   ],
@@ -458,6 +462,18 @@
   `quantity` для расчёта `total` внутри `*_item` берётся общей со строкой (тем же
   количеством, что и `total_min`/`total_avg`/`total_max` строки) — не пересчитывается
   по норме расхода конкретного SKU-варианта.
+- `category_mismatch` (в `materials[]` и в каждом `*_item`, #406) — `true`, когда
+  slug `source_url` резолвленного товара содержит токен смежной категории
+  (напр. под «Краска потолочная» встала «краска для древесины»:
+  `.../product/kraska-dlya-drevesiny-...`). Токены заданы на материале
+  (`Material.category_exclusions`, латиница), проверяются на этапе `/calculate`
+  из сохранённого `source_url` — работает и на проде (цены из кэша). Только
+  запрет, без positive-require: честно широкие категории (плитка 359→4637 ₽)
+  не помечаются — флаг ставится, лишь когда токен реально всплыл в slug'е.
+  На строке — эхо `category_mismatch` товара выбранного `tier` (его `*_item`).
+  Фронт показывает на помеченной строке пометку «товар может быть из смежной
+  категории — проверьте по ссылке». seed/нет цены (`source_url = null`) — всегда
+  `false`.
 - `hidden_works` (#239) — блок «может всплыть доплатой»: типовые скрытые работы сценария
   (непредвиденный демонтаж, замена стяжки, штробы в бетоне, доп. выравнивание, гидроизоляция),
   которые заранее не оценить. Отдаётся **всегда**; `items` пуст, если для сценария нет типовых

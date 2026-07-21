@@ -132,6 +132,10 @@ class MaterialTierItem(BaseModel):
     total: float
     source: str
     source_url: Optional[str] = None
+    # Товар из смежной категории (#406): slug source_url содержит запрещённый токен
+    # (напр. «краска для древесины» под «Краска потолочная»). Фронт показывает
+    # пометку «товар может быть из смежной категории — проверьте по ссылке».
+    category_mismatch: bool = False
 
 class MaterialItem(BaseModel):
     name: str
@@ -184,6 +188,10 @@ class MaterialItem(BaseModel):
     min_item: MaterialTierItem
     avg_item: MaterialTierItem
     max_item: MaterialTierItem
+    # Товар выбранного tier из смежной категории (#406) — эхо
+    # <tier>_item.category_mismatch для request.tier, чтобы фронт мог пометить
+    # строку без разбора вложенных *_item. См. MaterialTierItem.category_mismatch.
+    category_mismatch: bool = False
 
 class LaborItem(BaseModel):
     service: str

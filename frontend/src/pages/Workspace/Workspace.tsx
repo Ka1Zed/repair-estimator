@@ -48,6 +48,10 @@ const formatPrice = (price: number) => `${Math.round(price).toLocaleString("ru-R
 const formatNum = (n: number) =>
   n.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const formatQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+// Фасовка от парсера приходит с float-хвостом (8.999975… л, 1.974994… м²) — округляем
+// до 2 знаков, чтобы не показывать мусор пользователю, но сохранить реальную дробность
+// упаковки (напр. 1.97 м² в пачке ламината). Экспорт уже чистит это через fmtQty.
+const formatPackage = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
 
 // Регион, по которому реально взялась цена; null → нерегиональный источник
@@ -540,7 +544,7 @@ export function Workspace({
         details: [
           { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
           { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
-          { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
+          { label: "Упаковок", value: `${m.packs} × ${formatPackage(m.package_size)} ${m.unit}` },
           { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
           { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
           {

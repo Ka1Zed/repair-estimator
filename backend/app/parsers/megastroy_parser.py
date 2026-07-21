@@ -427,20 +427,38 @@ def _is_real_href(href: str | None) -> bool:
     return not (h.startswith(("javascript:", "#", "mailto:", "tel:")) or h == "")
 
 
+# Страница коллекции (#405) — /catalog/collection/<id> — это листинг расцветок
+# модели (линолеум показывает именно такие карточки, см. _COLLECTION_PRICE_RE),
+# а не карточка конкретного товара с ценой. Тот же класс, что #197 (ссылка на
+# категорию вместо SKU), но через путь /catalog/collection/, который фильтр
+# product-link раньше не отсекал. Ссылку на коллекцию как source_url товара не
+# сохраняем — лучше деградация до URL категории (#197) или seed, чем ссылка на
+# список.
+_COLLECTION_URL_RE = re.compile(r"/catalog/collection/", re.IGNORECASE)
+
+
+def _is_product_href(href: str | None) -> bool:
+    # Настоящий адрес карточки товара: не кнопка-заглушка (javascript:/#, см.
+    # _is_real_href) и не страница коллекции-листинга (#405).
+    return _is_real_href(href) and _COLLECTION_URL_RE.search(href) is None
+
+
 def _item_url(item, page_url: str) -> str | None:
     # Ссылка на карточку товара внутри одного .products-list__item.
     # В вёрстке Мегастроя карточка ведёт на /products/<id> якорем
     # .js-search-product-link; первыми же в DOM идут кнопки-заглушки с
-    # href="javascript:" (сравнение, избранное) — их брать нельзя.
+    # href="javascript:" (сравнение, избранное) — их брать нельзя. Карточки
+    # коллекций (линолеум) ведут на /catalog/collection/<id> — это тоже не
+    # ссылка на товар (#405).
     link = item.select_one("a.js-search-product-link[href]")
     href = link.get("href") if link else None
-    if not _is_real_href(href):
-        # Класс мог измениться — берём первый якорь с настоящим адресом.
+    if not _is_product_href(href):
+        # Класс мог измениться — берём первый якорь с настоящим адресом товара.
         href = next(
-            (a.get("href") for a in item.select("a[href]") if _is_real_href(a.get("href"))),
+            (a.get("href") for a in item.select("a[href]") if _is_product_href(a.get("href"))),
             None,
         )
-    if not _is_real_href(href):
+    if not _is_product_href(href):
         return None
     abs_url = urljoin(page_url, href.strip())
     return abs_url if abs_url.startswith(("http://", "https://")) else None

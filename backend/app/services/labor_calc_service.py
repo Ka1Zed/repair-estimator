@@ -13,12 +13,15 @@
 #   service, specialist, volume, unit, price_avg (за единицу), total_avg (= volume*price)
 # Здесь отдаём min/avg/max и по цене за единицу, и по итогу — для summary B1-5.
 
+import logging
 from decimal import Decimal
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from app.db.models import LaborPrice, PriceSource
 from app.services._num import D
 from app.services._query_cache import labor_service_by_slug, source_by_name
+
+logger = logging.getLogger(__name__)
 
 
 # ---- slug операций (как в seed_data/labor_services.json, поле slug) ----
@@ -202,7 +205,15 @@ def _labor_rows(
 
         service = labor_service_by_slug(db, service_slug)
         if service is None:
-            continue  # услуга не засидована — пропускаем
+            # Услуга не засидована — строка молча выпадала бы из сметы (демонтаж,
+            # сантехника и т.п. просто исчезали при рассинхроне кода и БД, напр.
+            # непере-сеянная БД после #401). Пропускаем, но громко: пропавшая
+            # работа не должна теряться без следа.
+            logger.warning(
+                "Услуга '%s' не найдена в БД — строка работ пропущена в смете",
+                service_slug,
+            )
+            continue
 
         q = db.query(LaborPrice).filter(LaborPrice.labor_service_id == service.id)
         price = q.filter(LaborPrice.source_id == seed_id).first() if seed_id else None
@@ -210,6 +221,10 @@ def _labor_rows(
             # fallback на любой источник; сортировка по id — выбор детерминирован
             price = q.order_by(LaborPrice.id).first()
         if price is None:
+            logger.warning(
+                "У услуги '%s' (%s) нет ни одной цены — строка работ пропущена в смете",
+                service.name, service_slug,
+            )
             continue
 
         source_name = "seed"

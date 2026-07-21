@@ -380,6 +380,43 @@ class TestLaborCalc:
         laminate_install = next(item for item in labor if item['service'] == 'Укладка ламината')
         assert laminate_install['volume'] == Decimal('12.0')
 
+    def test_unknown_labor_slug_skipped_and_warned(self, db_session, caplog):
+        """Услуга, которой нет в БД (рассинхрон кода и seed — напр. непере-сеянная
+        БД после #401), тихо выпадала из сметы. Теперь строка так же пропускается,
+        расчёт не падает, но пишется WARNING — пропавшая работа не теряется без следа.
+
+        Ломаем slug демонтажа: calculate_rough_labor ссылается на demolition_floor_covering,
+        после порчи slug услуга не резолвится → строки демонтажа нет, зато есть лог."""
+        import logging
+        from app.db.models import LaborService
+
+        demo = db_session.query(LaborService).filter(
+            LaborService.slug == "demolition_floor_covering"
+        ).first()
+        demo.slug = "demolition_floor_covering_TYPO"
+        db_session.commit()
+        try:
+            geometry = {
+                'floor_area': Decimal('12.0'), 'ceiling_area': Decimal('12.0'),
+                'wall_area': Decimal('34.1'), 'perimeter': Decimal('14.0'),
+            }
+            repair_options = {'floor': 'tile', 'walls': 'tile', 'ceiling': 'paint'}
+            with caplog.at_level(logging.WARNING, logger="app.services.labor_calc_service"):
+                rough = calculate_rough_labor(
+                    geometry, repair_options, "bathroom", db_session
+                )
+
+            services = {item['service'] for item in rough}
+            assert 'Демонтаж напольного покрытия' not in services  # slug разошёлся — строка выпала
+            assert 'Стяжка пола' in services                       # остальные черновые посчитаны
+            assert any(
+                "demolition_floor_covering" in r.message and r.levelno == logging.WARNING
+                for r in caplog.records
+            )
+        finally:
+            demo.slug = "demolition_floor_covering"
+            db_session.commit()
+
     def test_finish_labor_carries_stage(self, db_session):
         """Каждая отделочная строка помечена стадией: покраска — finish, шпаклёвка — pre_finish (#190)."""
         geometry = {

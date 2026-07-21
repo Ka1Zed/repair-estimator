@@ -19,16 +19,26 @@ slug'е source_url. Надёжного структурного признака
 def detect_category_mismatch(
     source_url: str | None, exclusions: list[str] | None
 ) -> bool:
-    """True, если slug source_url содержит любой из запрещённых токенов.
+    """True, если slug карточки source_url содержит любой из запрещённых токенов.
 
     source_url — ссылка на карточку товара у источника (slug транслитерирован
     латиницей: .../product/kraska-dlya-drevesiny-...). exclusions —
-    Material.category_exclusions (список подстрок-латиницы в нижнем регистре).
+    Material.category_exclusions (список токенов-латиницы в нижнем регистре).
+
+    Сверяем только slug карточки (последний сегмент пути, без query/fragment), а
+    не весь URL: токены — про НАЗВАНИЕ товара, совпадение в домене/городе/пути
+    было бы ложным (напр. город `fasad`-нейм). Токен ищем на границе слова слага
+    (начало или после дефиса) — иначе он всплывал бы внутри чужого слова; slug
+    дефисный, а токены заданы как начало слова (`drevesin` ловит `drevesiny`).
 
     Нет ссылки (seed/нет цены) или список пуст/не задан — считаем «свой» (False):
     без данных не помечаем, чтобы не пугать пользователя ложным флагом.
     """
     if not source_url or not exclusions:
         return False
-    slug = source_url.lower()
-    return any(token.lower() in slug for token in exclusions)
+    path = source_url.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    slug = path.rsplit("/", 1)[-1].lower()
+    return any(
+        slug.startswith(token) or ("-" + token) in slug
+        for token in (t.lower() for t in exclusions)
+    )

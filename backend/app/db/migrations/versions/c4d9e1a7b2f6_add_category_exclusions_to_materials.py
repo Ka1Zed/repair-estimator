@@ -23,18 +23,21 @@ depends_on: Union[str, Sequence[str], None] = None
 # пере-seed (как finish_key в d8b3c1f4a927) — держать в синхроне с
 # seed_data/materials.json. Токены проставляем и вариантам эконом/премиум: они
 # резолвятся отдельными Material в min_item/max_item.
+#
+# Токены — только про ЯВНО чужую категорию (древесина/металл/фасад/пол/авто).
+# Разделять «для стен» и «для потолка» токеном НЕ пытаемся: краски эти во многом
+# взаимозаменяемы, а типовой товар «краска для стен и потолков» (slug
+# kraska-dlya-sten-i-potolkov-...) под потолочной дал бы ложное срабатывание —
+# ровно то, чего PR избегает.
 _PAINT_TOKENS = ["drevesin", "dereva", "derevu", "po-metall", "po-metallu",
                  "fasad", "avtomobil", "dlya-pola"]
-# У потолочной дополнительно исключаем «для стен» — стеновая краска это тоже
-# смежная категория относительно потолочной.
-_CEILING_TOKENS = _PAINT_TOKENS + ["dlya-sten"]
 _BACKFILL = {
     "paint_walls": _PAINT_TOKENS,
     "paint_walls_economy": _PAINT_TOKENS,
     "paint_walls_premium": _PAINT_TOKENS,
-    "paint_ceiling": _CEILING_TOKENS,
-    "paint_ceiling_economy": _CEILING_TOKENS,
-    "paint_ceiling_premium": _CEILING_TOKENS,
+    "paint_ceiling": _PAINT_TOKENS,
+    "paint_ceiling_economy": _PAINT_TOKENS,
+    "paint_ceiling_premium": _PAINT_TOKENS,
     "paint_moisture": _PAINT_TOKENS,
 }
 

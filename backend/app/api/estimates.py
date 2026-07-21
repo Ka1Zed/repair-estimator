@@ -21,6 +21,7 @@ from app.services.labor_calc_service import (
     WET_ROOM_TYPES,
 )
 from app.services.repair_coeffs_service import CONTINGENCY, clamp_price_corridor
+from app.services.category_match import detect_category_mismatch
 from app.services.price_aggregator_service import get_material_price, get_labor_price
 from app.services.hidden_works_service import calculate_hidden_works
 from app.parsers.base import BaseParser
@@ -202,6 +203,9 @@ def _tier_item(
         total=float(total),
         source=sources_by_id.get(price_obj.source_id, "unknown"),
         source_url=price_obj.source_url,
+        category_mismatch=detect_category_mismatch(
+            price_obj.source_url, material.category_exclusions
+        ),
     )
 
 # tier выбирает границу вилки (min/avg/max) уже ВЫБРАННОГО SKU-варианта.
@@ -440,9 +444,19 @@ def calculate_estimate(
         # посчитанные выше price/total/source — без лишнего resolve_material/
         # get_material_price; для двух остальных уровней резолвим SKU-вариант
         # тем же путём, что и основной расчёт (_tier_item).
+        # Товар текущего tier из смежной категории (#406) — сверяем slug
+        # source_url с category_exclusions резолвленного материала. Материал
+        # берём по material_key/tier тем же путём, что и _tier_item (мемо
+        # resolve_material тут не нужно — вызов дешёвый).
+        current_material = resolve_material(db, group['material_key'], request.tier)
+        current_mismatch = detect_category_mismatch(
+            price_obj.source_url,
+            current_material.category_exclusions if current_material else None,
+        )
         current_tier_item = MaterialTierItem(
             name=name, price=float(price), total=float(total),
             source=source_name, source_url=price_obj.source_url,
+            category_mismatch=current_mismatch,
         )
         tier_items = {request.tier: current_tier_item}
         for t in ("min", "avg", "max"):
@@ -482,6 +496,7 @@ def calculate_estimate(
             min_item=tier_items["min"],
             avg_item=tier_items["avg"],
             max_item=tier_items["max"],
+            category_mismatch=current_mismatch,
         ))
 
         materials_sum['min'] += final_quantity * price_min

@@ -434,6 +434,47 @@ def test_parser_package_size_overrides_static_and_stays_consistent_with_quantity
     assert paint["quantity"] == pytest.approx(paint["packs"] * paint["package_size"], rel=1e-6)
 
 
+def test_category_mismatch_flag_on_cross_category_product(stub_material_parser):
+    """#406: под «Краска потолочная» резолвится «краска для древесины» (slug
+    source_url содержит запрещённый токен) → строка и её avg_item помечены
+    category_mismatch=true. «Краска для стен» с честной карточкой и seed-позиции
+    (ламинат) НЕ помечаются — без ложных срабатываний."""
+    from decimal import Decimal
+    from app.parsers.base import ParsedPrice
+
+    wood_url = "https://kazan.leman.ru/product/kraska-dlya-drevesiny-parade-carnelian-1"
+    walls_url = "https://kazan.leman.ru/product/kraska-dlya-sten-i-potolkov-parade-w1-2"
+
+    def fake_fetch(material_name):
+        if material_name == "Краска потолочная":
+            return ParsedPrice(price_min=Decimal("500"), price_avg=Decimal("700"),
+                               price_max=Decimal("900"), source_url=wood_url)
+        if material_name == "Краска для стен":
+            return ParsedPrice(price_min=Decimal("500"), price_avg=Decimal("700"),
+                               price_max=Decimal("900"), source_url=walls_url)
+        raise ValueError(f"нет категории для '{material_name}'")
+
+    stub_material_parser(fake_fetch)
+
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    materials = response.json()["materials"]
+
+    ceiling = next(m for m in materials if m["name"] == "Краска потолочная")
+    assert ceiling["category_mismatch"] is True
+    assert ceiling["avg_item"]["category_mismatch"] is True
+
+    # Стеновая краска: карточка честная (kraska-dlya-sten...) — не помечаем.
+    walls = next(m for m in materials if m["name"] == "Краска для стен")
+    assert walls["source_url"] == walls_url
+    assert walls["category_mismatch"] is False
+    assert walls["avg_item"]["category_mismatch"] is False
+
+    # Ламинат уходит в seed (source_url=None) — флага нет.
+    laminate = next(m for m in materials if m["name"] == "Ламинат")
+    assert laminate["category_mismatch"] is False
+
+
 def test_parser_fallback_on_error():
     """Когда парсер падает, расчёт не ломается и source остаётся 'seed'.
     Парсер по умолчанию заглушён падающим stub_material_parser → seed."""

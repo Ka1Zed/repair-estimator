@@ -164,8 +164,8 @@ def seed_test_data(session):
 
     # Материалы (с категорией). slug — как в seed_data/materials.json (#278).
     materials_data = [
-        {"name": "Краска для стен", "slug": "paint_walls", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "walls.paint", "variant_tier": "avg"},
-        {"name": "Краска потолочная", "slug": "paint_ceiling", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "ceiling.paint", "variant_tier": "avg"},
+        {"name": "Краска для стен", "slug": "paint_walls", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "walls.paint", "variant_tier": "avg", "category_exclusions": ["drevesin", "po-metall", "fasad"]},
+        {"name": "Краска потолочная", "slug": "paint_ceiling", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "ceiling.paint", "variant_tier": "avg", "category_exclusions": ["drevesin", "po-metall", "fasad"]},
         {"name": "Грунтовка", "slug": "primer", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10, "layers": 1, "finish_key": "primer", "variant_tier": "avg"},
         {"name": "Шпаклевка стартовая", "slug": "putty_start", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30, "finish_key": "putty_start", "variant_tier": "avg"},
         {"name": "Шпаклевка финишная", "slug": "putty_finish", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25, "finish_key": "putty_finish", "variant_tier": "avg"},

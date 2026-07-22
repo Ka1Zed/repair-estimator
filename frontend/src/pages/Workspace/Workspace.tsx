@@ -21,6 +21,7 @@ import { calculateEstimate } from "../../api/estimates";
 import { apiClient } from "../../api/client";
 import { Select } from "../../components/ui/Select";
 import { roomsToCalcPayload } from "../../utils/roomsToPayload";
+import { hasTierVariants } from "../../utils/tier";
 
 interface GeometryData {
   floor_area: number;
@@ -214,19 +215,9 @@ export function Workspace({
     });
   }, []);
 
-  // То же самое для работ (индекс в data.labor): у работ нет альтернативного
-  // исполнителя по tier, только цена внутри коридора price_min/avg/max строки.
-  const [laborOverrides, setLaborOverrides] = useState<Record<number, PriceMode>>({});
-  const toggleLaborOverride = useCallback((index: number, mode: PriceMode) => {
-    setLaborOverrides((prev) => {
-      if (prev[index] === mode) {
-        const next = { ...prev };
-        delete next[index];
-        return next;
-      }
-      return { ...prev, [index]: mode };
-    });
-  }, []);
+  // Работы уровней не имеют (#419): SKU-вариантов у услуги нет, вилка это лишь разброс
+  // цены одного подрядчика по прайс-листам, не выбор комплектации — закрепление уровня
+  // по услуге убрано. Глобальный ползунок min/avg/max по-прежнему двигает итог.
 
   // Список городов для селектора. Если текущего города нет в ответе бэка,
   // всё равно показываем его — расчёт по нему уйдёт в seed-fallback.
@@ -361,7 +352,6 @@ export function Workspace({
         setData({ ...res, summary, materials });
         setPriceMode("avg");
         setMaterialOverrides({});
-        setLaborOverrides({});
       } catch (err) {
         if (seq !== calcSeqRef.current) return;
         console.error(err);
@@ -508,25 +498,26 @@ export function Workspace({
     return (data?.materials ?? []).map((m, i) => {
       const effectiveMode = materialOverrides[i] ?? priceMode;
 
-      // finish_key-позиции (ламинат/плитка/покраска/обои/розетка, #331) реально меняют
-      // товар по tier — у каждого варианта тогда свой достоверный source_url. У остальных
-      // материалов на всех tier одна и та же строка/товар — только другая точка коридора
-      // (комбинация price_min/avg/max из m.sources); чья именно компания дала эту границу,
-      // бэкенд сообщает в m.min_source_url/m.max_source_url (#348). Если граница совпала
-      // с представителем, бэкенд отдаёт null — тогда ведём на представителя (m.source_url),
-      // а не прячем ссылку: цена границы реальна и у неё есть источник.
-      const namesDiffer =
-        new Set([m.min_item?.name, m.avg_item?.name, m.max_item?.name].filter((n): n is string => !!n)).size > 1;
-
-      // Тот же случай, что у работ: когда товар один на все tier (не finish_key) и
-      // источников несколько, «Стандарт» — среднее по их средним, число не на одной
-      // карточке. Ссылку оставляем на представителя (ближайший к средней оффер) и
-      // подписываем «ближайшее предложение», а не прячем.
-      const materialBlend = !namesDiffer && !!(m.sources && m.sources.length > 1);
+      // Уровни Эконом/Стандарт/Премиум показываем ТОЛЬКО у finish_key-позиций
+      // (ламинат/плитка/покраска/обои/розетка, #331), где min/avg/max_item — реально
+      // разные товары со своим source_url. У коммодити-материалов (светильник, кабель,
+      // труба, плинтус, грунт/шпаклёвка) товар один на все tier — вилка это лишь разброс
+      // цены одного товара по магазинам, а не выбор уровня. Для них псевдо-уровни и
+      // закрепление не показываем, вместо этого даём диапазон «по магазинам» (#419).
+      const tiered = hasTierVariants(m);
       const variants: LedgerRowVariant[] = [];
-      if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: namesDiffer ? m.min_item.source_url : (m.min_source_url ?? m.source_url), onClick: () => toggleMaterialOverride(i, "min") });
-      if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: m.avg_item.source_url, note: materialBlend ? "≈ ближайшее предложение" : undefined, onClick: () => toggleMaterialOverride(i, "avg") });
-      if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: namesDiffer ? m.max_item.source_url : (m.max_source_url ?? m.source_url), onClick: () => toggleMaterialOverride(i, "max") });
+      if (tiered) {
+        if (m.min_item) variants.push({ mode: "min", title: "Эконом", name: m.min_item.name, price: rub(Math.round(m.min_item.price)), url: m.min_item.source_url, onClick: () => toggleMaterialOverride(i, "min") });
+        if (m.avg_item) variants.push({ mode: "avg", title: "Стандарт", name: m.avg_item.name, price: rub(Math.round(m.avg_item.price)), url: m.avg_item.source_url, onClick: () => toggleMaterialOverride(i, "avg") });
+        if (m.max_item) variants.push({ mode: "max", title: "Премиум", name: m.max_item.name, price: rub(Math.round(m.max_item.price)), url: m.max_item.source_url, onClick: () => toggleMaterialOverride(i, "max") });
+      }
+
+      // Диапазон цены одного товара по магазинам (не уровни) — для коммодити-позиций,
+      // когда границы вилки реально разные (#419).
+      const priceRange =
+        !tiered && m.price_max > m.price_min
+          ? `${rub(Math.round(m.price_min))} – ${rub(Math.round(m.price_max))}`
+          : null;
 
       const activeVariant = effectiveMode === "min" ? m.min_item : effectiveMode === "max" ? m.max_item : m.avg_item;
       const activeName = activeVariant?.name ?? m.name;
@@ -545,17 +536,17 @@ export function Workspace({
       const activeVolume = activeVariant?.quantity || m.quantity;
       const activePacks = activeVariant?.packs || m.packs;
 
-      const combinedSources = !namesDiffer && m.sources && m.sources.length > 1 ? m.sources : null;
+      const combinedSources = !tiered && m.sources && m.sources.length > 1 ? m.sources : null;
       const sourceLabel = combinedSources ? combinedSources.join(", ") : activeSource;
       const sourceCount = combinedSources ? combinedSources.length : 1;
 
-      return { m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, activePackageSize, activeUnit, activeVolume, activePacks, sourceLabel, sourceCount, variants };
+      return { m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, activePackageSize, activeUnit, activeVolume, activePacks, sourceLabel, sourceCount, variants, priceRange };
     });
   }, [data, priceScale, priceMode, materialOverrides, toggleMaterialOverride]);
 
   const materialRows: LedgerRow[] = useMemo(
     () =>
-      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, activePackageSize, activeUnit, activeVolume, activePacks, sourceLabel, sourceCount, variants }, i) => ({
+      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, activePackageSize, activeUnit, activeVolume, activePacks, sourceLabel, sourceCount, variants, priceRange }, i) => ({
         name: activeName,
         volume: `${formatQty(activeVolume)} ${activeUnit}`,
         price: rub(Math.round(activePrice)),
@@ -569,6 +560,7 @@ export function Workspace({
           { label: "Упаковок", value: `${activePacks} × ${formatPackage(activePackageSize)} ${activeUnit}` },
           { label: "Итого кол-во", value: `${formatQty(activeVolume)} ${activeUnit}` },
           { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
+          ...(priceRange ? [{ label: "Цена по магазинам", value: priceRange }] : []),
           {
             label: "Итог по позиции",
             value: `${rub(Math.round(activeTotal))} (с резервом +${CONTINGENCY_PCT[effectiveMode]}%)`,
@@ -593,44 +585,33 @@ export function Workspace({
   const laborActive = useMemo(() => {
     const scale = priceScale("labor");
 
-    return (data?.labor ?? []).map((l, i) => {
-      const effectiveMode = laborOverrides[i] ?? priceMode;
+    return (data?.labor ?? []).map((l) => {
+      // У работ нет SKU-вариантов уровня (#419): показываем цену выбранного глобального
+      // режима, а разброс price_min/price_max — как диапазон «по подрядчикам», не как
+      // выбор Эконом/Премиум. Закрепления уровня по услуге нет.
       const hasCorridor = l.price_min != null && l.price_max != null;
 
       const activePrice = !hasCorridor
         ? l.price_avg * scale
-        : effectiveMode === "min"
+        : priceMode === "min"
           ? l.price_min!
-          : effectiveMode === "max"
+          : priceMode === "max"
             ? l.price_max!
             : l.price_avg;
       const activeTotal = !hasCorridor
         ? l.total_avg * scale
-        : effectiveMode === "min"
+        : priceMode === "min"
           ? (l.total_min ?? l.total_avg)
-          : effectiveMode === "max"
+          : priceMode === "max"
             ? (l.total_max ?? l.total_avg)
             : l.total_avg;
 
-      // Мин./макс. цена в коридоре — это реально цены разных компаний из l.sources
-      // (посчитаны на бэкенде из нескольких прайс-листов); чья именно компания дала
-      // каждую границу — в l.min_source_url/l.max_source_url (#348). Если граница
-      // совпала с представителем, бэкенд отдаёт null — тогда ведём на представителя
-      // (l.source_url), а не прячем ссылку: цена границы реальна и у неё есть источник.
-      // Список всех участников — одной строкой в "Источник(и) цены" ниже.
-      // «Стандарт» при нескольких источниках — среднее по их средним (mean на бэкенде),
-      // число не живёт ни на одной карточке. Ссылку всё равно даём — на представителя
-      // (source_url), это оффер, чья средняя ближе всего к общей, т.е. буквально
-      // ближайшее к середине предложение. Подписываем «ближайшее предложение», чтобы
-      // не читалось как «ровно эта цена». При одном источнике avg = его цена → без подписи.
-      const laborBlend = !!(l.sources && l.sources.length > 1);
-      const variants: LedgerRowVariant[] = hasCorridor
-        ? [
-            { mode: "min", title: "Эконом", name: l.service, price: rub(Math.round(l.price_min!)), url: l.min_source_url ?? l.source_url, onClick: () => toggleLaborOverride(i, "min") },
-            { mode: "avg", title: "Стандарт", name: l.service, price: rub(Math.round(l.price_avg)), url: l.source_url, note: laborBlend ? "≈ ближайшее предложение" : undefined, onClick: () => toggleLaborOverride(i, "avg") },
-            { mode: "max", title: "Премиум", name: l.service, price: rub(Math.round(l.price_max!)), url: l.max_source_url ?? l.source_url, onClick: () => toggleLaborOverride(i, "max") },
-          ]
-        : [];
+      // Диапазон цены услуги по разным подрядчикам из l.sources (границы вилки), когда
+      // они реально различаются — информационно, без выбора уровня.
+      const priceRange =
+        hasCorridor && l.price_max! > l.price_min!
+          ? `${rub(Math.round(l.price_min!))} – ${rub(Math.round(l.price_max!))}`
+          : null;
 
       const sourceCount = l.sources?.length ?? (l.source ? 1 : 0);
       const sourceLabel =
@@ -638,25 +619,25 @@ export function Workspace({
           ? l.sources.map(laborSourceName).join(", ")
           : laborSourceName(l.source);
 
-      return { l, effectiveMode, activePrice, activeTotal, variants, sourceLabel, sourceCount };
+      return { l, activePrice, activeTotal, priceRange, sourceLabel, sourceCount };
     });
-  }, [data, priceScale, priceMode, laborOverrides, toggleLaborOverride]);
+  }, [data, priceScale, priceMode]);
 
   const laborItemToRow = useCallback(
-    ({ l, effectiveMode, activePrice, activeTotal, variants, sourceLabel, sourceCount }: (typeof laborActive)[number]): LedgerRow => ({
+    ({ l, activePrice, activeTotal, priceRange, sourceLabel, sourceCount }: (typeof laborActive)[number]): LedgerRow => ({
       name: l.service,
       subtitle: l.specialist,
       volume: `${formatQty(l.volume)} ${l.unit}`,
       price: rub(Math.round(activePrice)),
       total: rub(Math.round(activeTotal)),
-      activeMode: effectiveMode,
-      variants: variants.length > 0 ? variants : undefined,
+      activeMode: priceMode,
       details: [
         { label: "Специалист", value: l.specialist },
         { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
+        ...(priceRange ? [{ label: "Цена по подрядчикам", value: priceRange }] : []),
         {
           label: "Итог по позиции",
-          value: `${rub(Math.round(activeTotal))} (с резервом +${CONTINGENCY_PCT[effectiveMode]}%)`,
+          value: `${rub(Math.round(activeTotal))} (с резервом +${CONTINGENCY_PCT[priceMode]}%)`,
         },
         {
           label: sourceCount > 1 ? "Источники цены" : "Источник цены",
@@ -666,26 +647,21 @@ export function Workspace({
         { label: "Регион", value: regionLabel(l.region, l.source_url, city, l.source) },
       ],
     }),
-    [city],
+    [city, priceMode],
   );
 
   const laborRows: LedgerRow[] = useMemo(
-    () => laborActive.map((item, i) => ({
-      ...laborItemToRow(item),
-      isOverridden: laborOverrides[i] !== undefined && laborOverrides[i] !== priceMode,
-    })),
-    [laborActive, laborItemToRow, laborOverrides, priceMode],
+    () => laborActive.map((item) => laborItemToRow(item)),
+    [laborActive, laborItemToRow],
   );
 
-  const hasMixedOverrides = useMemo(() => {
-    const matMixed = Object.entries(materialOverrides).some(([, mode]) => mode !== priceMode);
-    const labMixed = Object.entries(laborOverrides).some(([, mode]) => mode !== priceMode);
-    return matMixed || labMixed;
-  }, [materialOverrides, laborOverrides, priceMode]);
+  const hasMixedOverrides = useMemo(
+    () => Object.entries(materialOverrides).some(([, mode]) => mode !== priceMode),
+    [materialOverrides, priceMode],
+  );
 
   const clearAllOverrides = useCallback(() => {
     setMaterialOverrides({});
-    setLaborOverrides({});
   }, []);
 
   // Работы, сгруппированные по стадиям (черновая/предчистовая/чистовая) — для
@@ -1152,7 +1128,7 @@ export function Workspace({
                   <button
                     className={styles.exportBtn}
                     onClick={() =>
-                      data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode, materialOverrides, laborOverrides))
+                      data && import("../../utils/exportEstimate").then((m) => m.exportPdf(data, city, priceMode, materialOverrides))
                     }
                   >
                     Скачать PDF
@@ -1160,7 +1136,7 @@ export function Workspace({
                   <button
                     className={styles.exportBtn}
                     onClick={() =>
-                      data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode, materialOverrides, laborOverrides))
+                      data && import("../../utils/exportEstimate").then((m) => m.exportXlsx(data, city, priceMode, materialOverrides))
                     }
                   >
                     Экспорт в Excel

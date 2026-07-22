@@ -131,6 +131,18 @@ def _finish_options(room: RoomInput) -> Dict[str, Any]:
         "wall_condition": w.walls.wall_condition if w.walls.enabled else None,
     }
 
+
+def _safe_package_size(value: Any) -> Decimal:
+    """Фасовка материала защищённо: Material.package_size nullable, поэтому
+    None и <=0 (в т.ч. Decimal(str(None)), падающий InvalidOperation) сводим
+    к безопасному дефолту — 1 (штучная покупка), а не даём final_quantity
+    обнулиться от умножения на 0."""
+    if value is None:
+        return Decimal(1)
+    package_size = Decimal(str(value))
+    return package_size if package_size > 0 else Decimal(1)
+
+
 def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> Decimal:
     """Выбирает значение в зависимости от уровня комплектации."""
     if tier == "min":
@@ -341,7 +353,7 @@ def calculate_estimate(
                 'name': mat['name'],
                 'material_key': mat['material_key'],
                 'unit': mat['unit'],
-                'package_size': Decimal(str(mat.get('package_size', 1))),
+                'package_size': _safe_package_size(mat.get('package_size')),
                 'quantity': Decimal(0),
                 'base_quantity': Decimal(0),
                 'pack_quantity': Decimal(0),
@@ -371,14 +383,11 @@ def calculate_estimate(
         # и то, что легло в расчёт, могут разойтись (краска 2.5 л на карточке
         # против 9 л в смете). Нет цены/фасовки от парсера — прежнее поведение.
         effective_package_size = (
-            Decimal(str(price_obj.package_size))
+            _safe_package_size(price_obj.package_size)
             if price_obj is not None and price_obj.package_size
             else group['package_size']
         )
-        if effective_package_size > 0:
-            packs = packs_to_buy(group['quantity'] / effective_package_size)
-        else:
-            packs = packs_to_buy(group['pack_quantity'])
+        packs = packs_to_buy(group['quantity'] / effective_package_size)
         final_quantity = Decimal(packs) * effective_package_size
 
         if not price_obj:

@@ -279,6 +279,12 @@ export function Workspace({
     [stores, city],
   );
 
+  // Порядковый номер запроса расчёта: авто-пересчёт по дебаунсу и клик по кнопке
+  // могут запустить несколько запросов подряд. Если ответ на старый запрос придёт
+  // позже нового (сеть/нагрузка), он не должен перезаписать свежую смету — сверяем
+  // номер перед setState и игнорируем устаревший ответ.
+  const calcSeqRef = useRef(0);
+
   // silent=true — авто-пересчёт по дебаунсу: молча пропускаем невалидное состояние,
   // не пугаем пользователя ошибкой, пока он редактирует.
   const runCalculate = useCallback(
@@ -318,6 +324,7 @@ export function Workspace({
         return;
       }
 
+      const seq = ++calcSeqRef.current;
       setIsLoading(true);
       setError(null);
       try {
@@ -337,6 +344,9 @@ export function Workspace({
         // товара, а не про эконом/премиум SKU, см. docs/api.md).
         const res = (await calculateEstimate(payload)) as EstimateResponse;
 
+        // Пришёл ответ на устаревший запрос — уже летит более свежий, игнорируем.
+        if (seq !== calcSeqRef.current) return;
+
         const materials = res.materials;
         const materialsMin = materials.reduce((s, m) => s + (m.min_item?.total ?? 0), 0);
         const materialsMax = materials.reduce((s, m) => s + (m.max_item?.total ?? 0), 0);
@@ -353,12 +363,14 @@ export function Workspace({
         setMaterialOverrides({});
         setLaborOverrides({});
       } catch (err) {
+        if (seq !== calcSeqRef.current) return;
         console.error(err);
         if (!silent) {
           setError("Не удалось рассчитать смету. Проверьте, что бэкенд запущен.");
         }
       } finally {
-        setIsLoading(false);
+        // Гасим индикатор загрузки только для самого свежего запроса.
+        if (seq === calcSeqRef.current) setIsLoading(false);
       }
     },
     [rooms, city, scope, store],

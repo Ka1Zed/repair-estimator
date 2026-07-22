@@ -1,5 +1,7 @@
 from typing import List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.core.regions import normalize_city
 
 
 class Point(BaseModel):
@@ -83,6 +85,10 @@ class RoomInput(BaseModel):
     ceiling_shape: Optional[CeilingShape] = None
 
 class EstimateRequest(BaseModel):
+    # Валидируется/нормализуется против SUPPORTED_CITIES (#394): неизвестный
+    # город (опечатка, «Питер» вместо «Санкт-Петербург») — явный 422, а не
+    # тихий откат на дефолтные источники (Мегастрой + Леман-Казань). Регистр/
+    # пробелы игнорируются — «москва» и «Москва» матчят один регион.
     city: str
     rooms: List[RoomInput]
     tier: str = Field("avg", pattern="^(min|avg|max)$")  # уровень комплектации
@@ -99,6 +105,11 @@ class EstimateRequest(BaseModel):
     # Если имя магазина не найдено СРЕДИ ЗАРЕГИСТРИРОВАННЫХ вовсе (опечатка) —
     # 422, а не тихий откат (проверка в calculate_estimate).
     stores: Optional[List[str]] = None
+
+    @field_validator("city")
+    @classmethod
+    def validate_city(cls, v: str) -> str:
+        return normalize_city(v)
 
 
 class GeometrySummary(BaseModel):
@@ -121,6 +132,10 @@ class MaterialTierItem(BaseModel):
     total: float
     source: str
     source_url: Optional[str] = None
+    # Товар из смежной категории (#406): slug source_url содержит запрещённый токен
+    # (напр. «краска для древесины» под «Краска потолочная»). Фронт показывает
+    # пометку «товар может быть из смежной категории — проверьте по ссылке».
+    category_mismatch: bool = False
 
 class MaterialItem(BaseModel):
     name: str
@@ -173,6 +188,10 @@ class MaterialItem(BaseModel):
     min_item: MaterialTierItem
     avg_item: MaterialTierItem
     max_item: MaterialTierItem
+    # Товар выбранного tier из смежной категории (#406) — эхо
+    # <tier>_item.category_mismatch для request.tier, чтобы фронт мог пометить
+    # строку без разбора вложенных *_item. См. MaterialTierItem.category_mismatch.
+    category_mismatch: bool = False
 
 class LaborItem(BaseModel):
     service: str

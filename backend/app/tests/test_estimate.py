@@ -231,11 +231,16 @@ class TestMaterialCalc:
 
     def test_unknown_material_slug_skipped_not_crashed(self, db_session):
         """Опечатка/расхождение slug в seed → материал тихо пропускается (как раньше
-        было с name), расчёт остальных строк не падает (#278)."""
+        было с name), расчёт остальных строк не падает (#278).
+
+        Берём влагостойкую краску — единственный материал стеновой подготовки,
+        который после #390 остался слаг-резолвом (грунт/шпаклёвка/обычная краска
+        стен теперь резолвятся по finish_key и не матчат по slug вообще, так что
+        порча их slug на резолв не повлияла бы — не годится для этого сценария)."""
         from app.db.models import Material
 
-        primer = db_session.query(Material).filter(Material.slug == "primer").first()
-        primer.slug = "primer_TYPO"
+        moist = db_session.query(Material).filter(Material.slug == "paint_moisture").first()
+        moist.slug = "paint_moisture_TYPO"
         db_session.commit()
         try:
             geometry = {
@@ -243,16 +248,16 @@ class TestMaterialCalc:
                 'wall_area': Decimal('34.1'), 'perimeter': Decimal('14.0'),
                 'door_width_sum': Decimal('0.8'),
             }
-            repair_options = {'floor': None, 'walls': 'paint', 'ceiling': None}
+            repair_options = {'floor': None, 'walls': 'moisture_paint', 'ceiling': None}
 
             materials = calculate_materials(geometry, repair_options, db_session)
 
             names = {m['name'] for m in materials}
-            assert 'Грунтовка' not in names          # slug разошёлся — строка пропущена
-            assert 'Шпаклевка стартовая' in names     # остальные материалы посчитаны как обычно
-            assert 'Краска для стен' in names
+            assert 'Краска влагостойкая' not in names  # slug разошёлся — строка пропущена
+            assert 'Грунтовка' in names                # остальные материалы посчитаны как обычно
+            assert 'Шпаклевка стартовая' in names
         finally:
-            primer.slug = "primer"
+            moist.slug = "paint_moisture"
             db_session.commit()
 
 
@@ -300,6 +305,40 @@ class TestFinishVariants:
         socket = next((m for m in sockets_max if m['name'] == 'Розетка'), None)
         assert socket is not None  # socket не имеет max-варианта → fallback на avg
 
+    def test_tier_selects_different_sku_for_primer(self, db_session):
+        """#390: грунт тоже вошёл в finish_key-систему — tier=min/avg/max даёт три
+        разных SKU, а не один товар с другой ценой (как было до фикса)."""
+        repair_options = {'floor': None, 'walls': 'paint', 'ceiling': None}
+
+        by_tier = {}
+        for tier in ("min", "avg", "max"):
+            materials = calculate_materials(self.GEOM, repair_options, db_session, tier=tier)
+            primer = next(m for m in materials if m['unit'] == 'л' and 'Грунтовка' in m['name'])
+            by_tier[tier] = primer
+
+        assert by_tier['min']['name'] == 'Грунтовка эконом'
+        assert by_tier['avg']['name'] == 'Грунтовка'
+        assert by_tier['max']['name'] == 'Грунтовка премиум'
+        assert len({by_tier[t]['material_id'] for t in by_tier}) == 3
+
+    def test_primer_two_coats_applies_to_non_avg_tier(self, db_session):
+        """Регрессия #390: модификатор двойного слоя раньше матчил по material.slug ==
+        M_PRIMER, который есть только у avg-товара. У эконом/премиум SKU свой slug
+        (primer_economy/primer_premium) — без фикса на finish_key двойной слой на них
+        тихо переставал бы применяться."""
+        repair_options = {'floor': None, 'walls': 'paint', 'ceiling': None, 'tier': 'min'}
+
+        one_coat = calculate_materials(
+            self.GEOM, {**repair_options}, db_session, tier="min",
+        )
+        two_coats = calculate_materials(
+            self.GEOM, {**repair_options, 'primer_two_coats': True}, db_session, tier="min",
+        )
+
+        primer_1 = next(m for m in one_coat if m['name'] == 'Грунтовка эконом')
+        primer_2 = next(m for m in two_coats if m['name'] == 'Грунтовка эконом')
+        assert primer_2['quantity'] == primer_1['quantity'] * Decimal('2')
+
 
 class TestLaborCalc:
     """Модульные тесты для расчёта работ."""
@@ -327,7 +366,7 @@ class TestLaborCalc:
         returned_services = {item['service'] for item in labor}
         assert expected_services.issubset(returned_services)
         assert 'Электромонтаж' not in returned_services
-        assert 'Сантехнические работы' not in returned_services
+        assert 'Установка смесителя' not in returned_services
 
         painter_walls = next(item for item in labor if item['service'] == 'Покраска стен')
         assert painter_walls['volume'] == Decimal('34.1')
@@ -340,6 +379,43 @@ class TestLaborCalc:
 
         laminate_install = next(item for item in labor if item['service'] == 'Укладка ламината')
         assert laminate_install['volume'] == Decimal('12.0')
+
+    def test_unknown_labor_slug_skipped_and_warned(self, db_session, caplog):
+        """Услуга, которой нет в БД (рассинхрон кода и seed — напр. непере-сеянная
+        БД после #401), тихо выпадала из сметы. Теперь строка так же пропускается,
+        расчёт не падает, но пишется WARNING — пропавшая работа не теряется без следа.
+
+        Ломаем slug демонтажа: calculate_rough_labor ссылается на demolition_floor_covering,
+        после порчи slug услуга не резолвится → строки демонтажа нет, зато есть лог."""
+        import logging
+        from app.db.models import LaborService
+
+        demo = db_session.query(LaborService).filter(
+            LaborService.slug == "demolition_floor_covering"
+        ).first()
+        demo.slug = "demolition_floor_covering_TYPO"
+        db_session.commit()
+        try:
+            geometry = {
+                'floor_area': Decimal('12.0'), 'ceiling_area': Decimal('12.0'),
+                'wall_area': Decimal('34.1'), 'perimeter': Decimal('14.0'),
+            }
+            repair_options = {'floor': 'tile', 'walls': 'tile', 'ceiling': 'paint'}
+            with caplog.at_level(logging.WARNING, logger="app.services.labor_calc_service"):
+                rough = calculate_rough_labor(
+                    geometry, repair_options, "bathroom", db_session
+                )
+
+            services = {item['service'] for item in rough}
+            assert 'Демонтаж напольного покрытия' not in services  # slug разошёлся — строка выпала
+            assert 'Стяжка пола' in services                       # остальные черновые посчитаны
+            assert any(
+                "demolition_floor_covering" in r.message and r.levelno == logging.WARNING
+                for r in caplog.records
+            )
+        finally:
+            demo.slug = "demolition_floor_covering"
+            db_session.commit()
 
     def test_finish_labor_carries_stage(self, db_session):
         """Каждая отделочная строка помечена стадией: покраска — finish, шпаклёвка — pre_finish (#190)."""
@@ -455,13 +531,14 @@ class TestRoughLabor:
         )
         by_service = {item['service']: item for item in rough}
 
-        expected = {'Демонтаж', 'Выравнивание стен', 'Стяжка пола', 'Гидроизоляция', 'Грунтование'}
+        expected = {'Демонтаж напольного покрытия', 'Выравнивание стен', 'Стяжка пола',
+                    'Гидроизоляция', 'Грунтование'}
         assert expected.issubset(set(by_service))
         # Все черновые строки помечены стадией rough.
         assert all(item['stage'] == 'rough' for item in rough)
 
         # Жёсткие связки по объёму: демонтаж/стяжка/гидроизоляция — по полу, выравнивание — по стенам.
-        assert by_service['Демонтаж']['volume'] == Decimal('12.0')
+        assert by_service['Демонтаж напольного покрытия']['volume'] == Decimal('12.0')
         assert by_service['Стяжка пола']['volume'] == Decimal('12.0')
         assert by_service['Гидроизоляция']['volume'] == Decimal('12.0')
         assert by_service['Выравнивание стен']['volume'] == Decimal('34.1')
@@ -473,7 +550,7 @@ class TestRoughLabor:
         )
         services = {item['service'] for item in rough}
         assert 'Гидроизоляция' not in services
-        assert {'Демонтаж', 'Выравнивание стен', 'Стяжка пола'}.issubset(services)
+        assert {'Демонтаж напольного покрытия', 'Выравнивание стен', 'Стяжка пола'}.issubset(services)
 
     def test_dry_room_with_tile_floor_skips_waterproof(self, db_session):
         """Плитка на полу в сухой комнате гидроизоляцию не тянет — только мокрая зона."""
@@ -522,7 +599,7 @@ class TestEngineeringCalc:
         assert by_service['Монтаж светильника']['volume'] == Decimal('2')
         assert by_service['Прокладка кабеля']['volume'] == Decimal('48')
         assert by_service['Прокладка кабеля']['unit'] == 'м'
-        assert by_service['Сантехнические работы']['volume'] == Decimal('3')
+        assert by_service['Установка смесителя']['volume'] == Decimal('3')
         assert by_service['Монтаж труб']['volume'] == Decimal('9')
 
     def test_engineering_materials_units_and_waste(self, db_session):

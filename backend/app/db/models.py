@@ -43,6 +43,14 @@ class Material(Base):
     finish_key: Mapped[str | None]
     # Уровень варианта (min/avg/max), осмыслен только вместе с finish_key.
     variant_tier: Mapped[str | None]
+    # Токены смежных категорий (#406): список подстрок-латиницы, которых НЕ должно
+    # быть в slug'е source_url «своего» товара. Если slug резолвленной карточки
+    # содержит любой из них — товар из смежной категории (напр. «краска для
+    # древесины» под «Краска потолочная»: drevesin), строка помечается
+    # category_mismatch. Только запрет, без positive-require — чтобы честно
+    # широкие категории не давали ложных срабатываний. NULL = не проверяем.
+    # См. services/category_match.detect_category_mismatch.
+    category_exclusions: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
 
 class LaborService(Base):

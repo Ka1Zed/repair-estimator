@@ -9,15 +9,17 @@
 ProjectState {
   city:            string          // город для расчёта цен
   scope:           EstimateScope   // "finish_only" | "rough_and_finish" | "rough_only"
+  store:           string | null   // выбранный магазин материалов; null — «Любой» (автоподбор)
   rooms:           Room[]
   activeRoomIndex: number
 }
 ```
 
 `scope` определяет объём сметы (только чистовая / черновая+чистовая / только черновая) и
-уходит в `POST /api/estimates/calculate` как есть. Старые поля `repair_type`/`repair_options`
-из ранних версий стора удалены — их заменил `scope` на уровне проекта плюс `works` на уровне
-каждой комнаты (см. ниже).
+уходит в `POST /api/estimates/calculate` как есть. `store` (#365) ограничивает подбор цен
+материалов одним магазином (Мегастрой / Леман) — в запрос уходит как массив `stores` (`null`
+или `[store]`). Старые поля `repair_type`/`repair_options` из ранних версий стора удалены —
+их заменил `scope` на уровне проекта плюс `works` на уровне каждой комнаты (см. ниже).
 
 ## Тип Room
 
@@ -26,12 +28,13 @@ ProjectState {
 | Поле        | Тип                            | Описание                                          |
 |-------------|--------------------------------|---------------------------------------------------|
 | `id`        | `string` (UUID)                | Локальный идентификатор, в API не отправляется    |
-| `name`      | `string`                       | Название комнаты («Спальня», «Кухня»)             |
+| `name`      | `string`                       | Название комнаты («Комната», «Влажное помещение») |
 | `height`    | `number \| string`             | Высота потолка в метрах; конвертировать через `Number()` перед отправкой |
-| `room_type` | `"living" \| "kitchen" \| "bathroom" \| "hallway"` | Тип комнаты (пресет дефолтов)       |
+| `room_type` | `"living" \| "kitchen" \| "bathroom" \| "hallway"` | Тип комнаты — пресет дефолтов отделки. Пользователь его **не выбирает явно** (#366); «влажность» задаётся чекбоксом «Влажное помещение» в `WorksPanel` |
 | `points`    | `{ x: number \| string, y: number \| string }[]` | Вершины многоугольника в метрах; конвертировать через `Number()` перед отправкой |
 | `openings`  | `Opening[]`                    | Проёмы (двери и окна)                             |
 | `works`     | `RoomWorks`                    | Состав работ и отделка — на уровне комнаты        |
+| `ceilingShape` | `CeilingShape`              | Форма потолка (#357); влияет на `ceiling_area` на бэкенде. В API уходит как `ceiling_shape` |
 
 ## Тип Opening
 
@@ -41,6 +44,20 @@ ProjectState {
 | `type`   | `"door" \| "window"`   | Тип проёма                                            |
 | `width`  | `number \| string`     | Ширина в метрах; конвертировать через `Number()` перед отправкой |
 | `height` | `number \| string`     | Высота в метрах; конвертировать через `Number()` перед отправкой |
+
+## Тип CeilingShape
+
+Форма потолка на уровне комнаты (#357). Меняет только `ceiling_area` на бэкенде
+(`geometry_service`), не `works.ceiling` (отделку). В API уходит как `ceiling_shape`.
+
+| Поле           | Тип               | Описание                                                     |
+|----------------|-------------------|--------------------------------------------------------------|
+| `type`         | `"flat" \| "multilevel" \| "attic_slope"` | «Плоский» (`ceiling_area = floor_area`) / «Многоуровневый» / «Мансардный скат» |
+| `levels`       | `number \| null`  | `multilevel`: число уровней короба (1–5)                     |
+| `step_height_m`| `number \| null`  | `multilevel`: высота грани короба на уровень, м              |
+| `slope_deg`    | `number \| null`  | `attic_slope`: угол ската от горизонтали, ° (0–85)           |
+
+Дефолт — `{ type: "flat", levels: null, step_height_m: null, slope_deg: null }`.
 
 ## Тип RoomWorks
 
@@ -77,6 +94,7 @@ ProjectState {
   city,                    // из стора
   scope,                   // из стора
   tier: "avg",              // фиксированный запрос; ответ содержит min/avg/max по каждой позиции
+  stores: store ? [store] : null,  // из стора: ограничить подбор цен магазином (или «Любой»)
   rooms: rooms.map(room => ({
     name: room.name,
     room_type: room.room_type,
@@ -88,9 +106,18 @@ ProjectState {
       height: Number(op.height),
     })),
     works: room.works,     // состав работ на уровне комнаты
+    ceiling_shape: {       // форма потолка (#357)
+      type: room.ceilingShape.type,
+      levels: room.ceilingShape.levels,
+      step_height_m: room.ceilingShape.step_height_m,
+      slope_deg: room.ceilingShape.slope_deg,
+    },
   })),
 }
 ```
+
+Сборку тела выполняет `utils/roomsToPayload.ts` (`roomsToCalcPayload`), числовые поля
+конвертируются через `Number()`. Полный контракт запроса/ответа — в `docs/api.md`.
 
 Поля `id` из `Room` и `Opening` в запрос не включаются — они только локальные.
 
@@ -116,4 +143,4 @@ ProjectState {
 - Имя проекта (`ProjectSummary.name`/`Project.name`) не хранится в сторе — это отдельное локальное
   состояние `Workspace` (`projectName`), синхронизируемое через проп при открытии сохранённого
   проекта. Не путать со стором при доработке контракта.
-- Версия стора: **4**. Миграция v1→v2 переносит `repair_options` с уровня комнат на уровень проекта; v2→v3 добавляет `works` в каждую комнату по умолчанию из `defaultWorksForRoomType(room_type)`; v3→v4 добавляет `walls.wall_condition` (дефолт `"normal"` для старых записей).
+- Версия стора: **5**. Миграция v1→v2 переносит `repair_options` с уровня комнат на уровень проекта; v2→v3 добавляет `works` в каждую комнату по умолчанию из `defaultWorksForRoomType(room_type)`; v3→v4 добавляет `walls.wall_condition` (дефолт `"normal"` для старых записей); v4→v5 добавляет `ceilingShape` (дефолт `DEFAULT_CEILING_SHAPE` — плоский потолок) для старых записей.

@@ -16,7 +16,9 @@ from app.parsers._stats import filter_outliers
 from app.parsers.labor_table_parser import (
     LABOR_SERVICE_MAP,
     _matches,
+    _normalize_unit,
     _parse_price,
+    _unit_matches,
 )
 from app.parsers.otdelka_spb_parser import OtdelkaSpbParser
 from app.parsers.prorabneva_parser import ProrabnevaParser
@@ -27,21 +29,42 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 # Услуги, которые должны находиться на каждом прайсе (вёрстка сохранена в фикстурах).
 # prorabneva.ru не публикует шпаклёвку отдельной строкой — её closing закрывает otdelka.
+# Демонтаж/сантехника (#401) — не на каждом прайсе поделены на все подуслуги
+# (у части сайтов, напр. otdelka-spb.ru, нет отдельно бачка унитаза или демонтажа
+# стяжки строкой) — список per-parser отражает реальную вёрстку фикстуры, а не
+# требует полного покрытия (недостающее уходит в seed-fallback, #159).
 SERVICES_BY_PARSER = {
     "garantstroikompleks.ru": ["Покраска стен", "Покраска потолка", "Шпаклевка стен",
                                "Укладка ламината", "Укладка плитки", "Электромонтаж",
-                               "Сантехнические работы"],
+                               "Демонтаж напольного покрытия", "Демонтаж стен и перегородок",
+                               "Демонтаж стяжки", "Установка смесителя", "Установка унитаза",
+                               "Установка бачка унитаза",
+                               "Штробление", "Грунтование потолка", "Шпаклевка потолка"],
     "remont-uroven.ru": ["Покраска стен", "Покраска потолка", "Шпаклевка стен",
                          "Укладка ламината", "Укладка плитки", "Электромонтаж",
-                         "Сантехнические работы"],
+                         "Демонтаж напольного покрытия", "Демонтаж стен и перегородок",
+                         "Демонтаж стяжки", "Установка смесителя", "Установка унитаза",
+                         "Штробление", "Грунтование потолка", "Шпаклевка потолка",
+                         "Закладная под светильник"],
     "otdelka-spb.ru": ["Покраска стен", "Покраска потолка", "Шпаклевка стен",
                        "Укладка ламината", "Укладка плитки", "Электромонтаж",
-                       "Сантехнические работы"],
+                       "Демонтаж напольного покрытия", "Установка смесителя",
+                       "Установка унитаза",
+                       "Штробление", "Грунтование потолка", "Шпаклевка потолка",
+                       "Ниша под карниз"],
     "prorabneva.ru": ["Покраска стен", "Покраска потолка", "Укладка ламината",
-                      "Укладка плитки", "Электромонтаж", "Сантехнические работы"],
+                      "Укладка плитки", "Электромонтаж", "Демонтаж напольного покрытия",
+                      "Демонтаж стен и перегородок", "Демонтаж стяжки",
+                      "Установка смесителя", "Установка унитаза",
+                      "Штробление", "Грунтование потолка", "Ниша под карниз",
+                      "Закладная под светильник"],
     "kaz-stroyka.ru": ["Покраска стен", "Покраска потолка", "Шпаклевка стен",
                        "Укладка ламината", "Укладка плитки", "Электромонтаж",
-                       "Сантехнические работы"],
+                       "Демонтаж напольного покрытия", "Демонтаж стен и перегородок",
+                       "Демонтаж стяжки", "Установка смесителя", "Установка унитаза",
+                       "Установка бачка унитаза",
+                       "Штробление", "Грунтование потолка", "Шпаклевка потолка",
+                       "Ниша под карниз", "Закладная под светильник"],
 }
 
 # Фикстура — имя файла (прайс на одной странице) либо словарь url -> файл
@@ -94,6 +117,32 @@ def test_parser_extracts_positive_prices(parser_cls, fixture, region, source):
         assert parsed.source_url in parser._page_urls(), service
 
 
+# Нишевые услуги (#407): раньше жили только на seed-цене. После роутинга в прайсы
+# подрядчиков у каждой должно набираться >=3 источника (без учёта seed), чтобы вилка
+# min/avg/max опиралась на рынок, а не на один захардкоженный коридор.
+THIN_SERVICES_MIN_SOURCES = {
+    "Штробление": 3,
+    "Грунтование потолка": 3,
+    "Шпаклевка потолка": 3,
+    "Ниша под карниз": 3,
+    "Закладная под светильник": 3,
+}
+
+
+@pytest.mark.parametrize("service,min_sources", THIN_SERVICES_MIN_SOURCES.items())
+def test_thin_labor_services_have_price_corridor(service, min_sources):
+    '''#407: услуга находится минимум на min_sources прайсах подрядчиков.'''
+    hits = 0
+    for parser_cls, fixture, _region, _source in CASES:
+        parser = _parser_on_fixture(parser_cls, fixture)
+        try:
+            parser.fetch_price(service)
+        except RuntimeError:
+            continue  # на этом прайсе услуги нет -> уйдёт в seed-fallback
+        hits += 1
+    assert hits >= min_sources, f"{service}: источников {hits} < {min_sources}"
+
+
 def test_unit_cell_not_parsed_as_price():
     '''Ячейка-единица «м2» (цифра 2) не должна стать ценой: берём цену >= MIN_PRICE.'''
     parser = ProrabnevaParser()
@@ -129,7 +178,7 @@ def test_multipage_source_url_points_to_service_page():
     assert parser.fetch_price("Покраска стен").source_url == KazStroykaParser.PRICE_URL
     assert (parser.fetch_price("Электромонтаж").source_url
             == KazStroykaParser.EXTRA_PAGE_URLS[0])
-    assert (parser.fetch_price("Сантехнические работы").source_url
+    assert (parser.fetch_price("Установка смесителя").source_url
             == KazStroykaParser.EXTRA_PAGE_URLS[1])
 
 
@@ -148,7 +197,7 @@ def test_multipage_unavailable_page_does_not_break_others():
     parser = KazStroykaParser()
     parser._get_html = get_html
     assert parser.fetch_price("Электромонтаж").price_min > 0
-    assert parser.fetch_price("Сантехнические работы").price_min > 0
+    assert parser.fetch_price("Установка смесителя").price_min > 0
     with pytest.raises(RuntimeError):
         parser.fetch_price("Покраска стен")
 
@@ -302,25 +351,26 @@ def test_labor_combines_multiple_regional_sites(db_session):
     '''
     Две parser-цены одного региона объединяются в одну вилку: min=минимум,
     max=максимум, avg=среднее средних. source — представительный сайт (его avg
-    ближе к итоговому), sources — все сайты.
+    ближе к итоговому), sources — все сайты. Band каждого сайта узкий (в своём
+    коридоре, #411) → не клампится, реальная межсайтовая дисперсия проходит.
     '''
     service = db_session.query(LaborService).filter(LaborService.name == "Укладка плитки").first()
     garant = db_session.query(PriceSource).filter(PriceSource.name == "garantstroikompleks.ru").first()
     remont = db_session.query(PriceSource).filter(PriceSource.name == "remont-uroven.ru").first()
     rows = [
         LaborPrice(labor_service_id=service.id, source_id=garant.id, region="Москва",
-                   price_min=Decimal("400"), price_avg=Decimal("1000"), price_max=Decimal("1300"),
+                   price_min=Decimal("900"), price_avg=Decimal("1000"), price_max=Decimal("1150"),
                    source_url="https://garantstroikompleks.ru/prajs-list"),
         LaborPrice(labor_service_id=service.id, source_id=remont.id, region="Москва",
-                   price_min=Decimal("1600"), price_avg=Decimal("2700"), price_max=Decimal("4500"),
+                   price_min=Decimal("2400"), price_avg=Decimal("2700"), price_max=Decimal("3200"),
                    source_url="https://remont-uroven.ru/price.html"),
     ]
     db_session.add_all(rows)
     db_session.commit()
     try:
         price = get_labor_price("Укладка плитки", db=db_session, region="Москва")
-        assert price.price_min == Decimal("400")        # минимум по сайтам
-        assert price.price_max == Decimal("4500")       # максимум по сайтам
+        assert price.price_min == Decimal("900")        # минимум по сайтам (garant), не клампнут
+        assert price.price_max == Decimal("3200")       # максимум по сайтам (remont), не клампнут
         assert price.price_avg == Decimal("1850")       # среднее средних (1000+2700)/2
         assert price.region == "Москва"
         # Представительный сайт — garant (его avg 1000 ближе к 1850, чем 2700).
@@ -344,7 +394,8 @@ def test_labor_combine_attributes_min_and_max_to_different_sources_than_represen
     '''
     #348: когда ни минимум, ни максимум вилки не пришёлся на представителя —
     обе границы должны сослаться на СВОИ сайты (разные ссылки), а не молчать/
-    дублировать source_url представителя.
+    дублировать source_url представителя. Границы дают дешёвый и дорогой сайты
+    с узкими band'ами (не клампнуты, #411) → атрибутируются к своим источникам.
     '''
     service = db_session.query(LaborService).filter(LaborService.name == "Укладка плитки").first()
     garant = db_session.query(PriceSource).filter(PriceSource.name == "garantstroikompleks.ru").first()
@@ -352,21 +403,21 @@ def test_labor_combine_attributes_min_and_max_to_different_sources_than_represen
     otdelka = db_session.query(PriceSource).filter(PriceSource.name == "otdelka-spb.ru").first()
     rows = [
         LaborPrice(labor_service_id=service.id, source_id=garant.id, region="Москва",
-                   price_min=Decimal("500"), price_avg=Decimal("1000"), price_max=Decimal("1200"),
+                   price_min=Decimal("950"), price_avg=Decimal("1000"), price_max=Decimal("1100"),
                    source_url="https://garantstroikompleks.ru/prajs-list"),
         LaborPrice(labor_service_id=service.id, source_id=remont.id, region="Москва",
-                   price_min=Decimal("1600"), price_avg=Decimal("2700"), price_max=Decimal("4500"),
+                   price_min=Decimal("2400"), price_avg=Decimal("2700"), price_max=Decimal("3100"),
                    source_url="https://remont-uroven.ru/price.html"),
         LaborPrice(labor_service_id=service.id, source_id=otdelka.id, region="Москва",
-                   price_min=Decimal("200"), price_avg=Decimal("100"), price_max=Decimal("1300"),
+                   price_min=Decimal("90"), price_avg=Decimal("100"), price_max=Decimal("110"),
                    source_url="https://otdelka-spb.ru/prajjs/"),
     ]
     db_session.add_all(rows)
     db_session.commit()
     try:
         price = get_labor_price("Укладка плитки", db=db_session, region="Москва")
-        assert price.price_min == Decimal("200")    # минимум — otdelka
-        assert price.price_max == Decimal("4500")   # максимум — remont
+        assert price.price_min == Decimal("90")     # минимум — otdelka (не клампнут)
+        assert price.price_max == Decimal("3100")   # максимум — remont (не клампнут)
         # Представитель — garant (avg 1000 ближе к объединённой 1267, чем 2700 и 100).
         assert price.source_id == garant.id
         assert price.min_source_id == otdelka.id
@@ -397,13 +448,159 @@ def test_labor_single_site_reports_one_source(db_session):
         db_session.commit()
 
 
+@pytest.mark.usefixtures("setup_test_db")
+def test_labor_flat_premium_source_does_not_drag_avg(db_session):
+    '''
+    #412: сайт с реальным распределением (терции 600..3000, avg 1200) + одиночный
+    плоский премиум-прайс 3300. avg объединённой вилки тяготеет к телу распределения
+    (1200), а НЕ к среднему средних ((1200+3300)/2=2250): плоский подрядчик влияет
+    только на верхнюю границу вилки, но не тянет центр. Воспроизводит перекос из
+    живой сверки #407 («Шпаклевка потолка», Казань).
+    '''
+    service = db_session.query(LaborService).filter(LaborService.name == "Укладка плитки").first()
+    garant = db_session.query(PriceSource).filter(PriceSource.name == "garantstroikompleks.ru").first()
+    remont = db_session.query(PriceSource).filter(PriceSource.name == "remont-uroven.ru").first()
+    rows = [
+        LaborPrice(labor_service_id=service.id, source_id=garant.id, region="Москва",
+                   price_min=Decimal("600"), price_avg=Decimal("1200"), price_max=Decimal("3000"),
+                   source_url="https://garantstroikompleks.ru/prajs-list"),
+        LaborPrice(labor_service_id=service.id, source_id=remont.id, region="Москва",
+                   price_min=Decimal("3300"), price_avg=Decimal("3300"), price_max=Decimal("3300"),
+                   source_url="https://remont-uroven.ru/price.html"),
+    ]
+    db_session.add_all(rows)
+    db_session.commit()
+    try:
+        price = get_labor_price("Укладка плитки", db=db_session, region="Москва")
+        # Центр — по неплоскому сайту (1200), а не среднее средних (2250).
+        assert price.price_avg == Decimal("1200")
+        # Плоский сайт по-прежнему задаёт верхнюю границу вилки.
+        assert price.price_max == Decimal("3300")
+        assert set(price.contributing_sources) == {"garantstroikompleks.ru", "remont-uroven.ru"}
+    finally:
+        for r in rows:
+            db_session.delete(r)
+        db_session.commit()
+
+
+# --- контекстный матчинг: единица измерения и отсев дельт (#391) ---
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("м2", "м²"), ("м 2", "м²"), ("кв.м.", "м²"), ("м²", "м²"),
+        ("м3", "м³"), ("куб.м", "м³"),
+        ("п.м.", "м"), ("пог.м.", "м"), ("мп", "м"), ("м/п", "м"), ("м", "м"),
+        ("шт", "шт"), ("шт.", "шт"), ("компл", "шт"),
+        ("точка", "точка"),
+        ("Покраска стен", None), ("", None),
+    ],
+)
+def test_normalize_unit(text, expected):
+    assert _normalize_unit(text) == expected
+
+
+@pytest.mark.parametrize(
+    "row_unit,expected_unit,expected_match",
+    [
+        (None, "м²", True),     # единицу не распознали -> не отсеиваем (подстраховка)
+        ("м²", "м²", True),
+        ("м³", "м²", False),    # объём не сопоставим с площадью (#391)
+        ("шт", "точка", True),  # сайты пишут "шт" там, где у нас каталожная "точка"
+        ("точка", "шт", True),
+        ("м", "м²", False),
+    ],
+)
+def test_unit_matches(row_unit, expected_unit, expected_match):
+    assert _unit_matches(row_unit, expected_unit) is expected_match
+
+
+def test_matches_rejects_addon_surcharge_rows():
+    '''«... (дополнительно к стоимости ...)» — доплата к другой строке прайса,
+    а не цена самостоятельной операции (prorabneva.ru, #391).'''
+    rule = LABOR_SERVICE_MAP["Укладка плитки"]
+    assert not _matches(
+        "облицовка стен кафельной плиткой по диагонали (дополнительно к стоимости "
+        "облицовки кафельной плитки одного рисунка)", rule,
+    )
+    assert _matches("облицовка стен каф.плиткой", rule)
+
+
+def test_wall_leveling_excludes_removal_row():
+    '''«Выравнивание стен» — нанесение/выравнивание, а не снятие старой штукатурки
+    (otdelka-spb.ru: «отбивка штукатурки со стен», #391).'''
+    rule = LABOR_SERVICE_MAP["Выравнивание стен"]
+    assert not _matches("отбивка штукатурки со стен", rule)
+    assert _matches("штукатурка стен по маякам", rule)
+
+
+def test_electrical_install_excludes_switchboard_row():
+    '''«Электромонтаж» — розетка/выключатель «за точку», а не монтаж/установка
+    электрощита (otdelka-spb.ru, #391): старое слово "электрощит" не матчилось
+    реальной формулировке "электрического щита".'''
+    rule = LABOR_SERVICE_MAP["Электромонтаж"]
+    assert not _matches(
+        "установка электрического щита под электроавтоматы на 24 модулей врезка в бетон",
+        rule,
+    )
+    assert _matches("установка розетки", rule)
+
+
+def test_priming_excludes_bundled_waterproofing_row():
+    '''«Грунтование» — не составная строка с чужой услугой: для гидроизоляции есть
+    отдельная услуга «Гидроизоляция» (otdelka-spb.ru, #391).'''
+    rule = LABOR_SERVICE_MAP["Грунтование"]
+    assert not _matches("устройство гидроизоляции пола/грунтовка пола/обеспыливание", rule)
+    assert _matches("грунтовка стен", rule)
+
+
+def test_demolition_excludes_per_item_and_volume_rows_on_fixture():
+    '''«Демонтаж стен и перегородок» — услуга за м²; штучные (шт) и объёмные (м³)
+    строки прайса не сопоставимы по цене с площадью и не должны попадать в вилку
+    (#391). На фикстуре без фильтра по единице price_max доходил до 8500 ₽
+    («разборка монолитных бетонных конструкций», м³) — заведомо не то же самое,
+    что демонтаж кирпичной стены (м²).'''
+    parser = _parser_on_fixture(GarantStroiParser, "garantstroikompleks.html")
+    parsed = parser.fetch_price("Демонтаж стен и перегородок")
+    assert parsed.price_max < Decimal(8500)
+
+
+def test_demolition_splits_floor_covering_from_structural_walls_on_fixture():
+    '''«Демонтаж напольного покрытия» (линолеум/ламинат) и «Демонтаж стен и
+    перегородок» (кирпич/бетон) — разные подвыборки с разным порядком цен (#401):
+    раньше одна услуга «Демонтаж» держала оба конца на одной вилке (×10-40).'''
+    parser = _parser_on_fixture(GarantStroiParser, "garantstroikompleks.html")
+    floor_covering = parser.fetch_price("Демонтаж напольного покрытия")
+    walls = parser.fetch_price("Демонтаж стен и перегородок")
+    assert floor_covering.price_avg < walls.price_avg
+
+
+def test_plumbing_splits_faucet_toilet_and_tank_on_fixture():
+    '''«Установка бачка унитаза», «Установка смесителя», «Установка унитаза» —
+    разные операции по объёму работы (#401): раньше все три были одной услугой
+    «Сантехнические работы» на одной вилке.'''
+    parser = _parser_on_fixture(GarantStroiParser, "garantstroikompleks.html")
+    tank = parser.fetch_price("Установка бачка унитаза")
+    faucet = parser.fetch_price("Установка смесителя")
+    toilet = parser.fetch_price("Установка унитаза")
+    assert tank.price_avg < faucet.price_avg < toilet.price_avg
+
+
+def test_electrical_install_narrows_spread_on_fixture():
+    '''На otdelka-spb.ru «Электромонтаж» без фильтра включал ~20 строк монтажа
+    электрощита (400-8500 ₽) — вилка сужается после их исключения (#391).'''
+    parser = _parser_on_fixture(OtdelkaSpbParser, "otdelka-spb.html")
+    parsed = parser.fetch_price("Электромонтаж")
+    assert parsed.price_max < Decimal(2000)
+
+
 class TestRoughWorksRouting:
     """Черновые строки прайса роутятся в отдельные услуги, а не выкидываются (#190)."""
 
     def test_rough_rows_match_their_services(self):
         """Демонтаж/выравнивание/стяжка/гидроизоляция/грунт находят свою услугу."""
         cases = {
-            "Демонтаж перегородки": "Демонтаж",
+            "Демонтаж перегородки": "Демонтаж стен и перегородок",
             "Выравнивание стен штукатуркой": "Выравнивание стен",
             "Устройство стяжки пола": "Стяжка пола",
             "Гидроизоляция пола санузла": "Гидроизоляция",

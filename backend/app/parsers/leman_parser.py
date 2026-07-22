@@ -12,7 +12,12 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.parsers import leman_browser
-from app.parsers._stats import filter_outliers, filter_undersized_packages, price_band_slice
+from app.parsers._stats import (
+    filter_outliers,
+    filter_undersized_packages,
+    price_band_slice,
+    select_representative,
+)
 from app.parsers.base import BaseParser, ParsedPrice
 
 logger = logging.getLogger(__name__)
@@ -476,7 +481,10 @@ class LemanParser(BaseParser):
             return raw
 
     def fetch_price(
-        self, material_name: str, reference_package_size: Decimal | None = None
+        self,
+        material_name: str,
+        reference_package_size: Decimal | None = None,
+        apply_undersized_filter: bool = True,
     ) -> ParsedPrice:
         if material_name not in CATEGORY_MAP:
             raise ValueError(f"Нет категории Лемана для материала '{material_name}'")
@@ -523,13 +531,16 @@ class LemanParser(BaseParser):
             # и товар-представитель к себе, хотя типовая закупка — мешками/канистрами.
             # normalize_length (плинтус) сюда не попадает — там package_size это длина
             # рейки, а не масса/объём, треть справочной фасовки к ней не применима.
+            # Допущение проверено только для кг-материалов — apply_undersized_filter
+            # выключает отсев там, где оно не подтверждено (например, краска, #389).
+            filter_reference = reference_package_size if apply_undersized_filter else None
             items = filter_undersized_packages(
-                items, key=lambda it: it[3], reference_package_size=reference_package_size
+                items, key=lambda it: it[3], reference_package_size=filter_reference
             )
-            if reference_package_size is not None and not items:
+            if filter_reference is not None and not items:
                 raise RuntimeError(
                     f"Все карточки '{material_name}' — нетиповая фасовка "
-                    f"(< 1/3 справочной {reference_package_size} кг/л) — "
+                    f"(< 1/3 справочной {filter_reference} кг/л) — "
                     "как парсер не смог, откат на seed"
                 )
 
@@ -573,7 +584,11 @@ class LemanParser(BaseParser):
 
         # package_size берём у ТОГО ЖЕ товара-представителя (#306) — иначе
         # фасовка в смете и фасовка на странице source_url могут не совпадать.
-        representative = min(items, key=lambda it: abs(it[0] - price_avg))
+        # Выбор представителя учитывает и фасовку, а не только цену (#395) —
+        # см. select_representative.
+        representative = select_representative(
+            items, price_avg, reference_package_size, price_key=lambda it: it[0], package_key=lambda it: it[3]
+        )
         source_url = representative[1] or base_urls[0]
         package_size = representative[3]
 

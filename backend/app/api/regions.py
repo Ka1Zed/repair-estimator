@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.regions import DEFAULT_REGION, normalize_city
 from app.db.session import get_db
 from app.db.models import MaterialPrice, LaborPrice
 from app.parsers.base import BaseParser
@@ -8,10 +9,6 @@ from app.services.price_aggregator_service import get_available_stores
 from app.api.estimates import get_material_parsers
 
 router = APIRouter(prefix="/api", tags=["regions"])
-
-# Город по умолчанию: для него и для любого города без своих цен расчёт идёт
-# по базовым seed-ценам (region IS NULL).
-DEFAULT_REGION = "Казань"
 
 
 @router.get("/regions")
@@ -45,7 +42,17 @@ def get_store_availability(city: str, parsers: list[BaseParser] = Depends(get_ma
     города (см. price_aggregator_service.get_material_price/_select_regional_parsers);
     `available: false` — магазин известен системе, но физически не покрывает город
     (напр. Мегастрой для Москвы/СПб, где единственный источник — региональный Леман).
+
+    city валидируется/нормализуется тем же normalize_city, что и
+    EstimateRequest.city/ProjectCreate.city (#394/#396) — иначе регистр/пробелы
+    здесь сравнивались бы с covered_cities без нормализации и молча давали
+    available: false для всех магазинов вместо ошибки.
     '''
+    try:
+        city = normalize_city(city)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
+
     return {
         "city": city,
         "stores": get_available_stores(parsers, city),

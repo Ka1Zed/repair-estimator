@@ -53,6 +53,43 @@ def filter_undersized_packages(items: list, key, reference_package_size: Decimal
     return [it for it in items if key(it) is None or key(it) >= threshold]
 
 
+def select_representative(
+    items: list,
+    price_avg: Decimal,
+    reference_package_size: Decimal | None,
+    price_key=lambda x: x[0],
+    package_key=lambda x: None,
+):
+    """Выбирает товар-представитель (источник цены и package_size) внутри уже
+    отрезанной price_band-терции (#395).
+
+    До этой функции представитель выбирался только по ближайшей к price_avg
+    цене — package_size конкретной карточки в отборе не участвовал. У ходовых
+    фасовок (например, банка 5 л) цена, ближайшая к avg, часто оказывается и в
+    нижней, и в верхней терции — эконом и премиум-варианты получали одну и ту
+    же фасовку, хотя тир должен различать не только цену, но и упаковку.
+
+    Комбинируем ОТНОСИТЕЛЬНЫЕ (безразмерные, поэтому сравнимые между собой)
+    отклонения цены от price_avg и package_size от reference_package_size —
+    карточка с "нетипичной" фасовкой, но чуть более близкой ценой, больше не
+    выигрывает автоматически. reference_package_size или package_size
+    конкретной карточки неизвестны (None) либо reference_package_size <= 0
+    (как и в filter_undersized_packages) — вклад фасовки в скор = 0 (нечего
+    сравнивать, откатываемся к чистой цене, как и раньше).
+    """
+    def score(item) -> Decimal:
+        price = price_key(item)
+        price_dist = abs(price - price_avg) / price_avg if price_avg else Decimal(0)
+        package_size = package_key(item)
+        if reference_package_size is not None and reference_package_size > 0 and package_size is not None:
+            package_dist = abs(package_size - reference_package_size) / reference_package_size
+        else:
+            package_dist = Decimal(0)
+        return price_dist + package_dist
+
+    return min(items, key=score)
+
+
 def price_band_slice(items: list, band: str, key=lambda x: x) -> list:
     """Режет уже отфильтрованную (filter_outliers) выборку на терции по цене (#331).
 

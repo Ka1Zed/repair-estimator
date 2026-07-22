@@ -7,8 +7,12 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Material, MaterialPrice, PriceSource, LaborService, LaborPrice
+from app.db.models import MaterialPrice, PriceSource, LaborService, LaborPrice
 from app.parsers.base import BaseParser, ParsedPrice
+from app.services._query_cache import (
+    labor_service_by_name, material_by_name, source_by_name, source_name_by_id,
+)
+from app.services.repair_coeffs_service import clamp_price_corridor
 
 logger = logging.getLogger(__name__)
 
@@ -85,16 +89,14 @@ def get_price(
         ttl_hours = settings.PRICE_TTL_HOURS
 
     session = db
-    material = session.query(Material).filter(Material.name == material_name).first()
+    material = material_by_name(session, material_name)
     if not material:
         logger.warning(f"Материал '{material_name}' не найден в БД")
         return None
 
     # Пробуем парсер
     if parser is not None:
-        source = session.query(PriceSource).filter(
-            PriceSource.name == parser.source_name
-        ).first()
+        source = source_by_name(session, parser.source_name)
 
         if source is None:
             # Источник парсера отсутствует в БД (например, добавили парсер в код,
@@ -140,13 +142,21 @@ def get_price(
         if force_refresh or settings.PARSER_LIVE_FETCH:
             try:
                 # reference_package_size (#382) — справочная фасовка материала,
-                # парсеры кг/л-материалов отсеивают по ней нетиповую мелкую упаковку
-                # (см. app.parsers._stats.filter_undersized_packages).
+                # участвует в выборе товара-представителя (#395, select_representative)
+                # для любых материалов. Отсев нетиповой мелкой фасовки ДО статистики
+                # (filter_undersized_packages) включаем только для кг-материалов —
+                # именно на них проверено допущение «типовая закупка — мешками»
+                # (#382). У краски-премиум оно не подтвердилось: декоративная банка
+                # 0.9-1 л — легитимный формат, а не выброс, фильтр ложно её отсекал
+                # (#389). См. docs/price-sources.md.
                 reference_package_size = (
                     Decimal(str(material.package_size)) if material.package_size else None
                 )
+                apply_undersized_filter = material.unit == "кг"
                 parsed = parser.fetch_price(
-                    material_name, reference_package_size=reference_package_size
+                    material_name,
+                    reference_package_size=reference_package_size,
+                    apply_undersized_filter=apply_undersized_filter,
                 )
 
                 # Нулевую/пустую цену (VPN/блок-страница) не сохраняем и не возвращаем —
@@ -206,7 +216,7 @@ def get_price(
             return price_entry
 
     # Fallback: берем seed-цену из БД
-    seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
+    seed_source = source_by_name(session, "seed")
     if not seed_source:
         logger.error("Источник 'seed' не найден в БД")
         return None
@@ -236,6 +246,25 @@ def get_price(
     return seed_price
 
 
+def _combined_avg(rows) -> Decimal:
+    '''
+    Средняя объединённой вилки нескольких источников (#412).
+
+    Источник с реальным распределением цен (min<max: терции эконом→стандарт→премиум)
+    представляет тело рынка. Одиночный ПЛОСКИЙ прайс (min==max, напр. премиальный
+    подрядчик с единственной строкой) — лишь точка, и при «среднем средних» такой
+    выброс тянет avg наравне с целым распределением (живая сверка #407: kaz-стройка
+    даёт 600..3000, а плоский подрядчик — 3300, объединение давало avg≈2466 против
+    тела ~1000..1600). Поэтому центр считаем ТОЛЬКО по неплоским источникам, если они
+    есть: плоские по-прежнему участвуют в выборе границ вилки (min_row/max_row), но
+    не тянут центр. Если все источники плоские — обычное среднее (усреднять больше
+    нечего). Границы вилки эта функция не трогает — только avg.
+    '''
+    spread = [r for r in rows if r.price_max > r.price_min]
+    basis = spread or rows
+    return Decimal(round(statistics.mean([r.price_avg for r in basis])))
+
+
 def _combine_material_prices(session, material_id: int,
                               rows: list[MaterialPrice]) -> MaterialPrice:
     '''
@@ -254,23 +283,34 @@ def _combine_material_prices(session, material_id: int,
     Работает и для одного элемента rows (тогда вилка/представитель — этот же элемент),
     чтобы contributing_sources был заполнен и для единственного источника (как у labor).
 
-    min_row/max_row (#348) — строки, чьи price_min/price_max реально стали границами
-    вилки (а не просто число из min()/max() по значениям). Если такая строка совпадает
-    с представителем (тот же source_id), отдельную ссылку на границу не кладём (null) —
-    она и так есть в source/source_url, дублировать нечего.
+    Band КАЖДОГО источника прижимается к коридору по ЕГО средней ДО выбора границ
+    (#411, clamp_price_corridor): категорийный price-band одного источника (нижняя/
+    верхняя треть цен категории) гасится, а настоящая межисточниковая дисперсия
+    (min по одному источнику vs max по другому) проходит в вилку без клампа.
+
+    min_row/max_row (#348) — строки, чьи клампнутые price_min/price_max реально стали
+    границами вилки. Ссылку на границу не кладём (null), если эта строка совпадает с
+    представителем (дублировать source_url нечего) ИЛИ если границу задал кламп, а не
+    сырая цена источника (показанная цена уже не равна цене этого источника).
     '''
-    min_row = min(rows, key=lambda r: r.price_min)
-    max_row = max(rows, key=lambda r: r.price_max)
-    price_min = min_row.price_min
-    price_max = max_row.price_max
-    price_avg = Decimal(round(statistics.mean([r.price_avg for r in rows])))
+    clamped = {id(r): clamp_price_corridor(r.price_min, r.price_avg, r.price_max) for r in rows}
+    min_row = min(rows, key=lambda r: clamped[id(r)][0])
+    max_row = max(rows, key=lambda r: clamped[id(r)][1])
+    price_min = clamped[id(min_row)][0]
+    price_max = clamped[id(max_row)][1]
+    price_avg = _combined_avg(rows)
     representative = min(rows, key=lambda r: abs(r.price_avg - price_avg))
 
     source_names = [
-        s.name for s in session.query(PriceSource).filter(
-            PriceSource.id.in_({r.source_id for r in rows})
-        ).all()
+        name for name in (
+            source_name_by_id(session, sid) for sid in {r.source_id for r in rows}
+        ) if name is not None
     ]
+
+    min_is_clamp = price_min != min_row.price_min
+    max_is_clamp = price_max != max_row.price_max
+    min_attributable = min_row.source_id != representative.source_id and not min_is_clamp
+    max_attributable = max_row.source_id != representative.source_id and not max_is_clamp
 
     combined = MaterialPrice(
         material_id=material_id,
@@ -284,10 +324,10 @@ def _combine_material_prices(session, material_id: int,
         updated_at=representative.updated_at,
     )
     combined.contributing_sources = sorted(source_names)
-    combined.min_source_id = min_row.source_id if min_row.source_id != representative.source_id else None
-    combined.min_source_url = min_row.source_url if min_row.source_id != representative.source_id else None
-    combined.max_source_id = max_row.source_id if max_row.source_id != representative.source_id else None
-    combined.max_source_url = max_row.source_url if max_row.source_id != representative.source_id else None
+    combined.min_source_id = min_row.source_id if min_attributable else None
+    combined.min_source_url = min_row.source_url if min_attributable else None
+    combined.max_source_id = max_row.source_id if max_attributable else None
+    combined.max_source_url = max_row.source_url if max_attributable else None
     return combined
 
 
@@ -360,9 +400,9 @@ def get_material_price(
 
     Источников 0 (пустой parsers) — вернётся seed, как раньше при одном парсере.
     '''
-    seed_source = db.query(PriceSource).filter(PriceSource.name == "seed").first()
+    seed_source = source_by_name(db, "seed")
 
-    material = db.query(Material).filter(Material.name == material_name).first()
+    material = material_by_name(db, material_name)
     if not material:
         logger.warning(f"Материал '{material_name}' не найден в БД")
         return None
@@ -392,36 +432,73 @@ def get_material_price(
         )
         return combined
 
-    return seed_result
+    if seed_result is None:
+        return None
+    # Seed минует _combine (единственный источник), но его band — тот же категорийный
+    # price-band, что и у парсеров, и его тоже надо прижать к коридору (#411).
+    # Возвращаем транзитный клон (не мутируем персистентную seed-строку — иначе
+    # автофлаш сессии затёр бы seed в БД) без contributing_sources (контракт seed).
+    c_min, c_max = clamp_price_corridor(
+        seed_result.price_min, seed_result.price_avg, seed_result.price_max
+    )
+    return MaterialPrice(
+        material_id=seed_result.material_id,
+        source_id=seed_result.source_id,
+        price_min=c_min,
+        price_avg=seed_result.price_avg,
+        price_max=c_max,
+        region=seed_result.region,
+        source_url=seed_result.source_url,
+        package_size=seed_result.package_size,
+        updated_at=seed_result.updated_at,
+    )
 
 
 def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
-                          region: str | None) -> LaborPrice:
+                          region: str | None, *, clamp: bool = True) -> LaborPrice:
     '''
     Объединяет parser-цены нескольких сайтов одного региона в одну вилку:
-    min = минимум по сайтам, max = максимум, avg = среднее средних (так среднее
-    точнее, чем по одному прайсу). Возвращает несохраняемый (transient) LaborPrice.
+    min = минимум по сайтам, max = максимум, avg = средняя по неплоским сайтам
+    (см. _combined_avg, #412: одиночный плоский прайс не тянет центр). Возвращает
+    несохраняемый (transient) LaborPrice.
 
     Представительный сайт — чья средняя ближе всего к объединённой средней: его
     показываем в строке сметы (source/source_url). Полный список сайтов кладём в
     транзитивный атрибут .contributing_sources (его читает estimates → поле sources).
 
-    min_row/max_row (#348) — сайты, чьи price_min/price_max реально стали границами
-    вилки. Если такой сайт совпадает с представителем (тот же source_id), отдельную
-    ссылку на границу не кладём (null) — дублировать source/source_url нечего.
+    Band каждого сайта прижимается к коридору по его средней ДО выбора границ (#411,
+    clamp_price_corridor) — как у материалов: внутрисайтовый категорийный разброс
+    гасится, реальная межсайтовая (межподрядная) дисперсия проходит без клампа. Для
+    работ это особенно важно: у них нет tier-вариантов SKU, и межисточниковый разброс —
+    единственный канал реального рыночного разброса. clamp=False отключает кламп —
+    справочный блок скрытых работ намеренно показывает широкую вилку риска (#239).
+
+    min_row/max_row (#348) — сайты, чьи клампнутые price_min/price_max реально стали
+    границами вилки. Ссылку на границу не кладём (null), если сайт совпадает с
+    представителем ИЛИ границу задал кламп, а не сырая цена сайта.
     '''
-    min_row = min(rows, key=lambda r: r.price_min)
-    max_row = max(rows, key=lambda r: r.price_max)
-    price_min = min_row.price_min
-    price_max = max_row.price_max
-    price_avg = Decimal(round(statistics.mean([r.price_avg for r in rows])))
+    def _band(r: LaborPrice) -> tuple[Decimal, Decimal]:
+        if clamp:
+            return clamp_price_corridor(r.price_min, r.price_avg, r.price_max)
+        return (r.price_min, r.price_max)
+    clamped = {id(r): _band(r) for r in rows}
+    min_row = min(rows, key=lambda r: clamped[id(r)][0])
+    max_row = max(rows, key=lambda r: clamped[id(r)][1])
+    price_min = clamped[id(min_row)][0]
+    price_max = clamped[id(max_row)][1]
+    price_avg = _combined_avg(rows)
     representative = min(rows, key=lambda r: abs(r.price_avg - price_avg))
 
     source_names = [
-        s.name for s in session.query(PriceSource).filter(
-            PriceSource.id.in_({r.source_id for r in rows})
-        ).all()
+        name for name in (
+            source_name_by_id(session, sid) for sid in {r.source_id for r in rows}
+        ) if name is not None
     ]
+
+    min_is_clamp = price_min != min_row.price_min
+    max_is_clamp = price_max != max_row.price_max
+    min_attributable = min_row.source_id != representative.source_id and not min_is_clamp
+    max_attributable = max_row.source_id != representative.source_id and not max_is_clamp
 
     combined = LaborPrice(
         labor_service_id=service_id,
@@ -433,14 +510,15 @@ def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
         source_url=representative.source_url,
     )
     combined.contributing_sources = sorted(source_names)
-    combined.min_source_id = min_row.source_id if min_row.source_id != representative.source_id else None
-    combined.min_source_url = min_row.source_url if min_row.source_id != representative.source_id else None
-    combined.max_source_id = max_row.source_id if max_row.source_id != representative.source_id else None
-    combined.max_source_url = max_row.source_url if max_row.source_id != representative.source_id else None
+    combined.min_source_id = min_row.source_id if min_attributable else None
+    combined.min_source_url = min_row.source_url if min_attributable else None
+    combined.max_source_id = max_row.source_id if max_attributable else None
+    combined.max_source_url = max_row.source_url if max_attributable else None
     return combined
 
 
-def get_labor_price(service_name: str, db: Session, region: str | None = None) -> LaborPrice | None:
+def get_labor_price(service_name: str, db: Session, region: str | None = None,
+                    clamp: bool = True) -> LaborPrice | None:
     '''
     Возвращает цену работы. Источник правды — парсер (#144): сначала ищем валидные
     спарсенные цены (любой не-seed источник, записанный CLI update_prices), seed —
@@ -465,15 +543,20 @@ def get_labor_price(service_name: str, db: Session, region: str | None = None) -
     не пробрасываем.
 
     db — сессия приходит от вызывающего, эта функция сама её не открывает/закрывает.
+
+    clamp=True (по умолчанию) прижимает band каждого источника к коридору per-source
+    (#411) — так берёт цену основная смета. clamp=False отдаёт сырой band: его
+    запрашивает справочный блок скрытых работ (#239), где широкая вилка риска —
+    осознанный сигнал, а не категорийный шум, и кламп её бы схлопнул.
     '''
     ttl_hours = settings.PRICE_TTL_HOURS
     session = db
-    service = session.query(LaborService).filter(LaborService.name == service_name).first()
+    service = labor_service_by_name(session, service_name)
     if not service:
         logger.warning(f"Услуга '{service_name}' не найдена в БД")
         return None
 
-    seed_source = session.query(PriceSource).filter(PriceSource.name == "seed").first()
+    seed_source = source_by_name(session, "seed")
     if not seed_source:
         logger.error("Источник 'seed' не найден в БД")
         return None
@@ -506,7 +589,7 @@ def get_labor_price(service_name: str, db: Session, region: str | None = None) -
             pool, scope_region = base_rows, None
 
     if pool:
-        result = _combine_labor_prices(session, service.id, pool, scope_region)
+        result = _combine_labor_prices(session, service.id, pool, scope_region, clamp=clamp)
         logger.info(
             f"Цена работы '{service_name}': источник=parser "
             f"({', '.join(result.contributing_sources)}), region={scope_region}"
@@ -529,12 +612,28 @@ def get_labor_price(service_name: str, db: Session, region: str | None = None) -
             LaborPrice.region.is_(None),
         ).first()
 
-    if price:
-        logger.info(f"Цена работы '{service_name}': источник=seed (fallback), region={region}")
-    else:
+    if price is None:
         logger.warning(f"Seed-цена для работы '{service_name}' не найдена")
+        return None
 
-    return price
+    logger.info(f"Цена работы '{service_name}': источник=seed (fallback), region={region}")
+    if not clamp:
+        # Справочный блок скрытых работ (#239) берёт сырой seed-band — кламп бы
+        # схлопнул намеренно широкую вилку риска. Персистентную строку не мутируем.
+        return price
+    # Как у материалов (#411): seed минует _combine, но его band тоже категорийный —
+    # клампим к коридору. Транзитный клон, чтобы не затереть seed в БД автофлашем.
+    c_min, c_max = clamp_price_corridor(price.price_min, price.price_avg, price.price_max)
+    return LaborPrice(
+        labor_service_id=price.labor_service_id,
+        source_id=price.source_id,
+        price_min=c_min,
+        price_avg=price.price_avg,
+        price_max=c_max,
+        region=price.region,
+        source_url=price.source_url,
+        updated_at=price.updated_at,
+    )
 
 
 def update_labor_price(service_name: str, parser, db: Session, region: str | None = None) -> LaborPrice | None:

@@ -1,16 +1,23 @@
 from datetime import datetime
 from typing import List, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from app.core.regions import normalize_city
 from app.schemas.estimate import RoomInput
 
 
 class ProjectCreate(BaseModel):
     name: str
+    # Валидируется/нормализуется против SUPPORTED_CITIES, как EstimateRequest.city (#394).
     city: str
     rooms: List[RoomInput] = Field(min_length=1)
     scope: Literal["finish_only", "rough_and_finish", "rough_only"] = "finish_only"
+
+    @field_validator("city")
+    @classmethod
+    def validate_city(cls, v: str) -> str:
+        return normalize_city(v)
 
 
 class ProjectUpdate(ProjectCreate):

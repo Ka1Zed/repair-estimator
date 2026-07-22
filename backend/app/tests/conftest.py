@@ -164,13 +164,13 @@ def seed_test_data(session):
 
     # Материалы (с категорией). slug — как в seed_data/materials.json (#278).
     materials_data = [
-        {"name": "Краска для стен", "slug": "paint_walls", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "walls.paint", "variant_tier": "avg"},
-        {"name": "Краска потолочная", "slug": "paint_ceiling", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "ceiling.paint", "variant_tier": "avg"},
-        {"name": "Грунтовка", "slug": "primer", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10, "layers": 1},
-        {"name": "Шпаклевка стартовая", "slug": "putty_start", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30},
-        {"name": "Шпаклевка финишная", "slug": "putty_finish", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25},
+        {"name": "Краска для стен", "slug": "paint_walls", "category": "paint", "unit": "л", "consumption_per_m2": 0.13, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "walls.paint", "variant_tier": "avg", "category_exclusions": ["drevesin", "po-metall", "fasad"]},
+        {"name": "Краска потолочная", "slug": "paint_ceiling", "category": "paint", "unit": "л", "consumption_per_m2": 0.15, "waste_factor": 1.1, "package_size": 9, "layers": 2, "finish_key": "ceiling.paint", "variant_tier": "avg", "category_exclusions": ["drevesin", "po-metall", "fasad"]},
+        {"name": "Грунтовка", "slug": "primer", "category": "paint", "unit": "л", "consumption_per_m2": 0.12, "waste_factor": 1.1, "package_size": 10, "layers": 1, "finish_key": "primer", "variant_tier": "avg"},
+        {"name": "Шпаклевка стартовая", "slug": "putty_start", "category": "paint", "unit": "кг", "consumption_per_m2": 5.0, "waste_factor": 1.1, "package_size": 30, "finish_key": "putty_start", "variant_tier": "avg"},
+        {"name": "Шпаклевка финишная", "slug": "putty_finish", "category": "paint", "unit": "кг", "consumption_per_m2": 1.0, "waste_factor": 1.1, "package_size": 25, "finish_key": "putty_finish", "variant_tier": "avg"},
         {"name": "Ламинат", "slug": "laminate", "category": "floor", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 2.0, "finish_key": "floor.laminate", "variant_tier": "avg"},
-        {"name": "Плинтус", "slug": "plinth", "category": "floor", "unit": "м", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0},
+        {"name": "Плинтус", "slug": "plinth", "category": "floor", "unit": "м", "consumption_per_m2": 1.0, "waste_factor": 1.05, "package_size": 1.0, "finish_key": "plinth", "variant_tier": "avg"},
         {"name": "Плитка", "slug": "tile", "category": "tile", "unit": "м²", "consumption_per_m2": 1.0, "waste_factor": 1.15, "package_size": 1.2, "finish_key": "tile", "variant_tier": "avg"},
         {"name": "Плиточный клей", "slug": "tile_adhesive", "category": "tile", "unit": "кг", "consumption_per_m2": 4.5, "waste_factor": 1.1, "package_size": 25},
         {"name": "Затирка", "slug": "grout", "category": "tile", "unit": "кг", "consumption_per_m2": 0.4, "waste_factor": 1.1, "package_size": 2},
@@ -221,6 +221,34 @@ def seed_test_data(session):
         price_min=2200, price_avg=3200, price_max=4500,
     ))
 
+    # Варианты primer (#390) — в отличие от ламината, у грунта на unit="л" висит
+    # модификатор двойного слоя (primer_two_coats, см. quantity_of), матчащийся по
+    # finish_key. Даёт regression-покрытие: эконом/премиум SKU (свой slug) должны
+    # получать двойной слой так же, как и avg-товар.
+    primer_variants = [
+        Material(
+            name="Грунтовка эконом", slug="primer_economy", category="paint", unit="л",
+            consumption_per_m2=0.12, waste_factor=1.1, package_size=5, layers=1,
+            finish_key="primer", variant_tier="min",
+        ),
+        Material(
+            name="Грунтовка премиум", slug="primer_premium", category="paint", unit="л",
+            consumption_per_m2=0.12, waste_factor=1.1, package_size=10, layers=1,
+            finish_key="primer", variant_tier="max",
+        ),
+    ]
+    for mat in primer_variants:
+        session.add(mat)
+    session.flush()
+    session.add(MaterialPrice(
+        material_id=primer_variants[0].id, source_id=src.id,
+        price_min=45, price_avg=65, price_max=90,
+    ))
+    session.add(MaterialPrice(
+        material_id=primer_variants[1].id, source_id=src.id,
+        price_min=300, price_avg=450, price_max=650,
+    ))
+
     # Региональная seed-цена для теста регионального lookup (#127):
     # отличается от базовой (avg 200 против 120), чтобы выбор региона был заметен.
     paint = session.query(Material).filter(Material.name == "Краска для стен").first()
@@ -246,14 +274,20 @@ def seed_test_data(session):
         {"name": "Отделка откосов", "slug": "otkos", "specialist_type": "Штукатур", "unit": "м²"},
         {"name": "Электромонтаж", "slug": "electrical_install", "specialist_type": "Электрик", "unit": "точка"},
         {"name": "Штробление", "slug": "chasing", "specialist_type": "Электрик", "unit": "м"},
-        {"name": "Сантехнические работы", "slug": "plumbing_works", "specialist_type": "Сантехник", "unit": "точка"},
+        # Сантехника (#401): установка по типу прибора вместо одной широкой услуги.
+        {"name": "Установка смесителя", "slug": "install_faucet", "specialist_type": "Сантехник", "unit": "точка"},
+        {"name": "Установка унитаза", "slug": "install_toilet", "specialist_type": "Сантехник", "unit": "точка"},
+        {"name": "Установка бачка унитаза", "slug": "install_toilet_tank", "specialist_type": "Сантехник", "unit": "точка"},
         # Гранулярная инженерка works (#222).
         {"name": "Прокладка кабеля", "slug": "cable_lay", "specialist_type": "Электрик", "unit": "м"},
         {"name": "Монтаж розетки", "slug": "socket_mount", "specialist_type": "Электрик", "unit": "шт"},
         {"name": "Монтаж светильника", "slug": "light_mount", "specialist_type": "Электрик", "unit": "шт"},
         {"name": "Монтаж труб", "slug": "pipe_mount", "specialist_type": "Сантехник", "unit": "м"},
-        # Черновые работы (#190).
-        {"name": "Демонтаж", "slug": "demolition", "specialist_type": "Разнорабочий", "unit": "м²"},
+        # Черновые работы (#190). Демонтаж (#401) — по типу операции вместо одной
+        # услуги на м² вперемешку с лёгким и капитальным демонтажом.
+        {"name": "Демонтаж напольного покрытия", "slug": "demolition_floor_covering", "specialist_type": "Разнорабочий", "unit": "м²"},
+        {"name": "Демонтаж стен и перегородок", "slug": "demolition_walls", "specialist_type": "Разнорабочий", "unit": "м²"},
+        {"name": "Демонтаж стяжки", "slug": "demolition_screed", "specialist_type": "Разнорабочий", "unit": "м²"},
         {"name": "Выравнивание стен", "slug": "level_walls", "specialist_type": "Штукатур", "unit": "м²"},
         {"name": "Стяжка пола", "slug": "screed_floor", "specialist_type": "Стяжечник", "unit": "м²"},
         {"name": "Гидроизоляция", "slug": "waterproof", "specialist_type": "Гидроизолировщик", "unit": "м²"},
@@ -345,7 +379,9 @@ class _StubMaterialParser(BaseParser):
     def __init__(self, fetch=None):
         self._fetch = fetch
 
-    def fetch_price(self, material_name: str, reference_package_size=None) -> ParsedPrice:
+    def fetch_price(
+        self, material_name: str, reference_package_size=None, apply_undersized_filter=True
+    ) -> ParsedPrice:
         if self._fetch is None:
             raise RuntimeError("парсер материалов отключён в тестах (#174)")
         return self._fetch(material_name)

@@ -22,9 +22,11 @@ from app.parsers.leman_parser import (
     CATEGORY_MAP,
     LEMAN_MOSCOW,
     LEMAN_SPB,
+    MATERIAL_UNITS,
     LemanParser,
     _length_m_from_title,
     _parse_page,
+    _select_package_size,
 )
 
 PAGE_URL = "https://kazan.lemanapro.ru/catalogue/kraski-dlya-sten-i-potolkov/"
@@ -212,12 +214,13 @@ def test_package_size_none_when_only_one_price_block_present(monkeypatch):
     assert parsed.package_size is None
 
 
-def test_tile_and_laminate_use_primary_block_when_it_is_already_per_m2(monkeypatch):
-    # У плитки/ламината основной блок уже "₽/м²", вторичный — "₽/кор." (за
-    # упаковку) и не должен использоваться.
+def test_tile_uses_primary_block_when_it_is_already_per_m2(monkeypatch):
+    # У плитки основной блок уже "₽/м²", вторичный — "₽/кор." (за упаковку) и
+    # не должен использоваться.
     html = _page(
         _item(
             "/product/tile-1/",
+            name="Плитка настенная Kerama Marazzi Клемансо 25х40 см 1.2 м²",
             price="1125",
             price_unit="м²",
             unitprice="1368",
@@ -233,6 +236,45 @@ def test_tile_and_laminate_use_primary_block_when_it_is_already_per_m2(monkeypat
     # основной уже за м² (база), вторичный "₽/кор." — цена упаковки. Формула
     # та же: package_size = цена_упаковки / цена_базовой_единицы = 1368/1125 м².
     assert parsed.package_size == Decimal("1368") / Decimal("1125")
+
+
+def test_laminate_uses_primary_block_when_it_is_already_per_m2(monkeypatch):
+    # #395: раньше формула для ламината проверялась только на плиточной
+    # фикстуре "по аналогии" — своей вёрстки не было. Собственная фикстура с
+    # другими числами и реальным названием ламинатной карточки: основной блок
+    # уже "₽/м²", вторичный — "₽/уп." (за упаковку) и не должен использоваться
+    # как базовая цена.
+    html = _page(
+        _item(
+            "/product/laminate-1/",
+            name="Ламинат Kronospan Alfa Дуб Верден 32 класс 2.131 м²",
+            price="990",
+            price_unit="м²",
+            unitprice="2109.99",
+            unitprice_unit="уп.",
+        )
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Ламинат")
+
+    assert parsed.price_avg == Decimal("990")
+    # package_size (#306) = цена_упаковки / цена_базовой_единицы = 2109.99/990 м².
+    assert parsed.package_size == Decimal("2109.99") / Decimal("990")
+
+
+def test_select_package_size_for_laminate_spec_uses_package_block_over_base():
+    # #395: раньше формула для ламината проверялась косвенно через фикстуру
+    # плитки "по аналогии" — здесь напрямую гоняем _select_package_size на
+    # ламинатном UnitSpec со своими кандидатами (не переиспользуя плиточные
+    # числа): базовая цена "990 ₽/м²", кандидаты содержат ещё и "₽/уп." —
+    # именно он должен пойти в числитель формулы.
+    laminate_spec = MATERIAL_UNITS["Ламинат"]
+    candidates = [(Decimal("990"), "м²"), (Decimal("2109.99"), "уп.")]
+
+    package_size = _select_package_size(candidates, laminate_spec, base_price=Decimal("990"))
+
+    assert package_size == Decimal("2109.99") / Decimal("990")
 
 
 def test_wallpaper_accepts_pieces_as_rolls(monkeypatch):
@@ -498,6 +540,77 @@ def test_putty_all_undersized_raises_when_reference_given(monkeypatch):
         LemanParser().fetch_price("Шпаклевка финишная", reference_package_size=Decimal("25"))
 
 
+# Отсев мелкой фасовки — только для кг-материалов (#389): допущение "типовая
+# закупка — мешками" проверено на #382 (шпаклёвка/клей/затирка), но для
+# премиум-краски декоративная банка 0.9-1 л — легитимный формат, а не выброс.
+# price_aggregator_service включает apply_undersized_filter только при
+# material.unit == "кг" — тесты ниже гоняют сам параметр парсера напрямую.
+
+
+def test_paint_premium_undersized_filter_disabled_keeps_small_decorative_jar(monkeypatch):
+    html = _page(
+        _item(
+            "/product/paint-jar-0.9l/",
+            name="Краска premium декоративная 0.9 л",
+            price="3600",
+            price_unit="шт.",
+            unitprice="4000",
+            unitprice_unit="л",
+        ),
+        _item(
+            "/product/paint-can-10l/",
+            name="Краска premium 10 л",
+            price="36000",
+            price_unit="шт.",
+            unitprice="3600",
+            unitprice_unit="л",
+        ),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price(
+        "Краска для стен премиум",
+        reference_package_size=Decimal("10"),
+        apply_undersized_filter=False,
+    )
+
+    # apply_undersized_filter=False — банка 0.9 л не отсекается, несмотря на то что
+    # она меньше трети справочной фасовки (10/3 ≈ 3.33 л).
+    assert parsed.price_max == Decimal("4000")
+    assert parsed.price_min == Decimal("3600")
+
+
+def test_paint_premium_undersized_filter_enabled_would_drop_small_decorative_jar(monkeypatch):
+    # Воспроизводит баг #389: со старым дефолтным поведением (apply_undersized_filter=
+    # True) легитимная декоративная фасовка 0.9 л ложно отсекается как "нетиповая".
+    html = _page(
+        _item(
+            "/product/paint-jar-0.9l/",
+            name="Краска premium декоративная 0.9 л",
+            price="3600",
+            price_unit="шт.",
+            unitprice="4000",
+            unitprice_unit="л",
+        ),
+        _item(
+            "/product/paint-can-10l/",
+            name="Краска premium 10 л",
+            price="36000",
+            price_unit="шт.",
+            unitprice="3600",
+            unitprice_unit="л",
+        ),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price(
+        "Краска для стен премиум", reference_package_size=Decimal("10")
+    )
+
+    assert parsed.price_avg == Decimal("3600")  # 0.9 л карточка отсеяна, осталась только банка 10 л
+    assert parsed.package_size == Decimal("10")
+
+
 def test_plintus_normalizes_price_per_piece_by_length_from_title(monkeypatch):
     html = _page(
         _item(
@@ -593,6 +706,31 @@ def test_fetch_price_excludes_outliers_from_spread_and_source(monkeypatch):
     assert parsed.price_max == Decimal("250")
     assert parsed.price_max / parsed.price_min < 4
     assert "designer" not in (parsed.source_url or "")
+
+
+def test_price_band_representative_prefers_reference_package_size_on_price_tie(monkeypatch):
+    # #395: внутри уже отрезанной эконом-терции цены двух банок (95 и 105 ₽/л)
+    # равноудалены от avg=100 — раньше побеждала первая по порядку сортировки
+    # (банка 5 л), теперь должна побеждать банка 10 л — её package_size
+    # совпадает со справочной Material.package_size этого tier-варианта.
+    def _paint(href, title, price, unitprice):
+        return _item(href, name=title, price=price, price_unit="шт.", unitprice=unitprice, unitprice_unit="л")
+
+    html = _page(
+        _paint("/product/eco-5l/", "Краска Economy 5 л", "475", "95"),
+        _paint("/product/eco-10l/", "Краска Economy 10 л", "1050", "105"),
+        _paint("/product/mid-a/", "Краска Mid A 5 л", "2000", "400"),
+        _paint("/product/mid-b/", "Краска Mid B 5 л", "2200", "440"),
+        _paint("/product/mid-c/", "Краска Mid C 5 л", "2400", "480"),
+        _paint("/product/mid-d/", "Краска Mid D 5 л", "2600", "520"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = LemanParser().fetch_price("Краска для стен эконом", reference_package_size=Decimal("10"))
+
+    assert parsed.price_avg == Decimal("100")
+    assert "eco-10l" in parsed.source_url
+    assert parsed.package_size == Decimal("10")
 
 
 def test_fetch_price_economy_and_premium_return_different_products(monkeypatch):

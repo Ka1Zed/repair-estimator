@@ -434,6 +434,47 @@ def test_parser_package_size_overrides_static_and_stays_consistent_with_quantity
     assert paint["quantity"] == pytest.approx(paint["packs"] * paint["package_size"], rel=1e-6)
 
 
+def test_category_mismatch_flag_on_cross_category_product(stub_material_parser):
+    """#406: под «Краска потолочная» резолвится «краска для древесины» (slug
+    source_url содержит запрещённый токен) → строка и её avg_item помечены
+    category_mismatch=true. «Краска для стен» с честной карточкой и seed-позиции
+    (ламинат) НЕ помечаются — без ложных срабатываний."""
+    from decimal import Decimal
+    from app.parsers.base import ParsedPrice
+
+    wood_url = "https://kazan.leman.ru/product/kraska-dlya-drevesiny-parade-carnelian-1"
+    walls_url = "https://kazan.leman.ru/product/kraska-dlya-sten-i-potolkov-parade-w1-2"
+
+    def fake_fetch(material_name):
+        if material_name == "Краска потолочная":
+            return ParsedPrice(price_min=Decimal("500"), price_avg=Decimal("700"),
+                               price_max=Decimal("900"), source_url=wood_url)
+        if material_name == "Краска для стен":
+            return ParsedPrice(price_min=Decimal("500"), price_avg=Decimal("700"),
+                               price_max=Decimal("900"), source_url=walls_url)
+        raise ValueError(f"нет категории для '{material_name}'")
+
+    stub_material_parser(fake_fetch)
+
+    response = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD)
+    assert response.status_code == 200
+    materials = response.json()["materials"]
+
+    ceiling = next(m for m in materials if m["name"] == "Краска потолочная")
+    assert ceiling["category_mismatch"] is True
+    assert ceiling["avg_item"]["category_mismatch"] is True
+
+    # Стеновая краска: карточка честная (kraska-dlya-sten...) — не помечаем.
+    walls = next(m for m in materials if m["name"] == "Краска для стен")
+    assert walls["source_url"] == walls_url
+    assert walls["category_mismatch"] is False
+    assert walls["avg_item"]["category_mismatch"] is False
+
+    # Ламинат уходит в seed (source_url=None) — флага нет.
+    laminate = next(m for m in materials if m["name"] == "Ламинат")
+    assert laminate["category_mismatch"] is False
+
+
 def test_parser_fallback_on_error():
     """Когда парсер падает, расчёт не ломается и source остаётся 'seed'.
     Парсер по умолчанию заглушён падающим stub_material_parser → seed."""
@@ -483,11 +524,11 @@ def test_full_workset_has_electric_and_plumbing():
     assert labor["Прокладка кабеля"]["unit"] == "м"
 
     # Сантехника bathroom по дефолту: 3 точки → труба 3*3 = 9 м.
-    assert labor["Сантехнические работы"]["volume"] == pytest.approx(3.0)
-    assert labor["Сантехнические работы"]["unit"] == "точка"
+    assert labor["Установка смесителя"]["volume"] == pytest.approx(3.0)
+    assert labor["Установка смесителя"]["unit"] == "точка"
     assert labor["Монтаж труб"]["volume"] == pytest.approx(9.0)
 
-    for name in ("Монтаж розетки", "Прокладка кабеля", "Сантехнические работы", "Монтаж труб"):
+    for name in ("Монтаж розетки", "Прокладка кабеля", "Установка смесителя", "Монтаж труб"):
         assert labor[name]["total_avg"] > 0
 
     # Материалы инженерки: розетки/светильники штучно, кабель/труба с запасом.
@@ -585,7 +626,7 @@ def test_explicit_zero_disables_default():
     assert response.status_code == 200
     services = {x["service"] for x in response.json()["labor"]}
     # Явный 0 → сантехнических работ и монтажа труб нет.
-    assert "Сантехнические работы" not in services
+    assert "Установка смесителя" not in services
     assert "Монтаж труб" not in services
 
 
@@ -611,7 +652,7 @@ def test_plumbing_enabled_adds_plumbing_rows():
     response = client.post("/api/estimates/calculate", json=payload)
     assert response.status_code == 200
     services = {x["service"] for x in response.json()["labor"]}
-    assert "Сантехнические работы" in services
+    assert "Установка смесителя" in services
 
 
 def test_plinth_subtracts_door_width():
@@ -680,7 +721,7 @@ def test_finish_only_is_default_and_labeled():
     assert data["scope"] == "finish_only"
 
     services = {x["service"] for x in data["labor"]}
-    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+    for rough in ("Демонтаж напольного покрытия", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
         assert rough not in services
     # У каждой строки работ есть стадия.
     assert all("stage" in lab for lab in data["labor"])
@@ -702,11 +743,11 @@ def test_finish_only_keeps_engineering_wiring():
         assert labor[wiring]["stage"] == "rough"
         assert labor[wiring]["total_avg"] > 0
 
-    for fixture in ("Монтаж розетки", "Монтаж светильника", "Сантехнические работы"):
+    for fixture in ("Монтаж розетки", "Монтаж светильника", "Установка смесителя"):
         assert fixture in labor, f"монтаж приборов «{fixture}» должен остаться в finish_only"
         assert labor[fixture]["stage"] == "finish"
 
-    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+    for rough in ("Демонтаж напольного покрытия", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
         assert rough not in labor, f"черновая работа «{rough}» не должна попасть в finish_only"
 
 
@@ -719,7 +760,7 @@ def test_rough_scope_adds_rough_works():
     assert data["scope"] == "rough_and_finish"
 
     labor = {x["service"]: x for x in data["labor"]}
-    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
+    for rough in ("Демонтаж напольного покрытия", "Выравнивание стен", "Стяжка пола", "Гидроизоляция", "Грунтование"):
         assert rough in labor, f"нет черновой работы «{rough}»"
         assert labor[rough]["stage"] == "rough"
         assert labor[rough]["total_avg"] > 0
@@ -751,7 +792,7 @@ def test_rough_only_excludes_finish_labor():
     assert data["scope"] == "rough_only"
 
     labor = {x["service"]: x for x in data["labor"]}
-    for rough in ("Демонтаж", "Выравнивание стен", "Стяжка пола", "Грунтование",
+    for rough in ("Демонтаж напольного покрытия", "Выравнивание стен", "Стяжка пола", "Грунтование",
                   "Прокладка кабеля"):
         assert rough in labor, f"нет черновой работы «{rough}»"
         assert labor[rough]["stage"] == "rough"
@@ -911,7 +952,7 @@ def test_hidden_works_block_present_and_not_in_summary():
     services = {x["service"] for x in hidden["items"]}
     # Жилая комната с отделкой пола/стен и электрикой: демонтаж всегда, плюс стяжка,
     # выравнивание стен, штробы под кабель. Гидроизоляции в сухой комнате нет.
-    assert {"Демонтаж", "Стяжка пола", "Выравнивание стен", "Штробление"} <= services
+    assert {"Демонтаж напольного покрытия", "Стяжка пола", "Выравнивание стен", "Штробление"} <= services
     assert "Гидроизоляция" not in services
     assert hidden["total_avg"] > 0
 
@@ -925,6 +966,22 @@ def test_hidden_works_block_present_and_not_in_summary():
     assert labor_sum == pytest.approx(data["summary"]["labor_avg"], rel=1e-6)
     hidden_services = {x["service"] for x in hidden["items"]}
     assert hidden_services.isdisjoint({lab["service"] for lab in data["labor"]})
+
+
+def test_hidden_works_keeps_raw_wide_band():
+    """Скрытые работы показывают СЫРОЙ (не клампнутый) seed-band (#239 vs #411).
+
+    Кламп коридора PRICE_CORRIDOR (−15/+20%) — про категорийный шум внутри одного
+    источника в основной смете. Блок скрытых работ, наоборот, намеренно широкий:
+    это справочная вилка риска. Он берёт цену с clamp=False, поэтому реальный
+    seed-band проходит целиком. У «Штробления» seed-band заведомо шире коридора —
+    если бы кламп применился, границы прижались бы ровно к 0.85/1.20 от средней.
+    """
+    data = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD).json()
+    chasing = next(x for x in data["hidden_works"]["items"] if x["service"] == "Штробление")
+    # Границы заведомо за коридором → кламп бы их сузил, а он здесь не применяется.
+    assert chasing["total_min"] / chasing["total_avg"] < 0.85
+    assert chasing["total_max"] / chasing["total_avg"] > 1.20
 
 
 def test_hidden_works_scenario_driven():
@@ -1417,7 +1474,11 @@ def test_material_min_avg_max_item_single_request():
                     "walls": {"enabled": True, "finish": "paint"},
                     "ceiling": {"enabled": False, "finish": None},
                     "electric": {"enabled": False},
-                    "plumbing": {"enabled": False},
+                    # plumbing даёт трубу — единственный материал в этом наборе работ,
+                    # который после #390 остался без finish_key (грунт/шпаклёвка/плинтус/
+                    # краска стен теперь все тиренные, для примера "один товар на все tier"
+                    # нужен подлинно tier-agnostic материал).
+                    "plumbing": {"enabled": True, "points": 0, "pipe_m": 2},
                 }
             }
         ],
@@ -1446,14 +1507,14 @@ def test_material_min_avg_max_item_single_request():
     assert laminate["avg_item"]["price"] == pytest.approx(laminate["price_avg"])
     assert laminate["avg_item"]["total"] == pytest.approx(laminate["total_avg"])
 
-    # Позиция без finish_key (напр. грунтовка) — один товар на все tier: имя и ссылка
-    # совпадают у всех трёх *_item.
-    primer = next(m for m in materials if m["name"] == "Грунтовка")
-    assert primer["min_item"]["name"] == primer["avg_item"]["name"] == primer["max_item"]["name"] == "Грунтовка"
+    # Позиция без finish_key (труба) — один товар на все tier: имя и ссылка совпадают
+    # у всех трёх *_item.
+    pipe = next(m for m in materials if m["name"] == "Труба водопроводная")
+    assert pipe["min_item"]["name"] == pipe["avg_item"]["name"] == pipe["max_item"]["name"] == "Труба водопроводная"
     assert (
-        primer["min_item"]["source_url"]
-        == primer["avg_item"]["source_url"]
-        == primer["max_item"]["source_url"]
+        pipe["min_item"]["source_url"]
+        == pipe["avg_item"]["source_url"]
+        == pipe["max_item"]["source_url"]
     )
 
 

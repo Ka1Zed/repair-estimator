@@ -33,6 +33,12 @@
   border-radius: 3px;
 }
 
+.error {
+  color: #B5524A;
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+
 .addBtn {
   padding: 8px 15px;
   cursor: pointer;

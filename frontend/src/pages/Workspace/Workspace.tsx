@@ -48,6 +48,10 @@ const formatPrice = (price: number) => `${Math.round(price).toLocaleString("ru-R
 const formatNum = (n: number) =>
   n.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const formatQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+// Фасовка от парсера приходит с float-хвостом (8.999975… л, 1.974994… м²) — округляем
+// до 2 знаков, чтобы не показывать мусор пользователю, но сохранить реальную дробность
+// упаковки (напр. 1.97 м² в пачке ламината). Экспорт уже чистит это через fmtQty.
+const formatPackage = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
 
 // Регион, по которому реально взялась цена; null → нерегиональный источник
@@ -275,6 +279,12 @@ export function Workspace({
     [stores, city],
   );
 
+  // Порядковый номер запроса расчёта: авто-пересчёт по дебаунсу и клик по кнопке
+  // могут запустить несколько запросов подряд. Если ответ на старый запрос придёт
+  // позже нового (сеть/нагрузка), он не должен перезаписать свежую смету — сверяем
+  // номер перед setState и игнорируем устаревший ответ.
+  const calcSeqRef = useRef(0);
+
   // silent=true — авто-пересчёт по дебаунсу: молча пропускаем невалидное состояние,
   // не пугаем пользователя ошибкой, пока он редактирует.
   const runCalculate = useCallback(
@@ -314,6 +324,7 @@ export function Workspace({
         return;
       }
 
+      const seq = ++calcSeqRef.current;
       setIsLoading(true);
       setError(null);
       try {
@@ -333,6 +344,9 @@ export function Workspace({
         // товара, а не про эконом/премиум SKU, см. docs/api.md).
         const res = (await calculateEstimate(payload)) as EstimateResponse;
 
+        // Пришёл ответ на устаревший запрос — уже летит более свежий, игнорируем.
+        if (seq !== calcSeqRef.current) return;
+
         const materials = res.materials;
         const materialsMin = materials.reduce((s, m) => s + (m.min_item?.total ?? 0), 0);
         const materialsMax = materials.reduce((s, m) => s + (m.max_item?.total ?? 0), 0);
@@ -349,12 +363,14 @@ export function Workspace({
         setMaterialOverrides({});
         setLaborOverrides({});
       } catch (err) {
+        if (seq !== calcSeqRef.current) return;
         console.error(err);
         if (!silent) {
           setError("Не удалось рассчитать смету. Проверьте, что бэкенд запущен.");
         }
       } finally {
-        setIsLoading(false);
+        // Гасим индикатор загрузки только для самого свежего запроса.
+        if (seq === calcSeqRef.current) setIsLoading(false);
       }
     },
     [rooms, city, scope, store],
@@ -540,7 +556,7 @@ export function Workspace({
         details: [
           { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
           { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
-          { label: "Упаковок", value: `${m.packs} × ${m.package_size} ${m.unit}` },
+          { label: "Упаковок", value: `${m.packs} × ${formatPackage(m.package_size)} ${m.unit}` },
           { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
           { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
           {

@@ -30,7 +30,10 @@ NOTE = (
 
 # Slug операций (как в seed_data/labor_services.json, поле slug) — цену берём
 # по ним, name — только человекочитаемый label для API-ответа (#278).
-_S_DEMOLITION = "demolition"
+# Демонтаж разбит по типу операции (#401) — берём demolition_floor_covering как
+# единственную подуслугу, актуальную в любой комнате (см. labor_calc_service.py,
+# тот же выбор для симметричной строки в calculate_rough_labor).
+_S_DEMOLITION = "demolition_floor_covering"
 _S_SCREED = "screed_floor"
 _S_LEVEL_WALLS = "level_walls"
 _S_CHASING = "chasing"
@@ -60,8 +63,10 @@ def _priced_item(
     if svc_row is None:
         return None  # услуга не засидована — молча пропускаем строку
     # get_labor_price матчит по name (граница с парсерами работ, см. #278) —
-    # берём человекочитаемое имя из уже найденной по slug строки.
-    price = get_labor_price(svc_row.name, db=db, region=city)
+    # берём человекочитаемое имя из уже найденной по slug строки. clamp=False:
+    # скрытые работы — справочный риск с намеренно широкой вилкой (#239), кламп
+    # коридора (#411) здесь схлопнул бы её; как и CONTINGENCY, коридор тут не наш.
+    price = get_labor_price(svc_row.name, db=db, region=city, clamp=False)
     if price is None:
         return None  # цена не засидована — молча пропускаем строку
     p_min, p_avg, p_max = _D(price.price_min), _D(price.price_avg), _D(price.price_max)

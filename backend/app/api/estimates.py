@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.db.models import PriceSource
+from app.db.models import PriceSource, MaterialPrice
 from app.schemas.estimate import (
     EstimateRequest, EstimateResponse, Summary, GeometrySummary,
     MaterialItem, MaterialTierItem, LaborItem, HiddenWorks, HiddenWorkItem, RoomInput,
@@ -20,7 +20,8 @@ from app.services.labor_calc_service import (
     calculate_labor, calculate_engineering_labor, calculate_rough_labor,
     WET_ROOM_TYPES,
 )
-from app.services.repair_coeffs_service import CONTINGENCY, clamp_price_corridor
+from app.services.repair_coeffs_service import CONTINGENCY
+from app.services.category_match import detect_category_mismatch
 from app.services.price_aggregator_service import get_material_price, get_labor_price
 from app.services.hidden_works_service import calculate_hidden_works
 from app.parsers.base import BaseParser
@@ -130,6 +131,18 @@ def _finish_options(room: RoomInput) -> Dict[str, Any]:
         "wall_condition": w.walls.wall_condition if w.walls.enabled else None,
     }
 
+
+def _safe_package_size(value: Any) -> Decimal:
+    """Фасовка материала защищённо: Material.package_size nullable, поэтому
+    None и <=0 (в т.ч. Decimal(str(None)), падающий InvalidOperation) сводим
+    к безопасному дефолту — 1 (штучная покупка), а не даём final_quantity
+    обнулиться от умножения на 0."""
+    if value is None:
+        return Decimal(1)
+    package_size = Decimal(str(value))
+    return package_size if package_size > 0 else Decimal(1)
+
+
 def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> Decimal:
     """Выбирает значение в зависимости от уровня комплектации."""
     if tier == "min":
@@ -139,10 +152,31 @@ def pick_by_tier(tier: str, v_min: Decimal, v_avg: Decimal, v_max: Decimal) -> D
     return v_avg
 
 
+def _cached_material_price(
+    cache: Dict[tuple, "MaterialPrice | None"], material_name: str, db: Session,
+    parsers: list[BaseParser], region: str, store_names: List[str] | None,
+) -> MaterialPrice | None:
+    """get_material_price с мемоизацией в пределах одного /calculate.
+
+    Одна позиция материала запрашивается до 3 раз за запрос: основная строка +
+    min_item/max_item (см. _tier_item). Когда tier-варианты SKU не заведены,
+    resolve_material для всех трёх уровней отдаёт один и тот же товар → три
+    идентичных прохода get_material_price (цикл по парсерам + запросы к БД).
+    Кэшируем по (материал, город, магазины) — ключ, полностью определяющий
+    результат в рамках запроса; объект только читается вызывающими, не мутируется.
+    """
+    key = (material_name, region, tuple(store_names) if store_names else None)
+    if key not in cache:
+        cache[key] = get_material_price(
+            material_name, db=db, parsers=parsers, region=region, store_names=store_names,
+        )
+    return cache[key]
+
+
 def _tier_item(
     material_key: str, tier: str, quantity: Decimal, db: Session,
     parsers: list[BaseParser], region: str, sources_by_id: Dict[int, str],
-    store_names: List[str] | None = None,
+    price_cache: Dict[tuple, "MaterialPrice | None"], store_names: List[str] | None = None,
 ) -> MaterialTierItem:
     """SKU-вариант позиции для одного уровня комплектации (#349, min_item/avg_item/max_item).
 
@@ -152,27 +186,26 @@ def _tier_item(
     (pick_by_tier), что и основной расчёт строки — числа обязаны совпасть с тем,
     что вернул бы отдельный /calculate с этим tier. quantity — общая с родительской
     строкой (см. MaterialTierItem), доп. обращений к БД/парсеру сверх обычных для
-    resolve_material/get_material_price нет.
+    resolve_material/get_material_price нет. price_cache — общий с основным циклом
+    мемо цен (см. _cached_material_price).
     """
     material = resolve_material(db, material_key, tier)
     if material is None:
         return MaterialTierItem(name="", price=0.0, total=0.0, source="нет цены", source_url=None)
 
-    price_obj = get_material_price(
-        material.name, db=db, parsers=parsers, region=region, store_names=store_names,
+    price_obj = _cached_material_price(
+        price_cache, material.name, db, parsers, region, store_names,
     )
     if not price_obj:
         return MaterialTierItem(
             name=material.name, price=0.0, total=0.0, source="нет цены", source_url=None,
         )
 
-    # Границы вилки SKU прижимаются к коридору уровня — та же арифметика,
-    # что в основной строке, иначе числа min_item/max_item разошлись бы
+    # Границы вилки SKU уже прижаты к коридору per-source внутри
+    # get_material_price/_combine (#411) — здесь берём готовые price_min/max, та же
+    # арифметика, что в основной строке, иначе числа min_item/max_item разошлись бы
     # с ответом отдельного /calculate с этим tier.
-    p_min, p_max = clamp_price_corridor(
-        price_obj.price_min, price_obj.price_avg, price_obj.price_max
-    )
-    price = pick_by_tier(tier, p_min, price_obj.price_avg, p_max)
+    price = pick_by_tier(tier, price_obj.price_min, price_obj.price_avg, price_obj.price_max)
     total = quantity * price * CONTINGENCY[tier]
     return MaterialTierItem(
         name=material.name,
@@ -180,6 +213,9 @@ def _tier_item(
         total=float(total),
         source=sources_by_id.get(price_obj.source_id, "unknown"),
         source_url=price_obj.source_url,
+        category_mismatch=detect_category_mismatch(
+            price_obj.source_url, material.category_exclusions
+        ),
     )
 
 # tier выбирает границу вилки (min/avg/max) уже ВЫБРАННОГО SKU-варианта.
@@ -214,6 +250,12 @@ def calculate_estimate(
                     f"Доступные магазины: {', '.join(sorted(known_stores))}."
                 ),
             )
+
+    # Мемо цен материалов на весь запрос: одну позицию смета запрашивает до 3 раз
+    # (основная строка + min_item/max_item), а get_material_price каждый раз заново
+    # гоняет цикл по парсерам и запросы к БД. Ключ полностью определяет результат
+    # в пределах запроса (см. _cached_material_price).
+    material_price_cache: Dict[tuple, "MaterialPrice | None"] = {}
 
     all_materials: List[Dict[str, Any]] = []
     all_labor: List[Dict[str, Any]] = []
@@ -311,7 +353,7 @@ def calculate_estimate(
                 'name': mat['name'],
                 'material_key': mat['material_key'],
                 'unit': mat['unit'],
-                'package_size': Decimal(str(mat.get('package_size', 1))),
+                'package_size': _safe_package_size(mat.get('package_size')),
                 'quantity': Decimal(0),
                 'base_quantity': Decimal(0),
                 'pack_quantity': Decimal(0),
@@ -331,8 +373,8 @@ def calculate_estimate(
         # с накрученным по факту коэффициентом даже после суммирования нескольких комнат.
         waste_factor = (group['quantity'] / base_quantity) if base_quantity > 0 else Decimal(1)
 
-        price_obj = get_material_price(
-            name, db=db, parsers=parsers, region=request.city, store_names=request.stores,
+        price_obj = _cached_material_price(
+            material_price_cache, name, db, parsers, request.city, request.stores,
         )
 
         # package_size (#306): если цена пришла от парсера и он отдал фасовку
@@ -341,14 +383,11 @@ def calculate_estimate(
         # и то, что легло в расчёт, могут разойтись (краска 2.5 л на карточке
         # против 9 л в смете). Нет цены/фасовки от парсера — прежнее поведение.
         effective_package_size = (
-            Decimal(str(price_obj.package_size))
+            _safe_package_size(price_obj.package_size)
             if price_obj is not None and price_obj.package_size
             else group['package_size']
         )
-        if effective_package_size > 0:
-            packs = packs_to_buy(group['quantity'] / effective_package_size)
-        else:
-            packs = packs_to_buy(group['pack_quantity'])
+        packs = packs_to_buy(group['quantity'] / effective_package_size)
         final_quantity = Decimal(packs) * effective_package_size
 
         if not price_obj:
@@ -384,21 +423,17 @@ def calculate_estimate(
             continue
 
         price_avg = price_obj.price_avg
-        # Категорийный разброс источника прижимаем к коридору уровня
-        # (−15%/+20% от средней, PRICE_CORRIDOR) — межтоварный разброс
-        # уровней остаётся в min_item/max_item.
-        price_min, price_max = clamp_price_corridor(
-            price_obj.price_min, price_avg, price_obj.price_max
-        )
+        # Категорийный band каждого источника уже прижат к коридору per-source внутри
+        # get_material_price/_combine (#411); межисточниковая дисперсия прошла как есть,
+        # межтоварный разброс уровней остаётся в min_item/max_item. Здесь — готовые границы.
+        price_min = price_obj.price_min
+        price_max = price_obj.price_max
         source_name = sources_by_id.get(price_obj.source_id, "unknown")
         updated_at = price_obj.updated_at.strftime("%Y-%m-%d") if price_obj.updated_at else ""
         # min_source/max_source — «источник, чья цена реально стала границей» (#348).
-        # Если границу переопределил кламп коридора, цена этого источника в вилке
-        # уже не участвует — ссылку на него не отдаём.
-        min_clamped = price_min != price_obj.price_min
-        max_clamped = price_max != price_obj.price_max
-        min_source_id = None if min_clamped else getattr(price_obj, "min_source_id", None)
-        max_source_id = None if max_clamped else getattr(price_obj, "max_source_id", None)
+        # _combine уже занулил их, если границу задал кламп или это сам представитель.
+        min_source_id = getattr(price_obj, "min_source_id", None)
+        max_source_id = getattr(price_obj, "max_source_id", None)
         min_source_name = sources_by_id.get(min_source_id) if min_source_id else None
         max_source_name = sources_by_id.get(max_source_id) if max_source_id else None
         total_min = final_quantity * price_min * CONTINGENCY['min']
@@ -412,16 +447,27 @@ def calculate_estimate(
         # посчитанные выше price/total/source — без лишнего resolve_material/
         # get_material_price; для двух остальных уровней резолвим SKU-вариант
         # тем же путём, что и основной расчёт (_tier_item).
+        # Товар текущего tier из смежной категории (#406) — сверяем slug
+        # source_url с category_exclusions резолвленного материала. Материал
+        # берём по material_key/tier тем же путём, что и _tier_item (мемо
+        # resolve_material тут не нужно — вызов дешёвый).
+        current_material = resolve_material(db, group['material_key'], request.tier)
+        current_mismatch = detect_category_mismatch(
+            price_obj.source_url,
+            current_material.category_exclusions if current_material else None,
+        )
         current_tier_item = MaterialTierItem(
             name=name, price=float(price), total=float(total),
             source=source_name, source_url=price_obj.source_url,
+            category_mismatch=current_mismatch,
         )
         tier_items = {request.tier: current_tier_item}
         for t in ("min", "avg", "max"):
             if t not in tier_items:
                 tier_items[t] = _tier_item(
                     group['material_key'], t, final_quantity, db, parsers,
-                    request.city, sources_by_id, store_names=request.stores,
+                    request.city, sources_by_id, material_price_cache,
+                    store_names=request.stores,
                 )
 
         materials_response.append(MaterialItem(
@@ -447,12 +493,13 @@ def calculate_estimate(
             region=price_obj.region,
             sources=getattr(price_obj, "contributing_sources", None),
             min_source=min_source_name,
-            min_source_url=None if min_clamped else getattr(price_obj, "min_source_url", None),
+            min_source_url=getattr(price_obj, "min_source_url", None),
             max_source=max_source_name,
-            max_source_url=None if max_clamped else getattr(price_obj, "max_source_url", None),
+            max_source_url=getattr(price_obj, "max_source_url", None),
             min_item=tier_items["min"],
             avg_item=tier_items["avg"],
             max_item=tier_items["max"],
+            category_mismatch=current_mismatch,
         ))
 
         materials_sum['min'] += final_quantity * price_min
@@ -482,8 +529,11 @@ def calculate_estimate(
 
         volume = group['volume']
         p_avg = labor_price.price_avg
-        # Тот же коридор уровня, что и у материалов (PRICE_CORRIDOR).
-        p_min, p_max = clamp_price_corridor(labor_price.price_min, p_avg, labor_price.price_max)
+        # Band каждого сайта уже прижат к коридору per-source внутри get_labor_price/
+        # _combine (#411); межсайтовая (межподрядная) дисперсия прошла как есть — у
+        # работ это единственный канал реального разброса (tier-вариантов нет).
+        p_min = labor_price.price_min
+        p_max = labor_price.price_max
 
         # Применяем непредвиденные расходы для каждой границы
         total_min = volume * p_min * CONTINGENCY['min']
@@ -496,12 +546,10 @@ def calculate_estimate(
 
         labor_source_name = sources_by_id.get(labor_price.source_id, "seed")
         updated_at = labor_price.updated_at.strftime("%Y-%m-%d") if labor_price.updated_at else ""
-        # Как и у материалов: если границу вилки задал кламп коридора, а не источник,
-        # ссылку на «источник границы» (#348) не отдаём.
-        lab_min_clamped = p_min != labor_price.price_min
-        lab_max_clamped = p_max != labor_price.price_max
-        labor_min_source_id = None if lab_min_clamped else getattr(labor_price, "min_source_id", None)
-        labor_max_source_id = None if lab_max_clamped else getattr(labor_price, "max_source_id", None)
+        # Источник границы (#348): _combine уже занулил, если границу задал кламп
+        # или это сам представитель.
+        labor_min_source_id = getattr(labor_price, "min_source_id", None)
+        labor_max_source_id = getattr(labor_price, "max_source_id", None)
         labor_min_source_name = sources_by_id.get(labor_min_source_id) if labor_min_source_id else None
         labor_max_source_name = sources_by_id.get(labor_max_source_id) if labor_max_source_id else None
 
@@ -526,9 +574,9 @@ def calculate_estimate(
             region=labor_price.region,
             sources=getattr(labor_price, "contributing_sources", None),
             min_source=labor_min_source_name,
-            min_source_url=None if lab_min_clamped else getattr(labor_price, "min_source_url", None),
+            min_source_url=getattr(labor_price, "min_source_url", None),
             max_source=labor_max_source_name,
-            max_source_url=None if lab_max_clamped else getattr(labor_price, "max_source_url", None),
+            max_source_url=getattr(labor_price, "max_source_url", None),
         ))
 
         labor_sum['min'] += volume * p_min

@@ -14,7 +14,12 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.parsers import headless_session
-from app.parsers._stats import filter_outliers, filter_undersized_packages, price_band_slice
+from app.parsers._stats import (
+    filter_outliers,
+    filter_undersized_packages,
+    price_band_slice,
+    select_representative,
+)
 from app.parsers.base import BaseParser, ParsedPrice, DEFAULT_HEADERS, DEFAULT_REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -422,20 +427,38 @@ def _is_real_href(href: str | None) -> bool:
     return not (h.startswith(("javascript:", "#", "mailto:", "tel:")) or h == "")
 
 
+# Страница коллекции (#405) — /catalog/collection/<id> — это листинг расцветок
+# модели (линолеум показывает именно такие карточки, см. _COLLECTION_PRICE_RE),
+# а не карточка конкретного товара с ценой. Тот же класс, что #197 (ссылка на
+# категорию вместо SKU), но через путь /catalog/collection/, который фильтр
+# product-link раньше не отсекал. Ссылку на коллекцию как source_url товара не
+# сохраняем — лучше деградация до URL категории (#197) или seed, чем ссылка на
+# список.
+_COLLECTION_URL_RE = re.compile(r"/catalog/collection/", re.IGNORECASE)
+
+
+def _is_product_href(href: str | None) -> bool:
+    # Настоящий адрес карточки товара: не кнопка-заглушка (javascript:/#, см.
+    # _is_real_href) и не страница коллекции-листинга (#405).
+    return _is_real_href(href) and _COLLECTION_URL_RE.search(href) is None
+
+
 def _item_url(item, page_url: str) -> str | None:
     # Ссылка на карточку товара внутри одного .products-list__item.
     # В вёрстке Мегастроя карточка ведёт на /products/<id> якорем
     # .js-search-product-link; первыми же в DOM идут кнопки-заглушки с
-    # href="javascript:" (сравнение, избранное) — их брать нельзя.
+    # href="javascript:" (сравнение, избранное) — их брать нельзя. Карточки
+    # коллекций (линолеум) ведут на /catalog/collection/<id> — это тоже не
+    # ссылка на товар (#405).
     link = item.select_one("a.js-search-product-link[href]")
     href = link.get("href") if link else None
-    if not _is_real_href(href):
-        # Класс мог измениться — берём первый якорь с настоящим адресом.
+    if not _is_product_href(href):
+        # Класс мог измениться — берём первый якорь с настоящим адресом товара.
         href = next(
-            (a.get("href") for a in item.select("a[href]") if _is_real_href(a.get("href"))),
+            (a.get("href") for a in item.select("a[href]") if _is_product_href(a.get("href"))),
             None,
         )
-    if not _is_real_href(href):
+    if not _is_product_href(href):
         return None
     abs_url = urljoin(page_url, href.strip())
     return abs_url if abs_url.startswith(("http://", "https://")) else None
@@ -550,7 +573,10 @@ class MegastroyParser(BaseParser):
             return raw_items
 
     def fetch_price(
-        self, material_name: str, reference_package_size: Decimal | None = None
+        self,
+        material_name: str,
+        reference_package_size: Decimal | None = None,
+        apply_undersized_filter: bool = True,
     ) -> ParsedPrice:
         if material_name not in CATEGORY_MAP:
             raise ValueError(f"Нет категории Мегастроя для материала '{material_name}'")
@@ -601,13 +627,16 @@ class MegastroyParser(BaseParser):
             # Нетиповая (мелкая) фасовка отсекается ДО статистики (#382) — иначе
             # мелкая упаковка (её обычно больше по числу карточек) тянет price_avg
             # и товар-представитель к себе, хотя типовая закупка — мешками/канистрами.
+            # Допущение проверено только для кг-материалов — apply_undersized_filter
+            # выключает отсев там, где оно не подтверждено (например, краска, #389).
+            filter_reference = reference_package_size if apply_undersized_filter else None
             items = filter_undersized_packages(
-                items, key=lambda it: it[2], reference_package_size=reference_package_size
+                items, key=lambda it: it[2], reference_package_size=filter_reference
             )
-            if reference_package_size is not None and not items:
+            if filter_reference is not None and not items:
                 raise RuntimeError(
                     f"Все карточки '{material_name}' — нетиповая фасовка "
-                    f"(< 1/3 справочной {reference_package_size} кг/л) — "
+                    f"(< 1/3 справочной {filter_reference} кг/л) — "
                     "как парсер не смог, откат на seed"
                 )
         elif category.normalize_length_mm:
@@ -679,8 +708,11 @@ class MegastroyParser(BaseParser):
         # для работ (price_aggregator._combine_labor_prices). Товар без ссылки →
         # деградируем до URL категории, чтобы источник никогда не был пустым (#197).
         # package_size берём у ТОГО ЖЕ товара (#306) — иначе фасовка в смете и
-        # фасовка на странице source_url могут не совпадать.
-        representative = min(items, key=lambda it: abs(it[0] - price_avg))
+        # фасовка на странице source_url могут не совпадать. Выбор представителя
+        # учитывает и фасовку, а не только цену (#395) — см. select_representative.
+        representative = select_representative(
+            items, price_avg, reference_package_size, price_key=lambda it: it[0], package_key=lambda it: it[2]
+        )
         source_url = representative[1] or category.urls[0]
         package_size = representative[2]
 

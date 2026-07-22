@@ -290,6 +290,30 @@ def test_price_band_slice_takes_low_and_high_terciles():
     assert price_band_slice(small, "low", key=lambda it: it[0]) == small
 
 
+def test_price_band_representative_prefers_reference_package_size_on_price_tie(monkeypatch):
+    # #395: внутри уже отрезанной эконом-терции цены двух карточек (95 и 105
+    # ₽/л) равноудалены от avg=100 — раньше побеждала первая по порядку сортировки
+    # (5 л), теперь должна побеждать карточка с фасовкой (10 л), совпадающей со
+    # справочной Material.package_size этого tier-варианта.
+    html = _page(
+        _item("475", "/catalog/x/eco-5l", title="Краска Economy 5 л"),
+        _item("1050", "/catalog/x/eco-10l", title="Краска Economy 10 л"),
+        _item("2000", "/catalog/x/mid-a", title="Краска Mid A 5 л"),
+        _item("2200", "/catalog/x/mid-b", title="Краска Mid B 5 л"),
+        _item("2400", "/catalog/x/mid-c", title="Краска Mid C 5 л"),
+        _item("2600", "/catalog/x/mid-d", title="Краска Mid D 5 л"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price(
+        "Краска для стен эконом", reference_package_size=Decimal("10")
+    )
+
+    assert parsed.price_avg == Decimal("100")
+    assert "eco-10l" in parsed.source_url
+    assert parsed.package_size == Decimal("10")
+
+
 def test_fetch_price_economy_and_premium_return_different_products(monkeypatch):
     """#331: 'Ламинат эконом'/'Ламинат премиум' берут нижнюю/верхнюю треть цен той
     же категории — разные товары (source_url), а не только разная цена."""
@@ -603,6 +627,49 @@ def test_putty_all_undersized_raises_when_reference_given(monkeypatch):
         MegastroyParser().fetch_price("Шпаклевка финишная", reference_package_size=Decimal("25"))
 
 
+# Отсев мелкой фасовки — только для кг-материалов (#389): допущение "типовая
+# закупка — мешками" проверено на #382 (шпаклёвка/клей/затирка), но для
+# премиум-краски декоративная банка 0.9-1 л — легитимный формат, а не выброс.
+# price_aggregator_service включает apply_undersized_filter только при
+# material.unit == "кг" — тесты ниже гоняют сам параметр парсера напрямую.
+
+
+def test_paint_premium_undersized_filter_disabled_keeps_small_decorative_jar(monkeypatch):
+    html = _page(
+        _item("3600", "/products/paint-jar-0.9l", title="Краска premium декоративная 0.9 л"),
+        _item("36000", "/products/paint-can-10l", title="Краска premium 10 л"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price(
+        "Краска для стен премиум",
+        reference_package_size=Decimal("10"),
+        apply_undersized_filter=False,
+    )
+
+    # apply_undersized_filter=False — банка 0.9 л не отсекается, несмотря на то что
+    # она меньше трети справочной фасовки (10/3 ≈ 3.33 л).
+    assert parsed.price_max == Decimal("4000")  # 3600 / 0.9
+    assert parsed.price_min == Decimal("3600")  # 36000 / 10
+
+
+def test_paint_premium_undersized_filter_enabled_would_drop_small_decorative_jar(monkeypatch):
+    # Воспроизводит баг #389: со старым дефолтным поведением (apply_undersized_filter=
+    # True) легитимная декоративная фасовка 0.9 л ложно отсекается как "нетиповая".
+    html = _page(
+        _item("3600", "/products/paint-jar-0.9l", title="Краска premium декоративная 0.9 л"),
+        _item("36000", "/products/paint-can-10l", title="Краска premium 10 л"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price(
+        "Краска для стен премиум", reference_package_size=Decimal("10")
+    )
+
+    assert parsed.price_avg == Decimal("3600")  # 0.9 л карточка отсеяна, осталась только банка 10 л
+    assert parsed.package_size == Decimal("10")
+
+
 # Плинтус (#277): витринная единица — "шт" (рейка фиксированной длины), наша
 # база — метр; цену приводим делением на длину рейки из названия.
 
@@ -798,17 +865,22 @@ def test_socket_economy_takes_lower_tercile(monkeypatch):
 
 
 def test_parse_page_reads_collection_card_price_from_text():
-    # #335: линолеум показывает карточки-коллекции без itemprop=price.
+    # #335: линолеум показывает карточки-коллекции без itemprop=price. Цену берём,
+    # но ссылку на /catalog/collection/<id> — нет (#405): это листинг расцветок,
+    # а не карточка товара.
     html = _page(_collection_item("от 325 ₽/м2", "/catalog/collection/13673", title="Линолеум BAZIS"))
     items = _parse_page(html, "https://kazan.megastroy.com/catalog/linoleum")
     assert [(p, u, unit, t) for p, u, unit, t in items] == [
-        (
-            Decimal("325"),
-            "https://kazan.megastroy.com/catalog/collection/13673",
-            "м²",
-            "Линолеум BAZIS",
-        )
+        (Decimal("325"), None, "м²", "Линолеум BAZIS"),
     ]
+
+
+def test_item_url_rejects_collection_page_link():
+    # #405: карточка, у которой единственная ссылка ведёт на страницу коллекции —
+    # это не товар, source_url не должен её сохранять.
+    html = _page(_collection_item("от 325 ₽/м2", "/catalog/collection/9058", title="Линолеум X"))
+    items = _parse_page(html, "https://kazan.megastroy.com/catalog/linoleum")
+    assert items[0][1] is None
 
 
 def test_linoleum_reads_price_from_collection_cards(monkeypatch):
@@ -825,6 +897,37 @@ def test_linoleum_reads_price_from_collection_cards(monkeypatch):
     # site_unit-материалы не дают отдельной "цены за упаковку" (#306) — как у
     # плитки/ламината/обоев.
     assert parsed.package_size is None
+
+
+def test_linoleum_source_url_never_points_to_collection_listing(monkeypatch):
+    # #405: даже когда вся выдача — карточки-коллекции, source_url не должен вести
+    # на /catalog/collection/<id>; деградируем до URL категории (#197), а не на
+    # листинг конкретной коллекции.
+    html = _page(
+        _collection_item("от 325 ₽/м2", "/catalog/collection/1", title="Линолеум А"),
+        _collection_item("от 450 ₽/м2", "/catalog/collection/2", title="Линолеум Б"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Линолеум")
+
+    assert "/catalog/collection/" not in (parsed.source_url or "")
+    assert parsed.source_url == CATEGORY_MAP["Линолеум"].urls[0]
+
+
+def test_linoleum_prefers_real_product_card_over_collection(monkeypatch):
+    # #405: если в выдаче линолеума среди коллекций есть настоящая карточка
+    # /products/<id> с ценой около avg — берём именно её как source_url.
+    html = _page(
+        _collection_item("от 300 ₽/м2", "/catalog/collection/1", title="Линолеум А"),
+        _item("400", "/products/lino-real", title="Линолеум реальный", unit="м2"),
+        _collection_item("от 500 ₽/м2", "/catalog/collection/2", title="Линолеум В"),
+    )
+    _patch_pages(monkeypatch, html)
+
+    parsed = MegastroyParser().fetch_price("Линолеум")
+
+    assert parsed.source_url == "https://kazan.megastroy.com/products/lino-real"
 
 
 def test_light_takes_price_as_is_without_unit_normalization(monkeypatch):

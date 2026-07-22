@@ -177,12 +177,17 @@ class TestMaterialPriceCombination:
         return parser
 
     def test_combines_two_sources_into_one_corridor(self, db_session):
-        """Мегастрой + Леман дают валидные цены → вилка min по обоим/max по обоим/
-        avg среднего средних, sources содержит оба источника."""
+        """Мегастрой + Леман дают валидные цены → межисточниковая дисперсия проходит
+        в вилку без клампа (#411): min по обоим / max по обоим / avg среднего средних.
+        Band каждого источника узкий (внутри коридора), клампить нечего, поэтому
+        итоговая вилка шире ±15/+20% — это реальный разброс между магазинами, не шум."""
         self._clear_parser_prices(db_session)
         try:
-            self._insert_price(db_session, "Мегастрой", 100, 120, 150)
-            self._insert_price(db_session, "Леман", 130, 160, 200)
+            # Каждый band в пределах своего коридора (не клампится), но средние
+            # источников разнесены → объединённая вилка 108..176 при avg 140 шире
+            # ±15/+20% — межисточниковая дисперсия сохранена.
+            self._insert_price(db_session, "Мегастрой", 108, 120, 132)
+            self._insert_price(db_session, "Леман", 150, 160, 176)
 
             price = get_material_price(
                 self.MATERIAL, db=db_session,
@@ -191,8 +196,8 @@ class TestMaterialPriceCombination:
             )
 
             assert price is not None
-            assert price.price_min == Decimal("100")   # минимум по источникам
-            assert price.price_max == Decimal("200")   # максимум по источникам
+            assert price.price_min == Decimal("108")   # минимум по источникам (Мегастрой), не клампнут
+            assert price.price_max == Decimal("176")   # максимум по источникам (Леман), не клампнут
             assert price.price_avg == Decimal("140")   # среднее средних (120+160)/2
             assert set(price.contributing_sources) == {"Мегастрой", "Леман"}
             # parser-цены нерегиональны (region IS NULL) → объединённая тоже null,
@@ -200,8 +205,8 @@ class TestMaterialPriceCombination:
             assert price.region is None
             # #348: представитель — Мегастрой (его avg 120 не хуже Лемана-160 по
             # близости к 140, выигрывает тай-брейк первым в rows) и он же дал price_min
-            # → min_source не дублируем (null). price_max дал Леман → его источник/ссылка
-            # видны отдельно от source/source_url представителя.
+            # → min_source не дублируем (null). price_max дал Леман (не клампнут) → его
+            # источник/ссылка видны отдельно от source/source_url представителя.
             assert price.min_source_id is None
             assert price.min_source_url is None
             assert price.max_source_url == "http://example-леман.ru"
@@ -212,13 +217,18 @@ class TestMaterialPriceCombination:
         """Когда ни минимум, ни максимум вилки не пришёлся на представителя —
         обе границы должны сослаться на СВОИ источники, а не молчать/дублировать
         source_url представителя (#348, основной сценарий issue: разные карточки
-        товара для эконом-/премиум-границы)."""
+        товара для дешёвой/дорогой границы).
+
+        Границы дают источники с разными средними (не клампнутый межисточниковый
+        разброс, #411): дешёвый источник задаёт price_min, дорогой — price_max, оба
+        band'а внутри своих коридоров, поэтому границы не переопределены клампом и
+        ссылки на источники видны."""
         self._clear_parser_prices(db_session)
         try:
-            self._insert_price(db_session, "Мегастрой", 100, 150, 155)   # представитель (avg ближе к 167)
-            self._insert_price(db_session, "Леман", 90, 200, 210)        # даёт price_min
+            self._insert_price(db_session, "Мегастрой", 140, 150, 160)   # представитель (avg ближе к 150)
+            self._insert_price(db_session, "Леман", 90, 100, 110)        # дешёвый → price_min 90
             self._seed_source(db_session, "Третий")
-            self._insert_price(db_session, "Третий", 95, 150, 300)       # даёт price_max
+            self._insert_price(db_session, "Третий", 185, 200, 220)      # дорогой → price_max 220
 
             price = get_material_price(
                 self.MATERIAL, db=db_session,
@@ -231,13 +241,82 @@ class TestMaterialPriceCombination:
             )
 
             assert price is not None
+            # avg = среднее средних (150+100+200)/3 = 150. Представитель — Мегастрой
+            # (его avg 150 ровно на объединённой средней). Границы не клампнуты
+            # (каждый band в своём коридоре) → проходят как есть и атрибутируются.
             assert price.price_min == Decimal("90")
-            assert price.price_max == Decimal("300")
-            # Представитель — Мегастрой (avg 150 и avg Третьего=150 равноудалены от 167,
-            # тай-брейк выигрывает первый по rows — Мегастрой).
+            assert price.price_max == Decimal("220")
             assert price.source_url == "http://example-мегастрой.ru"
             assert price.min_source_url == "http://example-леман.ru"
             assert price.max_source_url == "http://example-третий.ru"
+        finally:
+            self._clear_parser_prices(db_session)
+
+    def test_per_source_band_clamped_before_combine(self, db_session):
+        """Категорийно-широкий band ОДНОГО источника (price-band целой категории)
+        прижимается к коридору по ЕГО средней ДО объединения (#411): внутристочниковый
+        шум гасится, а не утекает в вилку через min()/max(). Средняя не меняется."""
+        self._clear_parser_prices(db_session)
+        try:
+            # Один источник с диким band (напр. затирка 76→2097 при avg 836) —
+            # клампится к 836×0.85..836×1.2 = 710.6..1003.2, средняя 836 неизменна.
+            self._insert_price(db_session, "Мегастрой", 76, 836, 2097)
+
+            price = get_material_price(
+                self.MATERIAL, db=db_session,
+                parsers=[self._no_network_parser("Мегастрой")],
+                region="Москва",
+            )
+
+            assert price is not None
+            assert price.price_avg == Decimal("836")
+            # Коридор не округляет границу: 836×0.85 = 710.6, 836×1.2 = 1003.2.
+            assert price.price_min == Decimal("836") * Decimal("0.85")
+            assert price.price_max == Decimal("836") * Decimal("1.20")
+        finally:
+            self._clear_parser_prices(db_session)
+
+    def test_flat_single_source_has_no_spread(self, db_session):
+        """Единственный плоский источник (min=avg=max) → вилка тоже плоская: ничего
+        не выдумываем (#411, «Как проверить»)."""
+        self._clear_parser_prices(db_session)
+        try:
+            self._insert_price(db_session, "Мегастрой", 500, 500, 500)
+
+            price = get_material_price(
+                self.MATERIAL, db=db_session,
+                parsers=[self._no_network_parser("Мегастрой")],
+                region="Москва",
+            )
+
+            assert price is not None
+            assert price.price_min == price.price_avg == price.price_max == Decimal("500")
+        finally:
+            self._clear_parser_prices(db_session)
+
+    def test_flat_premium_source_does_not_drag_avg(self, db_session):
+        """#412: источник с реальным распределением (терции 600..3000, avg 1200) +
+        одиночный плоский премиум-прайс 3300. avg объединённой вилки должен тяготеть
+        к телу распределения (1200), а НЕ к среднему двух средних ((1200+3300)/2=2250):
+        плоский выброс влияет только на верхнюю границу, но не тянет центр."""
+        self._clear_parser_prices(db_session)
+        try:
+            self._insert_price(db_session, "Мегастрой", 600, 1200, 3000)
+            self._seed_source(db_session, "Третий")
+            self._insert_price(db_session, "Третий", 3300, 3300, 3300)
+
+            price = get_material_price(
+                self.MATERIAL, db=db_session,
+                parsers=[self._no_network_parser("Мегастрой"), self._no_network_parser("Третий")],
+                region="Москва",
+            )
+
+            assert price is not None
+            # Центр — по неплоскому источнику (1200), а не среднее средних (2250).
+            assert price.price_avg == Decimal("1200")
+            # Плоский источник по-прежнему задаёт верхнюю границу вилки.
+            assert price.price_max == Decimal("3300")
+            assert set(price.contributing_sources) == {"Мегастрой", "Третий"}
         finally:
             self._clear_parser_prices(db_session)
 

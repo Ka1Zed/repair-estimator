@@ -26,3 +26,6 @@ backend/.cache/
 
 # дампы БД (backup.sh)
 backups/
+
+# прод-скрипт обновления цен с секретами БД (не версионировать)
+refresh-prices.sh

@@ -535,29 +535,39 @@ export function Workspace({
       const activeUrl = activeVariant?.source_url ?? m.source_url;
       const activeSource = activeVariant?.source ?? m.source;
 
+      // Фасовка/единица/упаковки выбранного уровня (#349): у finish_key-позиций
+      // товар меняется по tier, и фасовка своя (9 л против 10 л, плинтус 2.5 м
+      // против 3 м). Берём из активного варианта, откат на общую строку для старых
+      // ответов/материалов без вариантов. quantity/packs у варианта могут быть 0
+      // (no-price) — тогда тоже откат.
+      const activePackageSize = activeVariant?.package_size || m.package_size;
+      const activeUnit = activeVariant?.unit || m.unit;
+      const activeVolume = activeVariant?.quantity || m.quantity;
+      const activePacks = activeVariant?.packs || m.packs;
+
       const combinedSources = !namesDiffer && m.sources && m.sources.length > 1 ? m.sources : null;
       const sourceLabel = combinedSources ? combinedSources.join(", ") : activeSource;
       const sourceCount = combinedSources ? combinedSources.length : 1;
 
-      return { m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, sourceLabel, sourceCount, variants };
+      return { m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, activePackageSize, activeUnit, activeVolume, activePacks, sourceLabel, sourceCount, variants };
     });
   }, [data, priceScale, priceMode, materialOverrides, toggleMaterialOverride]);
 
   const materialRows: LedgerRow[] = useMemo(
     () =>
-      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, sourceLabel, sourceCount, variants }, i) => ({
+      materialsActive.map(({ m, effectiveMode, activeName, activePrice, activeTotal, activeUrl, activeSource, activePackageSize, activeUnit, activeVolume, activePacks, sourceLabel, sourceCount, variants }, i) => ({
         name: activeName,
-        volume: `${formatQty(m.quantity)} ${m.unit}`,
+        volume: `${formatQty(activeVolume)} ${activeUnit}`,
         price: rub(Math.round(activePrice)),
         total: rub(Math.round(activeTotal)),
         activeMode: effectiveMode,
         isOverridden: materialOverrides[i] !== undefined && materialOverrides[i] !== priceMode,
         variants: variants.length > 0 ? variants : undefined,
         details: [
-          { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${m.unit}` },
+          { label: "Базовое кол-во", value: `${formatQty(m.base_quantity)} ${activeUnit}` },
           { label: "Запас", value: `×${m.waste_factor} (+${Math.round((m.waste_factor - 1) * 100)}%)` },
-          { label: "Упаковок", value: `${m.packs} × ${formatPackage(m.package_size)} ${m.unit}` },
-          { label: "Итого кол-во", value: `${formatQty(m.quantity)} ${m.unit}` },
+          { label: "Упаковок", value: `${activePacks} × ${formatPackage(activePackageSize)} ${activeUnit}` },
+          { label: "Итого кол-во", value: `${formatQty(activeVolume)} ${activeUnit}` },
           { label: "Цена за единицу", value: rub(Math.round(activePrice)) },
           {
             label: "Итог по позиции",

@@ -436,7 +436,7 @@ def get_material_price(
 
 
 def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
-                          region: str | None) -> LaborPrice:
+                          region: str | None, *, clamp: bool = True) -> LaborPrice:
     '''
     Объединяет parser-цены нескольких сайтов одного региона в одну вилку:
     min = минимум по сайтам, max = максимум, avg = среднее средних (так среднее
@@ -450,13 +450,18 @@ def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
     clamp_price_corridor) — как у материалов: внутрисайтовый категорийный разброс
     гасится, реальная межсайтовая (межподрядная) дисперсия проходит без клампа. Для
     работ это особенно важно: у них нет tier-вариантов SKU, и межисточниковый разброс —
-    единственный канал реального рыночного разброса.
+    единственный канал реального рыночного разброса. clamp=False отключает кламп —
+    справочный блок скрытых работ намеренно показывает широкую вилку риска (#239).
 
     min_row/max_row (#348) — сайты, чьи клампнутые price_min/price_max реально стали
     границами вилки. Ссылку на границу не кладём (null), если сайт совпадает с
     представителем ИЛИ границу задал кламп, а не сырая цена сайта.
     '''
-    clamped = {id(r): clamp_price_corridor(r.price_min, r.price_avg, r.price_max) for r in rows}
+    def _band(r: LaborPrice) -> tuple[Decimal, Decimal]:
+        if clamp:
+            return clamp_price_corridor(r.price_min, r.price_avg, r.price_max)
+        return (r.price_min, r.price_max)
+    clamped = {id(r): _band(r) for r in rows}
     min_row = min(rows, key=lambda r: clamped[id(r)][0])
     max_row = max(rows, key=lambda r: clamped[id(r)][1])
     price_min = clamped[id(min_row)][0]
@@ -492,7 +497,8 @@ def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
     return combined
 
 
-def get_labor_price(service_name: str, db: Session, region: str | None = None) -> LaborPrice | None:
+def get_labor_price(service_name: str, db: Session, region: str | None = None,
+                    clamp: bool = True) -> LaborPrice | None:
     '''
     Возвращает цену работы. Источник правды — парсер (#144): сначала ищем валидные
     спарсенные цены (любой не-seed источник, записанный CLI update_prices), seed —
@@ -517,6 +523,11 @@ def get_labor_price(service_name: str, db: Session, region: str | None = None) -
     не пробрасываем.
 
     db — сессия приходит от вызывающего, эта функция сама её не открывает/закрывает.
+
+    clamp=True (по умолчанию) прижимает band каждого источника к коридору per-source
+    (#411) — так берёт цену основная смета. clamp=False отдаёт сырой band: его
+    запрашивает справочный блок скрытых работ (#239), где широкая вилка риска —
+    осознанный сигнал, а не категорийный шум, и кламп её бы схлопнул.
     '''
     ttl_hours = settings.PRICE_TTL_HOURS
     session = db
@@ -558,7 +569,7 @@ def get_labor_price(service_name: str, db: Session, region: str | None = None) -
             pool, scope_region = base_rows, None
 
     if pool:
-        result = _combine_labor_prices(session, service.id, pool, scope_region)
+        result = _combine_labor_prices(session, service.id, pool, scope_region, clamp=clamp)
         logger.info(
             f"Цена работы '{service_name}': источник=parser "
             f"({', '.join(result.contributing_sources)}), region={scope_region}"
@@ -586,6 +597,10 @@ def get_labor_price(service_name: str, db: Session, region: str | None = None) -
         return None
 
     logger.info(f"Цена работы '{service_name}': источник=seed (fallback), region={region}")
+    if not clamp:
+        # Справочный блок скрытых работ (#239) берёт сырой seed-band — кламп бы
+        # схлопнул намеренно широкую вилку риска. Персистентную строку не мутируем.
+        return price
     # Как у материалов (#411): seed минует _combine, но его band тоже категорийный —
     # клампим к коридору. Транзитный клон, чтобы не затереть seed в БД автофлашем.
     c_min, c_max = clamp_price_corridor(price.price_min, price.price_avg, price.price_max)

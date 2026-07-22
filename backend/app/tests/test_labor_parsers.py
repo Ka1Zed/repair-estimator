@@ -351,25 +351,26 @@ def test_labor_combines_multiple_regional_sites(db_session):
     '''
     Две parser-цены одного региона объединяются в одну вилку: min=минимум,
     max=максимум, avg=среднее средних. source — представительный сайт (его avg
-    ближе к итоговому), sources — все сайты.
+    ближе к итоговому), sources — все сайты. Band каждого сайта узкий (в своём
+    коридоре, #411) → не клампится, реальная межсайтовая дисперсия проходит.
     '''
     service = db_session.query(LaborService).filter(LaborService.name == "Укладка плитки").first()
     garant = db_session.query(PriceSource).filter(PriceSource.name == "garantstroikompleks.ru").first()
     remont = db_session.query(PriceSource).filter(PriceSource.name == "remont-uroven.ru").first()
     rows = [
         LaborPrice(labor_service_id=service.id, source_id=garant.id, region="Москва",
-                   price_min=Decimal("400"), price_avg=Decimal("1000"), price_max=Decimal("1300"),
+                   price_min=Decimal("900"), price_avg=Decimal("1000"), price_max=Decimal("1150"),
                    source_url="https://garantstroikompleks.ru/prajs-list"),
         LaborPrice(labor_service_id=service.id, source_id=remont.id, region="Москва",
-                   price_min=Decimal("1600"), price_avg=Decimal("2700"), price_max=Decimal("4500"),
+                   price_min=Decimal("2400"), price_avg=Decimal("2700"), price_max=Decimal("3200"),
                    source_url="https://remont-uroven.ru/price.html"),
     ]
     db_session.add_all(rows)
     db_session.commit()
     try:
         price = get_labor_price("Укладка плитки", db=db_session, region="Москва")
-        assert price.price_min == Decimal("400")        # минимум по сайтам
-        assert price.price_max == Decimal("4500")       # максимум по сайтам
+        assert price.price_min == Decimal("900")        # минимум по сайтам (garant), не клампнут
+        assert price.price_max == Decimal("3200")       # максимум по сайтам (remont), не клампнут
         assert price.price_avg == Decimal("1850")       # среднее средних (1000+2700)/2
         assert price.region == "Москва"
         # Представительный сайт — garant (его avg 1000 ближе к 1850, чем 2700).
@@ -393,7 +394,8 @@ def test_labor_combine_attributes_min_and_max_to_different_sources_than_represen
     '''
     #348: когда ни минимум, ни максимум вилки не пришёлся на представителя —
     обе границы должны сослаться на СВОИ сайты (разные ссылки), а не молчать/
-    дублировать source_url представителя.
+    дублировать source_url представителя. Границы дают дешёвый и дорогой сайты
+    с узкими band'ами (не клампнуты, #411) → атрибутируются к своим источникам.
     '''
     service = db_session.query(LaborService).filter(LaborService.name == "Укладка плитки").first()
     garant = db_session.query(PriceSource).filter(PriceSource.name == "garantstroikompleks.ru").first()
@@ -401,21 +403,21 @@ def test_labor_combine_attributes_min_and_max_to_different_sources_than_represen
     otdelka = db_session.query(PriceSource).filter(PriceSource.name == "otdelka-spb.ru").first()
     rows = [
         LaborPrice(labor_service_id=service.id, source_id=garant.id, region="Москва",
-                   price_min=Decimal("500"), price_avg=Decimal("1000"), price_max=Decimal("1200"),
+                   price_min=Decimal("950"), price_avg=Decimal("1000"), price_max=Decimal("1100"),
                    source_url="https://garantstroikompleks.ru/prajs-list"),
         LaborPrice(labor_service_id=service.id, source_id=remont.id, region="Москва",
-                   price_min=Decimal("1600"), price_avg=Decimal("2700"), price_max=Decimal("4500"),
+                   price_min=Decimal("2400"), price_avg=Decimal("2700"), price_max=Decimal("3100"),
                    source_url="https://remont-uroven.ru/price.html"),
         LaborPrice(labor_service_id=service.id, source_id=otdelka.id, region="Москва",
-                   price_min=Decimal("200"), price_avg=Decimal("100"), price_max=Decimal("1300"),
+                   price_min=Decimal("90"), price_avg=Decimal("100"), price_max=Decimal("110"),
                    source_url="https://otdelka-spb.ru/prajjs/"),
     ]
     db_session.add_all(rows)
     db_session.commit()
     try:
         price = get_labor_price("Укладка плитки", db=db_session, region="Москва")
-        assert price.price_min == Decimal("200")    # минимум — otdelka
-        assert price.price_max == Decimal("4500")   # максимум — remont
+        assert price.price_min == Decimal("90")     # минимум — otdelka (не клампнут)
+        assert price.price_max == Decimal("3100")   # максимум — remont (не клампнут)
         # Представитель — garant (avg 1000 ближе к объединённой 1267, чем 2700 и 100).
         assert price.source_id == garant.id
         assert price.min_source_id == otdelka.id

@@ -20,7 +20,7 @@ from app.services.labor_calc_service import (
     calculate_labor, calculate_engineering_labor, calculate_rough_labor,
     WET_ROOM_TYPES,
 )
-from app.services.repair_coeffs_service import CONTINGENCY, clamp_price_corridor
+from app.services.repair_coeffs_service import CONTINGENCY
 from app.services.category_match import detect_category_mismatch
 from app.services.price_aggregator_service import get_material_price, get_labor_price
 from app.services.hidden_works_service import calculate_hidden_works
@@ -189,13 +189,11 @@ def _tier_item(
             name=material.name, price=0.0, total=0.0, source="нет цены", source_url=None,
         )
 
-    # Границы вилки SKU прижимаются к коридору уровня — та же арифметика,
-    # что в основной строке, иначе числа min_item/max_item разошлись бы
+    # Границы вилки SKU уже прижаты к коридору per-source внутри
+    # get_material_price/_combine (#411) — здесь берём готовые price_min/max, та же
+    # арифметика, что в основной строке, иначе числа min_item/max_item разошлись бы
     # с ответом отдельного /calculate с этим tier.
-    p_min, p_max = clamp_price_corridor(
-        price_obj.price_min, price_obj.price_avg, price_obj.price_max
-    )
-    price = pick_by_tier(tier, p_min, price_obj.price_avg, p_max)
+    price = pick_by_tier(tier, price_obj.price_min, price_obj.price_avg, price_obj.price_max)
     total = quantity * price * CONTINGENCY[tier]
     return MaterialTierItem(
         name=material.name,
@@ -416,21 +414,17 @@ def calculate_estimate(
             continue
 
         price_avg = price_obj.price_avg
-        # Категорийный разброс источника прижимаем к коридору уровня
-        # (−15%/+20% от средней, PRICE_CORRIDOR) — межтоварный разброс
-        # уровней остаётся в min_item/max_item.
-        price_min, price_max = clamp_price_corridor(
-            price_obj.price_min, price_avg, price_obj.price_max
-        )
+        # Категорийный band каждого источника уже прижат к коридору per-source внутри
+        # get_material_price/_combine (#411); межисточниковая дисперсия прошла как есть,
+        # межтоварный разброс уровней остаётся в min_item/max_item. Здесь — готовые границы.
+        price_min = price_obj.price_min
+        price_max = price_obj.price_max
         source_name = sources_by_id.get(price_obj.source_id, "unknown")
         updated_at = price_obj.updated_at.strftime("%Y-%m-%d") if price_obj.updated_at else ""
         # min_source/max_source — «источник, чья цена реально стала границей» (#348).
-        # Если границу переопределил кламп коридора, цена этого источника в вилке
-        # уже не участвует — ссылку на него не отдаём.
-        min_clamped = price_min != price_obj.price_min
-        max_clamped = price_max != price_obj.price_max
-        min_source_id = None if min_clamped else getattr(price_obj, "min_source_id", None)
-        max_source_id = None if max_clamped else getattr(price_obj, "max_source_id", None)
+        # _combine уже занулил их, если границу задал кламп или это сам представитель.
+        min_source_id = getattr(price_obj, "min_source_id", None)
+        max_source_id = getattr(price_obj, "max_source_id", None)
         min_source_name = sources_by_id.get(min_source_id) if min_source_id else None
         max_source_name = sources_by_id.get(max_source_id) if max_source_id else None
         total_min = final_quantity * price_min * CONTINGENCY['min']
@@ -490,9 +484,9 @@ def calculate_estimate(
             region=price_obj.region,
             sources=getattr(price_obj, "contributing_sources", None),
             min_source=min_source_name,
-            min_source_url=None if min_clamped else getattr(price_obj, "min_source_url", None),
+            min_source_url=getattr(price_obj, "min_source_url", None),
             max_source=max_source_name,
-            max_source_url=None if max_clamped else getattr(price_obj, "max_source_url", None),
+            max_source_url=getattr(price_obj, "max_source_url", None),
             min_item=tier_items["min"],
             avg_item=tier_items["avg"],
             max_item=tier_items["max"],
@@ -526,8 +520,11 @@ def calculate_estimate(
 
         volume = group['volume']
         p_avg = labor_price.price_avg
-        # Тот же коридор уровня, что и у материалов (PRICE_CORRIDOR).
-        p_min, p_max = clamp_price_corridor(labor_price.price_min, p_avg, labor_price.price_max)
+        # Band каждого сайта уже прижат к коридору per-source внутри get_labor_price/
+        # _combine (#411); межсайтовая (межподрядная) дисперсия прошла как есть — у
+        # работ это единственный канал реального разброса (tier-вариантов нет).
+        p_min = labor_price.price_min
+        p_max = labor_price.price_max
 
         # Применяем непредвиденные расходы для каждой границы
         total_min = volume * p_min * CONTINGENCY['min']
@@ -540,12 +537,10 @@ def calculate_estimate(
 
         labor_source_name = sources_by_id.get(labor_price.source_id, "seed")
         updated_at = labor_price.updated_at.strftime("%Y-%m-%d") if labor_price.updated_at else ""
-        # Как и у материалов: если границу вилки задал кламп коридора, а не источник,
-        # ссылку на «источник границы» (#348) не отдаём.
-        lab_min_clamped = p_min != labor_price.price_min
-        lab_max_clamped = p_max != labor_price.price_max
-        labor_min_source_id = None if lab_min_clamped else getattr(labor_price, "min_source_id", None)
-        labor_max_source_id = None if lab_max_clamped else getattr(labor_price, "max_source_id", None)
+        # Источник границы (#348): _combine уже занулил, если границу задал кламп
+        # или это сам представитель.
+        labor_min_source_id = getattr(labor_price, "min_source_id", None)
+        labor_max_source_id = getattr(labor_price, "max_source_id", None)
         labor_min_source_name = sources_by_id.get(labor_min_source_id) if labor_min_source_id else None
         labor_max_source_name = sources_by_id.get(labor_max_source_id) if labor_max_source_id else None
 
@@ -570,9 +565,9 @@ def calculate_estimate(
             region=labor_price.region,
             sources=getattr(labor_price, "contributing_sources", None),
             min_source=labor_min_source_name,
-            min_source_url=None if lab_min_clamped else getattr(labor_price, "min_source_url", None),
+            min_source_url=getattr(labor_price, "min_source_url", None),
             max_source=labor_max_source_name,
-            max_source_url=None if lab_max_clamped else getattr(labor_price, "max_source_url", None),
+            max_source_url=getattr(labor_price, "max_source_url", None),
         ))
 
         labor_sum['min'] += volume * p_min

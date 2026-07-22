@@ -18,6 +18,9 @@ export default function RoomPolygonEditor() {
 
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(true);
+  // Транзиентное сообщение вместо блокирующего alert (напр. попытка удалить
+  // точку, когда их уже минимум 3) — гасим само через несколько секунд.
+  const [pointCountError, setPointCountError] = useState<string | null>(null);
   const [editingEdge, setEditingEdge] = useState<number | null>(null);
   const [edgeInputValue, setEdgeInputValue] = useState("");
 
@@ -109,9 +112,11 @@ export default function RoomPolygonEditor() {
   const handleDeletePoint = (index: number, e: React.PointerEvent) => {
     if (e.shiftKey) {
       if (points.length <= 3) {
-        alert("У комнаты должно быть минимум 3 точки!");
+        setPointCountError("У комнаты должно быть минимум 3 точки.");
+        setTimeout(() => setPointCountError(null), 4000);
         return;
       }
+      setPointCountError(null);
       setPoints(points.filter((_, i) => i !== index));
     } else {
       handlePointerDown(index);
@@ -412,6 +417,8 @@ export default function RoomPolygonEditor() {
           Контур самопересекается — площадь будет неверной. Исправьте форму комнаты.
         </div>
       )}
+
+      {pointCountError && <div className={styles.errorBox}>{pointCountError}</div>}
 
       {controlButtonsJSX}
     </div>

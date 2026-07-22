@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx-js-style';
 import type { SummaryData } from '../components/EstimateSummary';
 import type { MaterialItem, LaborItem, HiddenWorks, HiddenWorkItem } from '../types/estimate';
 import type { PriceMode } from '../pages/Workspace/Workspace';
+import { hasTierVariants } from './tier';
 
 export interface EstimateExportData {
   summary: SummaryData;
@@ -193,8 +194,7 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
   // разные name/source_url. У остальных материалов name совпадает на всех tier (тот же
   // товар, другая точка коридора) — для них границу атрибутирует m.min_source_url/
   // m.max_source_url (#348), а не source_url представителя из min_item/max_item.
-  const namesDiffer =
-    new Set([m.min_item?.name, m.avg_item?.name, m.max_item?.name].filter((n): n is string => !!n)).size > 1;
+  const namesDiffer = hasTierVariants(m);
 
   if (priceMode === 'min' && m.min_item) {
     activeName = m.min_item.name;

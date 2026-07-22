@@ -448,6 +448,41 @@ def test_labor_single_site_reports_one_source(db_session):
         db_session.commit()
 
 
+@pytest.mark.usefixtures("setup_test_db")
+def test_labor_flat_premium_source_does_not_drag_avg(db_session):
+    '''
+    #412: сайт с реальным распределением (терции 600..3000, avg 1200) + одиночный
+    плоский премиум-прайс 3300. avg объединённой вилки тяготеет к телу распределения
+    (1200), а НЕ к среднему средних ((1200+3300)/2=2250): плоский подрядчик влияет
+    только на верхнюю границу вилки, но не тянет центр. Воспроизводит перекос из
+    живой сверки #407 («Шпаклевка потолка», Казань).
+    '''
+    service = db_session.query(LaborService).filter(LaborService.name == "Укладка плитки").first()
+    garant = db_session.query(PriceSource).filter(PriceSource.name == "garantstroikompleks.ru").first()
+    remont = db_session.query(PriceSource).filter(PriceSource.name == "remont-uroven.ru").first()
+    rows = [
+        LaborPrice(labor_service_id=service.id, source_id=garant.id, region="Москва",
+                   price_min=Decimal("600"), price_avg=Decimal("1200"), price_max=Decimal("3000"),
+                   source_url="https://garantstroikompleks.ru/prajs-list"),
+        LaborPrice(labor_service_id=service.id, source_id=remont.id, region="Москва",
+                   price_min=Decimal("3300"), price_avg=Decimal("3300"), price_max=Decimal("3300"),
+                   source_url="https://remont-uroven.ru/price.html"),
+    ]
+    db_session.add_all(rows)
+    db_session.commit()
+    try:
+        price = get_labor_price("Укладка плитки", db=db_session, region="Москва")
+        # Центр — по неплоскому сайту (1200), а не среднее средних (2250).
+        assert price.price_avg == Decimal("1200")
+        # Плоский сайт по-прежнему задаёт верхнюю границу вилки.
+        assert price.price_max == Decimal("3300")
+        assert set(price.contributing_sources) == {"garantstroikompleks.ru", "remont-uroven.ru"}
+    finally:
+        for r in rows:
+            db_session.delete(r)
+        db_session.commit()
+
+
 # --- контекстный матчинг: единица измерения и отсев дельт (#391) ---
 
 @pytest.mark.parametrize(

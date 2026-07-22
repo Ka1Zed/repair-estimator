@@ -10,14 +10,15 @@
 # Поэтому сопоставляем repair_options -> slug ОПЕРАЦИИ, а не специалиста.
 #
 # Контракт строки labor[]:
-#   service, specialist, volume, unit, price_avg (за единицу), total_avg (= volume*price)
-# Здесь отдаём min/avg/max и по цене за единицу, и по итогу — для summary B1-5.
+#   service, specialist, stage, volume, unit
+# Цену (min/avg/max за единицу и по итогу) не считаем здесь — её пересчитывает
+# estimates.py при агрегации labor_groups через get_labor_price (там же выбор
+# региона/tier), см. _labor_rows.
 
 import logging
 from decimal import Decimal
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from app.db.models import LaborPrice, PriceSource
 from app.services._num import D
 from app.services._query_cache import labor_service_by_slug, source_by_name
 
@@ -192,9 +193,11 @@ def _labor_rows(
 ) -> List[Dict[str, Any]]:
     """Собрать строки сметы работ по списку (slug_операции, объём).
 
-    sources_by_id — предзагруженный словарь id->name справочника PriceSource
-    (передаёт вызывающий, обычно estimates.py); без него на каждую строку шёл
-    отдельный запрос к price_sources (N+1, #278).
+    Возвращает только service/specialist/stage/unit/volume: цену (и источник)
+    в estimates.py пересчитывают заново через get_labor_price (агрегация
+    labor_groups по имени услуги, с учётом региона/tier) — цена и SQL-запрос
+    к LaborPrice здесь были мёртвым весом, никто их не читал.
+    seed_id/sources_by_id оставлены в сигнатуре ради совместимости вызывающих.
     """
     result: List[Dict[str, Any]] = []
 
@@ -215,42 +218,12 @@ def _labor_rows(
             )
             continue
 
-        q = db.query(LaborPrice).filter(LaborPrice.labor_service_id == service.id)
-        price = q.filter(LaborPrice.source_id == seed_id).first() if seed_id else None
-        if price is None:
-            # fallback на любой источник; сортировка по id — выбор детерминирован
-            price = q.order_by(LaborPrice.id).first()
-        if price is None:
-            logger.warning(
-                "У услуги '%s' (%s) нет ни одной цены — строка работ пропущена в смете",
-                service.name, service_slug,
-            )
-            continue
-
-        source_name = "seed"
-        if price.source_id:
-            if sources_by_id is not None:
-                source_name = sources_by_id.get(price.source_id, "seed")
-            else:
-                src = db.query(PriceSource).filter(PriceSource.id == price.source_id).first()
-                if src:
-                    source_name = src.name
-
-        p_min, p_avg, p_max = D(price.price_min), D(price.price_avg), D(price.price_max)
-
         result.append({
             "service": service.name,                 # операция (display, не slug)
             "specialist": service.specialist_type,   # ← поле specialist_type, не specialist
             "stage": stage_of(service.slug),         # стадия ремонта (#190)
             "volume": volume,
             "unit": service.unit,
-            "price_min": p_min,                       # цена за единицу
-            "price_avg": p_avg,
-            "price_max": p_max,
-            "total_min": volume * p_min,              # итог по строке
-            "total_avg": volume * p_avg,
-            "total_max": volume * p_max,
-            "source": source_name,
         })
 
     return result
@@ -277,9 +250,8 @@ def calculate_labor(
         стен" (stage="pre_finish") — она не входит в жёсткие связки scope, см.
         docs/estimation-rules.md.
 
-    Возвращает строки по контракту api.md:
-        service, specialist, volume, unit,
-        price_min/avg/max (за единицу), total_min/avg/max (= volume * price), source
+    Возвращает строки: service, specialist, stage, volume, unit — цену (по
+    контракту api.md) пересчитывает estimates.py, см. _labor_rows.
     """
     selections = _labor_selections(repair_options, geometry)
     if not include_finish:

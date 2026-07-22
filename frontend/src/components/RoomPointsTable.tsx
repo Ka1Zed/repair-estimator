@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useProjectStore } from "../store/projectStore";
 import styles from "./RoomPointsTable.module.css";
 
@@ -10,15 +11,19 @@ export default function RoomPointsTable() {
   const setPoints = useProjectStore((state) => state.setPoints);
   const updatePoint = useProjectStore((state) => state.updatePoint);
 
+  const [error, setError] = useState<string | null>(null);
+
   const handleAddPoint = () => {
+    setError(null);
     setPoints([...points, { x: 0, y: 0 }]);
   };
 
   const handleRemovePoint = (indexToRemove: number) => {
     if (points.length <= 3) {
-      alert("У комнаты должно быть минимум 3 точки!");
+      setError("У комнаты должно быть минимум 3 точки.");
       return;
     }
+    setError(null);
     setPoints(points.filter((_, index) => index !== indexToRemove));
   };
 
@@ -91,6 +96,8 @@ export default function RoomPointsTable() {
           ))}
         </tbody>
       </table>
+
+      {error && <p className={styles.error}>{error}</p>}
 
       <button onClick={handleAddPoint} className={styles.addBtn}>
         + Добавить точку

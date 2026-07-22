@@ -191,8 +191,8 @@ def _ceiling_area(
     if shape_type == 'attic_slope':
         slope_deg = ceiling_shape.get('slope_deg')
         slope_deg = to_decimal(slope_deg) if slope_deg is not None else Decimal('0')
-        if slope_deg < 0 or slope_deg >= 85:
-            raise ValueError("Угол ската потолка должен быть от 0 до 85°.")
+        if slope_deg < 0 or slope_deg > 85:
+            raise ValueError("Угол ската потолка должен быть от 0 до 85° включительно.")
 
         cos_slope = Decimal(str(math.cos(math.radians(float(slope_deg)))))
         return floor / cos_slope

@@ -968,6 +968,22 @@ def test_hidden_works_block_present_and_not_in_summary():
     assert hidden_services.isdisjoint({lab["service"] for lab in data["labor"]})
 
 
+def test_hidden_works_keeps_raw_wide_band():
+    """Скрытые работы показывают СЫРОЙ (не клампнутый) seed-band (#239 vs #411).
+
+    Кламп коридора PRICE_CORRIDOR (−15/+20%) — про категорийный шум внутри одного
+    источника в основной смете. Блок скрытых работ, наоборот, намеренно широкий:
+    это справочная вилка риска. Он берёт цену с clamp=False, поэтому реальный
+    seed-band проходит целиком. У «Штробления» seed-band заведомо шире коридора —
+    если бы кламп применился, границы прижались бы ровно к 0.85/1.20 от средней.
+    """
+    data = client.post("/api/estimates/calculate", json=PAINT_PAYLOAD).json()
+    chasing = next(x for x in data["hidden_works"]["items"] if x["service"] == "Штробление")
+    # Границы заведомо за коридором → кламп бы их сузил, а он здесь не применяется.
+    assert chasing["total_min"] / chasing["total_avg"] < 0.85
+    assert chasing["total_max"] / chasing["total_avg"] > 1.20
+
+
 def test_hidden_works_scenario_driven():
     """Гидроизоляция всплывает только в мокрой зоне; штробы — при электрике (#239)."""
     bath = client.post("/api/estimates/calculate", json=_bathroom_payload()).json()

@@ -246,6 +246,25 @@ def get_price(
     return seed_price
 
 
+def _combined_avg(rows) -> Decimal:
+    '''
+    Средняя объединённой вилки нескольких источников (#412).
+
+    Источник с реальным распределением цен (min<max: терции эконом→стандарт→премиум)
+    представляет тело рынка. Одиночный ПЛОСКИЙ прайс (min==max, напр. премиальный
+    подрядчик с единственной строкой) — лишь точка, и при «среднем средних» такой
+    выброс тянет avg наравне с целым распределением (живая сверка #407: kaz-стройка
+    даёт 600..3000, а плоский подрядчик — 3300, объединение давало avg≈2466 против
+    тела ~1000..1600). Поэтому центр считаем ТОЛЬКО по неплоским источникам, если они
+    есть: плоские по-прежнему участвуют в выборе границ вилки (min_row/max_row), но
+    не тянут центр. Если все источники плоские — обычное среднее (усреднять больше
+    нечего). Границы вилки эта функция не трогает — только avg.
+    '''
+    spread = [r for r in rows if r.price_max > r.price_min]
+    basis = spread or rows
+    return Decimal(round(statistics.mean([r.price_avg for r in basis])))
+
+
 def _combine_material_prices(session, material_id: int,
                               rows: list[MaterialPrice]) -> MaterialPrice:
     '''
@@ -279,7 +298,7 @@ def _combine_material_prices(session, material_id: int,
     max_row = max(rows, key=lambda r: clamped[id(r)][1])
     price_min = clamped[id(min_row)][0]
     price_max = clamped[id(max_row)][1]
-    price_avg = Decimal(round(statistics.mean([r.price_avg for r in rows])))
+    price_avg = _combined_avg(rows)
     representative = min(rows, key=lambda r: abs(r.price_avg - price_avg))
 
     source_names = [
@@ -439,8 +458,9 @@ def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
                           region: str | None, *, clamp: bool = True) -> LaborPrice:
     '''
     Объединяет parser-цены нескольких сайтов одного региона в одну вилку:
-    min = минимум по сайтам, max = максимум, avg = среднее средних (так среднее
-    точнее, чем по одному прайсу). Возвращает несохраняемый (transient) LaborPrice.
+    min = минимум по сайтам, max = максимум, avg = средняя по неплоским сайтам
+    (см. _combined_avg, #412: одиночный плоский прайс не тянет центр). Возвращает
+    несохраняемый (transient) LaborPrice.
 
     Представительный сайт — чья средняя ближе всего к объединённой средней: его
     показываем в строке сметы (source/source_url). Полный список сайтов кладём в
@@ -466,7 +486,7 @@ def _combine_labor_prices(session, service_id: int, rows: list[LaborPrice],
     max_row = max(rows, key=lambda r: clamped[id(r)][1])
     price_min = clamped[id(min_row)][0]
     price_max = clamped[id(max_row)][1]
-    price_avg = Decimal(round(statistics.mean([r.price_avg for r in rows])))
+    price_avg = _combined_avg(rows)
     representative = min(rows, key=lambda r: abs(r.price_avg - price_avg))
 
     source_names = [

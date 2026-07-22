@@ -294,6 +294,32 @@ class TestMaterialPriceCombination:
         finally:
             self._clear_parser_prices(db_session)
 
+    def test_flat_premium_source_does_not_drag_avg(self, db_session):
+        """#412: источник с реальным распределением (терции 600..3000, avg 1200) +
+        одиночный плоский премиум-прайс 3300. avg объединённой вилки должен тяготеть
+        к телу распределения (1200), а НЕ к среднему двух средних ((1200+3300)/2=2250):
+        плоский выброс влияет только на верхнюю границу, но не тянет центр."""
+        self._clear_parser_prices(db_session)
+        try:
+            self._insert_price(db_session, "Мегастрой", 600, 1200, 3000)
+            self._seed_source(db_session, "Третий")
+            self._insert_price(db_session, "Третий", 3300, 3300, 3300)
+
+            price = get_material_price(
+                self.MATERIAL, db=db_session,
+                parsers=[self._no_network_parser("Мегастрой"), self._no_network_parser("Третий")],
+                region="Москва",
+            )
+
+            assert price is not None
+            # Центр — по неплоскому источнику (1200), а не среднее средних (2250).
+            assert price.price_avg == Decimal("1200")
+            # Плоский источник по-прежнему задаёт верхнюю границу вилки.
+            assert price.price_max == Decimal("3300")
+            assert set(price.contributing_sources) == {"Мегастрой", "Третий"}
+        finally:
+            self._clear_parser_prices(db_session)
+
     def test_single_source_reports_one_source(self, db_session):
         """Только у одного источника есть цена → вилка этого источника, sources из одного элемента."""
         self._clear_parser_prices(db_session)

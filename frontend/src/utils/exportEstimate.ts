@@ -174,6 +174,20 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
   let activeTotal = m.total_avg * scale;
   let activeSource = m.source;
   let activeUrl = m.source_url;
+  // Фасовка/единица/упаковки/итог-количество выбранного уровня (#349): у finish_key-
+  // позиций товар меняется по tier и фасовка своя. Откат на общую строку для старых
+  // ответов/материалов без вариантов и для no-price (у варианта нули).
+  let activePackageSize = m.package_size;
+  let activeUnit = m.unit;
+  let activeQuantity = m.quantity;
+  let activePacks = m.packs;
+  const applyPackaging = (v: MaterialItem['min_item']) => {
+    if (!v) return;
+    activePackageSize = v.package_size || m.package_size;
+    activeUnit = v.unit || m.unit;
+    activeQuantity = v.quantity || m.quantity;
+    activePacks = v.packs || m.packs;
+  };
 
   // finish_key-позиции (#331) реально меняют товар по tier — у min/avg/max_item тогда
   // разные name/source_url. У остальных материалов name совпадает на всех tier (тот же
@@ -188,6 +202,7 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
     activeTotal = m.min_item.total;
     activeSource = (namesDiffer ? m.min_item.source : m.min_source) || m.source;
     activeUrl = (namesDiffer ? m.min_item.source_url : m.min_source_url) || m.source_url;
+    applyPackaging(m.min_item);
   } else if (priceMode === 'avg' && m.avg_item) {
     activeName = m.avg_item.name;
     activePrice = m.avg_item.price;
@@ -199,15 +214,17 @@ const getActiveMaterialData = (m: MaterialItem, priceMode: PriceMode, scale: num
     const avgSource = m.avg_item.source || m.source;
     activeSource = blend ? `${avgSource} (ближайшее)` : avgSource;
     activeUrl = m.avg_item.source_url || m.source_url;
+    applyPackaging(m.avg_item);
   } else if (priceMode === 'max' && m.max_item) {
     activeName = m.max_item.name;
     activePrice = m.max_item.price;
     activeTotal = m.max_item.total;
     activeSource = (namesDiffer ? m.max_item.source : m.max_source) || m.source;
     activeUrl = (namesDiffer ? m.max_item.source_url : m.max_source_url) || m.source_url;
+    applyPackaging(m.max_item);
   }
 
-  return { activeName, activePrice, activeTotal, activeSource, activeUrl };
+  return { activeName, activePrice, activeTotal, activeSource, activeUrl, activePackageSize, activeUnit, activeQuantity, activePacks };
 };
 
 // Активные цена/итог работы с учётом уровня — зеркалит логику UI (Workspace.tsx):
@@ -321,7 +338,7 @@ export const exportXlsx = (
     ...data.materials.map((m, i) => {
       const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
-        act.activeName, Math.round(m.quantity * 100) / 100, m.unit, Math.round(act.activePrice), Math.round(act.activeTotal),
+        act.activeName, Math.round(act.activeQuantity * 100) / 100, act.activeUnit, Math.round(act.activePrice), Math.round(act.activeTotal),
         sourceLabel(act.activeSource, m.region), fmtDate(m.updated_at),
       ];
     }),
@@ -400,11 +417,11 @@ export const exportXlsx = (
       const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
         act.activeName,
-        `${fmtQty(m.base_quantity)} ${m.unit}`,
+        `${fmtQty(m.base_quantity)} ${act.activeUnit}`,
         wastePct(m.waste_factor),
-        `${fmtQty(m.package_size)} ${m.unit}`,
-        m.packs,
-        `${fmtQty(m.quantity)} ${m.unit}`,
+        `${fmtQty(act.activePackageSize)} ${act.activeUnit}`,
+        act.activePacks,
+        `${fmtQty(act.activeQuantity)} ${act.activeUnit}`,
       ];
     }),
   ];
@@ -621,7 +638,7 @@ export const exportPdf = async (
     body: data.materials.map((m, i) => {
       const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
-        act.activeName, fmtQty(m.quantity), m.unit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, m.region)
+        act.activeName, fmtQty(act.activeQuantity), act.activeUnit, formatPricePDF(Math.round(act.activePrice)), formatPricePDF(Math.round(act.activeTotal)), sourceLabel(act.activeSource, m.region)
       ];
     }),
     columnStyles: {
@@ -707,11 +724,11 @@ export const exportPdf = async (
       const act = getActiveMaterialData(m, resolveTier(i, priceMode, materialOverrides), scaleMat);
       return [
         act.activeName,
-        `${fmtQty(m.base_quantity)} ${m.unit}`,
+        `${fmtQty(m.base_quantity)} ${act.activeUnit}`,
         wastePct(m.waste_factor),
-        `${fmtQty(m.package_size)} ${m.unit}`,
-        m.packs,
-        `${fmtQty(m.quantity)} ${m.unit}`,
+        `${fmtQty(act.activePackageSize)} ${act.activeUnit}`,
+        act.activePacks,
+        `${fmtQty(act.activeQuantity)} ${act.activeUnit}`,
       ];
     }),
     columnStyles: {

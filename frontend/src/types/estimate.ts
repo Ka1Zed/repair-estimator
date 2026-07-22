@@ -4,6 +4,14 @@ export interface PriceVariant {
   total: number;
   source: string;
   source_url?: string | null;
+  // Фасовка/единица/упаковки/итог-количество ИМЕННО этого SKU уровня (#349): у
+  // finish_key-позиций товары разные → фасовка разная (стандарт 9 л против премиум
+  // 10 л, плинтус 2.5 м против 3 м). Показывать их, а не общие из родительской
+  // строки, иначе разные уровни выглядят «× одна и та же фасовка».
+  package_size?: number;
+  unit?: string;
+  quantity?: number;
+  packs?: number;
 }
 
 export interface MaterialItem {

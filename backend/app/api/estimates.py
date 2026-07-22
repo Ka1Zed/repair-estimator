@@ -174,7 +174,7 @@ def _cached_material_price(
 
 
 def _tier_item(
-    material_key: str, tier: str, quantity: Decimal, db: Session,
+    material_key: str, tier: str, needed_quantity: Decimal, db: Session,
     parsers: list[BaseParser], region: str, sources_by_id: Dict[int, str],
     price_cache: Dict[tuple, "MaterialPrice | None"], store_names: List[str] | None = None,
 ) -> MaterialTierItem:
@@ -184,35 +184,52 @@ def _tier_item(
     на ближайший уровень, если у finish_key нет варианта именно этого tier), затем
     берёт цену тем же путём (get_material_price) и той же арифметикой band'ов
     (pick_by_tier), что и основной расчёт строки — числа обязаны совпасть с тем,
-    что вернул бы отдельный /calculate с этим tier. quantity — общая с родительской
-    строкой (см. MaterialTierItem), доп. обращений к БД/парсеру сверх обычных для
-    resolve_material/get_material_price нет. price_cache — общий с основным циклом
-    мемо цен (см. _cached_material_price).
+    что вернул бы отдельный /calculate с этим tier. needed_quantity — общая с
+    родительской строкой потребность (base×waste ДО округления до упаковок): её
+    округляем вверх до упаковок фасовкой ЭТОГО SKU (#306/#349), иначе стандарт и
+    премиум с разной фасовкой (9 л против 10 л, плинтус 2.5 м против 3 м) показали бы
+    одну и ту же «× N ед.» из родительской строки. Доп. обращений к БД/парсеру сверх
+    обычных для resolve_material/get_material_price нет. price_cache — общий с
+    основным циклом мемо цен (см. _cached_material_price).
     """
     material = resolve_material(db, material_key, tier)
     if material is None:
         return MaterialTierItem(name="", price=0.0, total=0.0, source="нет цены", source_url=None)
 
+    ref_package_size = _safe_package_size(material.package_size)
     price_obj = _cached_material_price(
         price_cache, material.name, db, parsers, region, store_names,
     )
     if not price_obj:
         return MaterialTierItem(
             name=material.name, price=0.0, total=0.0, source="нет цены", source_url=None,
+            unit=material.unit or "", package_size=float(ref_package_size),
         )
+
+    # Фасовка КОНКРЕТНОГО товара за source_url (#306), иначе справочная у SKU.
+    effective_package_size = (
+        _safe_package_size(price_obj.package_size)
+        if price_obj.package_size else ref_package_size
+    )
+    packs = packs_to_buy(needed_quantity / effective_package_size)
+    final_quantity = Decimal(packs) * effective_package_size
 
     # Границы вилки SKU уже прижаты к коридору per-source внутри
     # get_material_price/_combine (#411) — здесь берём готовые price_min/max, та же
     # арифметика, что в основной строке, иначе числа min_item/max_item разошлись бы
     # с ответом отдельного /calculate с этим tier.
     price = pick_by_tier(tier, price_obj.price_min, price_obj.price_avg, price_obj.price_max)
-    total = quantity * price * CONTINGENCY[tier]
+    total = final_quantity * price * CONTINGENCY[tier]
     return MaterialTierItem(
         name=material.name,
         price=float(price),
         total=float(total),
         source=sources_by_id.get(price_obj.source_id, "unknown"),
         source_url=price_obj.source_url,
+        unit=material.unit or "",
+        package_size=float(effective_package_size),
+        quantity=float(final_quantity),
+        packs=packs,
         category_mismatch=detect_category_mismatch(
             price_obj.source_url, material.category_exclusions
         ),
@@ -394,6 +411,8 @@ def calculate_estimate(
             logger.warning(f"Цена для материала '{name}' не найдена, показываем без цены")
             no_price_item = MaterialTierItem(
                 name=name, price=0.0, total=0.0, source="нет цены", source_url=None,
+                unit=group['unit'], package_size=float(effective_package_size),
+                quantity=float(final_quantity), packs=packs,
             )
             materials_response.append(MaterialItem(
                 name=name,
@@ -459,13 +478,17 @@ def calculate_estimate(
         current_tier_item = MaterialTierItem(
             name=name, price=float(price), total=float(total),
             source=source_name, source_url=price_obj.source_url,
+            unit=group['unit'], package_size=float(effective_package_size),
+            quantity=float(final_quantity), packs=packs,
             category_mismatch=current_mismatch,
         )
         tier_items = {request.tier: current_tier_item}
         for t in ("min", "avg", "max"):
             if t not in tier_items:
+                # Потребность (не округлённая): каждый SKU округляет её вверх до
+                # СВОИХ упаковок — фасовки уровней различаются (#306/#349).
                 tier_items[t] = _tier_item(
-                    group['material_key'], t, final_quantity, db, parsers,
+                    group['material_key'], t, group['quantity'], db, parsers,
                     request.city, sources_by_id, material_price_cache,
                     store_names=request.stores,
                 )
